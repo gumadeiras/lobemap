@@ -1,0 +1,9 @@
+*.7z binary
+*.am -whitespace
+*.docx binary
+*.gz binary
+*.npy binary
+*.pdf binary
+*.ps -whitespace
+*.tif binary
+*.html -whitespace

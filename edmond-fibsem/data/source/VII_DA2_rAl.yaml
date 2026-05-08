@@ -1,0 +1,29 @@
+- project:
+    id: 8
+    stacks:
+    - attribution: ''
+      broken_sections: []
+      canary_location: (0, 0, 0)
+      comment: ''
+      description: ''
+      dimension: (4490, 4290, 572)
+      downsample_factors:
+      - (1, 1, 1)
+      - (2, 2, 1)
+      - (4, 4, 1)
+      id: 11
+      metadata: null
+      mirrors:
+      - fileextension: jpg
+        position: 0
+        tile_height: 256
+        tile_source_type: 1
+        tile_width: 256
+        title: VII_DA2_rAl
+        url: /tiles/VII_DA2_rAl/
+      orientation: 0
+      placeholder_color: (0,0,0,1)
+      resolution: (4.4,4.4,20)
+      title: VII_DA2_rAl
+      translation: (-280,-260,0)
+    title: VII_DA2_rAl

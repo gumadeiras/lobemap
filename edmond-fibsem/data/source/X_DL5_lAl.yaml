@@ -1,0 +1,26 @@
+- project:
+    id: 6
+    stacks:
+    - attribution: ''
+      broken_sections: []
+      canary_location: (0, 0, 0)
+      comment: ''
+      description: ''
+      dimension: (6656, 4608, 976)
+      downsample_factors: null
+      id: 7
+      metadata: null
+      mirrors:
+      - fileextension: jpg
+        position: 0
+        tile_height: 512
+        tile_source_type: 5
+        tile_width: 512
+        title: X_DL5_lAl-xy
+        url: /tiles/X_DL5_lAl/xy/
+      orientation: 0
+      placeholder_color: (0,0,0,1)
+      resolution: (4.89,4.89,20)
+      title: X_DL5_lAl
+      translation: (0,0,0)
+    title: X_DL5_lAl
