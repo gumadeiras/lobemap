@@ -21,8 +21,9 @@ What it opens:
 Use:
 
 - Move the slider to slice through the atlas.
-- Use `View` to switch between Anterior-Posterior, Dorsal-Ventral, and
-  Lateral-Medial planes.
+- Use `View` to switch between Dorsal-Ventral, Anterior-Posterior, and
+  Lateral-Medial views. The original source stack previously labeled
+  Anterior-Posterior in this viewer is the Dorsal-Ventral view.
 - Use the three rotation spinboxes to rotate around the displayed Z/slice,
   Y/vertical, and X/horizontal axes.
 - Toggle `slice name anchors` in the layer list to show/hide on-slice names.

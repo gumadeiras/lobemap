@@ -53,12 +53,17 @@ Run:
 ./lobemap --atlas flywire
 ```
 
+Coordinate validation tables are tracked at
+`hemibrain/data/validation/coordinate_axes.csv` and
+`flywire/data/validation/coordinate_axes.csv`.
+
 ## Reference resources
 
 - `flywire-codex/`: FlyWire v783 release metadata and proofread root IDs.
 - `benton-2025/`: review resource for the Drosophila olfactory system.
 - `potter-task-2022/`: chemosensory co-receptor AL reference map and source
   files.
+- `vfb/`: Virtual Fly Brain glomerulus term references.
 - `reference-tables/`: cross-dataset glomerulus metadata and name
   reconciliation tables.
 - `edmond-fibsem/`: DA2/DL5 focused FIB-SEM dataset metadata.

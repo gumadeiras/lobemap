@@ -1,0 +1,4 @@
+source_column,anatomical_axis,viewer_axis_index,viewer_axis_name,min,max,mean,units,evidence,evidence_url
+X,Lateral-Medial,2,Lateral-Medial,109.088477,195.964438,157.588045,microns,inferred from hemibrain mesh convention,
+Y,Anterior-Posterior,1,Anterior-Posterior,211.272687,301.361156,263.158061,microns,documented by hemibrainr,https://rdrr.io/github/flyconnectome/hemibrainr/man/hemibrain_al.surf.html
+Z,Dorsal-Ventral,0,Dorsal-Ventral,181.029828,281.325562,225.648294,microns,inferred from hemibrain mesh convention,

@@ -41,6 +41,10 @@ ATLASES = {
         "label": "Potter Task 2022",
         "module": ROOT / "potter-task-2022/potter_task_napari.py",
     },
+    "vfb": {
+        "label": "VFB",
+        "module": ROOT / "vfb/vfb_napari.py",
+    },
 }
 
 

@@ -30,6 +30,11 @@ DATA_DIR = WORK_DIR / "data"
 SOURCE_DIR = DATA_DIR / "source"
 DERIVED_DIR = DATA_DIR / "derived"
 VOLUME_RESOLUTION = 256
+VOLUME_AXIS_NAMES = ("Dorsal-Ventral", "Anterior-Posterior", "Lateral-Medial")
+SOURCE_AXIS_COLUMNS = {
+    "hemibrain_al_microns": ("Z", "Y", "X"),
+    "flywire_al": ("Y", "Z", "X"),
+}
 
 warnings.filterwarnings(
     "ignore",
@@ -54,6 +59,7 @@ class AtlasVolume:
     labels: np.ndarray
     names: dict[int, str]
     colors: dict[int, tuple[float, float, float, float]]
+    source_axis_columns: tuple[str, str, str]
 
 
 def parse_hex_color(value: str) -> tuple[float, float, float, float]:
@@ -68,11 +74,18 @@ def parse_hex_color(value: str) -> tuple[float, float, float, float]:
     )
 
 
+def source_axis_columns(stem: str) -> tuple[str, str, str]:
+    try:
+        return SOURCE_AXIS_COLUMNS[stem]
+    except KeyError as exc:
+        raise ValueError(f"No coordinate axis mapping defined for {stem}") from exc
+
+
 def load_meshes(stem: str) -> list[Mesh]:
     materials = pd.read_csv(SOURCE_DIR / f"{stem}_materials.csv")
     vertices_df = pd.read_csv(SOURCE_DIR / f"{stem}_vertices.csv.gz")
     vertices_df = vertices_df.sort_values("PointNo")
-    vertices = vertices_df[["Z", "Y", "X"]].to_numpy(dtype=float)
+    vertices = vertices_df[list(source_axis_columns(stem))].to_numpy(dtype=float)
 
     faces_df = pd.read_csv(SOURCE_DIR / f"{stem}_faces.csv.gz")
     meshes: list[Mesh] = []
@@ -244,7 +257,7 @@ def rasterize_loop(volume_slice: np.ndarray, loop: np.ndarray, label_id: int) ->
     volume_slice[yy[mask], xx[mask]] = label_id
 
 
-def build_label_volume(meshes: list[Mesh]) -> AtlasVolume:
+def build_label_volume(meshes: list[Mesh], stem: str) -> AtlasVolume:
     lo, hi = mesh_bounds(meshes)
     levels = np.linspace(lo[0], hi[0], VOLUME_RESOLUTION)
     labels = np.zeros(
@@ -269,6 +282,7 @@ def build_label_volume(meshes: list[Mesh]) -> AtlasVolume:
         labels=labels,
         names={mesh.label_id: mesh.name for mesh in meshes},
         colors={mesh.label_id: mesh.color for mesh in meshes},
+        source_axis_columns=source_axis_columns(stem),
     )
 
 
@@ -285,6 +299,8 @@ def save_volume_cache(stem: str, volume: AtlasVolume) -> None:
         names=np.asarray([volume.names[i] for i in sorted(volume.names)]),
         colors=np.asarray([volume.colors[i] for i in sorted(volume.names)]),
         resolution=np.asarray([VOLUME_RESOLUTION], dtype=np.uint16),
+        source_axis_columns=np.asarray(volume.source_axis_columns),
+        volume_axis_names=np.asarray(VOLUME_AXIS_NAMES),
     )
 
 
@@ -296,6 +312,11 @@ def load_volume_cache(stem: str) -> AtlasVolume | None:
         resolution = int(data["resolution"][0])
         if resolution != VOLUME_RESOLUTION:
             return None
+        if "source_axis_columns" not in data.files:
+            return None
+        cached_axis_columns = tuple(data["source_axis_columns"].astype(str))
+        if cached_axis_columns != source_axis_columns(stem):
+            return None
         label_ids = data["label_ids"].astype(int).tolist()
         names_array = data["names"].astype(str).tolist()
         colors_array = data["colors"].astype(float)
@@ -306,6 +327,7 @@ def load_volume_cache(stem: str) -> AtlasVolume | None:
                 label_id: tuple(color)
                 for label_id, color in zip(label_ids, colors_array, strict=True)
             },
+            source_axis_columns=cached_axis_columns,
         )
 
 
@@ -313,9 +335,28 @@ def load_volume(stem: str) -> AtlasVolume:
     cached = load_volume_cache(stem)
     if cached is not None:
         return cached
-    volume = build_label_volume(load_meshes(stem))
+    volume = build_label_volume(load_meshes(stem), stem)
     save_volume_cache(stem, volume)
     return volume
+
+
+def bilateral_display_volume(volume: AtlasVolume, gap: int = 16) -> AtlasVolume:
+    mirrored = volume.labels[:, :, ::-1]
+    offset = max(volume.names)
+    mirrored = np.where(mirrored > 0, mirrored + offset, 0).astype(np.uint16)
+    spacer = np.zeros((*volume.labels.shape[:2], gap), dtype=np.uint16)
+    labels = np.concatenate([mirrored, spacer, volume.labels], axis=2)
+    names = dict(volume.names)
+    colors = dict(volume.colors)
+    for label_id, name in volume.names.items():
+        names[label_id + offset] = name
+        colors[label_id + offset] = volume.colors[label_id]
+    return AtlasVolume(
+        labels=labels,
+        names=names,
+        colors=colors,
+        source_axis_columns=volume.source_axis_columns,
+    )
 
 
 def label_name(label_id: int, names: dict[int, str]) -> str:
@@ -428,6 +469,7 @@ def load_atlas(
     work_dir: Path,
     stem: str,
     title: str,
+    bilateral: bool = False,
 ) -> QWidget:
     global WORK_DIR, DATA_DIR, SOURCE_DIR, DERIVED_DIR
     WORK_DIR = Path(work_dir)
@@ -436,6 +478,8 @@ def load_atlas(
     DERIVED_DIR = DATA_DIR / "derived"
 
     atlas = load_volume(stem)
+    if bilateral:
+        atlas = bilateral_display_volume(atlas)
     source_labels = atlas.labels
     unique_ids = np.asarray(sorted(i for i in np.unique(source_labels) if i != 0))
     metadata = load_metadata()
@@ -453,11 +497,11 @@ def load_atlas(
 
     visible_names = set(atlas.names.values())
     axis_orders = {
-        "Anterior-Posterior": (0, 1, 2),
-        "Dorsal-Ventral": (1, 0, 2),
+        "Dorsal-Ventral": (0, 1, 2),
+        "Anterior-Posterior": (1, 0, 2),
         "Lateral-Medial": (2, 0, 1),
     }
-    current_axis_order = axis_orders["Anterior-Posterior"]
+    current_axis_order = axis_orders["Dorsal-Ventral"]
     rotation_degrees = {0: 0.0, 1: 0.0, 2: 0.0}
     centroid_cache: dict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = {}
 
@@ -644,7 +688,7 @@ def load_atlas(
     scroll_contents = QWidget()
     scroll_layout = QVBoxLayout()
     scroll_layout.setContentsMargins(0, 0, 0, 0)
-    for name in sorted(atlas.names.values()):
+    for name in sorted(set(atlas.names.values())):
         checkbox = QCheckBox(name)
         checkbox.setChecked(True)
         checkbox.toggled.connect(

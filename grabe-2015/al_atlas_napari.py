@@ -248,8 +248,8 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     groups = group_ids_by_short_name(source_labels, materials)
     visible_group_names = set(groups)
     axis_orders = {
-        "Anterior-Posterior": (0, 1, 2),
-        "Dorsal-Ventral": (1, 0, 2),
+        "Dorsal-Ventral": (0, 1, 2),
+        "Anterior-Posterior": (1, 0, 2),
         "Lateral-Medial": (2, 0, 1),
     }
     current_axis_order = axis_orders["Dorsal-Ventral"]
@@ -384,7 +384,6 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     axis_combo = QComboBox()
     for name in axis_orders:
         axis_combo.addItem(name)
-    axis_combo.setCurrentText("Dorsal-Ventral")
 
     def on_axis_changed(index: int) -> None:
         nonlocal current_axis_order

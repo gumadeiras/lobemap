@@ -45,7 +45,7 @@ def regenerate_hemibrain_flywire_caches() -> None:
     atlas.SOURCE_DIR = atlas.DATA_DIR / "source"
     atlas.DERIVED_DIR = atlas.DATA_DIR / "derived"
     hemibrain_volume = atlas.build_label_volume(
-        atlas.load_meshes("hemibrain_al_microns")
+        atlas.load_meshes("hemibrain_al_microns"), "hemibrain_al_microns"
     )
     atlas.save_volume_cache("hemibrain_al_microns", hemibrain_volume)
 
@@ -57,8 +57,18 @@ def regenerate_hemibrain_flywire_caches() -> None:
     atlas.DATA_DIR = atlas.WORK_DIR / "data"
     atlas.SOURCE_DIR = atlas.DATA_DIR / "source"
     atlas.DERIVED_DIR = atlas.DATA_DIR / "derived"
-    flywire_volume = atlas.build_label_volume(atlas.load_meshes("flywire_al"))
+    flywire_volume = atlas.build_label_volume(
+        atlas.load_meshes("flywire_al"), "flywire_al"
+    )
     atlas.save_volume_cache("flywire_al", flywire_volume)
+
+
+def regenerate_coordinate_validation() -> None:
+    validation = import_module(
+        "coordinate_validation",
+        ROOT / "scripts/write_coordinate_validation.py",
+    )
+    validation.main()
 
 
 def regenerate_potter_preview() -> None:
@@ -90,6 +100,7 @@ def main() -> None:
     regenerate_grabe_materials()
     regenerate_bates_cache()
     regenerate_hemibrain_flywire_caches()
+    regenerate_coordinate_validation()
     regenerate_potter_preview()
     print("visual data regenerated")
 
