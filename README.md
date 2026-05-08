@@ -32,6 +32,18 @@ You can also open one atlas directly:
 - Virtual Fly Brain term lookup
 - reference tables for glomerulus names, receptors, sensilla, and direct line labels
 
+## Demo
+
+![Grabe 2015 atlas in lobemap](docs/images/demo-grabe-2015.png)
+
+![Bates Schlegel 2020 atlas in lobemap](docs/images/demo-bates-schlegel-2020.png)
+
+![Hemibrain atlas in lobemap](docs/images/demo-hemibrain.png)
+
+![FlyWire atlas in lobemap](docs/images/demo-flywire.png)
+
+![DoOR 2D map in lobemap](docs/images/demo-door-2d.png)
+
 ## Data And Credit
 
 This repo combines source data from several papers and public resources. Source
