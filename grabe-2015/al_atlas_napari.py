@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,13 +21,16 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 
 WORK_DIR = Path(__file__).resolve().parent
+ROOT = WORK_DIR.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+from ui_helpers import make_glomerulus_table, set_table_checked  # noqa: E402
+
 DATA_DIR = WORK_DIR / "data"
 SOURCE_DIR = DATA_DIR / "source"
 DERIVED_DIR = DATA_DIR / "derived"
@@ -186,12 +190,21 @@ def rotation_matrix(axis: int, degrees: float) -> np.ndarray:
     return matrix
 
 
-def affine_for_rotation(shape: tuple[int, int, int], rotations: dict[int, float]) -> Affine:
+def affine_for_rotation(
+    shape: tuple[int, int, int],
+    rotations: dict[int, float],
+    mirror_vertical: bool = False,
+    mirror_horizontal: bool = False,
+) -> Affine:
     matrix = (
         rotation_matrix(0, rotations[0])
         @ rotation_matrix(1, rotations[1])
         @ rotation_matrix(2, rotations[2])
     )
+    if mirror_vertical:
+        matrix = np.diag((1.0, -1.0, 1.0)) @ matrix
+    if mirror_horizontal:
+        matrix = np.diag((1.0, 1.0, -1.0)) @ matrix
     center = (np.asarray(shape, dtype=np.float64) - 1.0) / 2.0
     translate = center - matrix @ center
     return Affine(linear_matrix=matrix, translate=translate, ndim=3)
@@ -254,6 +267,8 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     }
     current_axis_order = axis_orders["Dorsal-Ventral"]
     rotation_degrees = {0: 0.0, 1: 0.0, 2: 0.0}
+    mirror_vertical = False
+    mirror_horizontal = False
     centroid_cache: dict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = {}
 
     def filtered_labels(labels: np.ndarray) -> np.ndarray:
@@ -335,7 +350,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     hover_label = QLabel("Hover over a label")
     hover_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-    checkbox_by_group: dict[str, QCheckBox] = {}
+    table = None
 
     def refresh_layers() -> None:
         image, labels, anchor_points, anchor_ids = current_scene_data()
@@ -352,16 +367,19 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         hover_label.setText(f"{len(visible_group_names)} glomeruli visible")
 
     def apply_rotation_transform() -> None:
-        affine = affine_for_rotation(image_layer.data.shape, rotation_degrees)
+        affine = affine_for_rotation(
+            image_layer.data.shape,
+            rotation_degrees,
+            mirror_vertical,
+            mirror_horizontal,
+        )
         image_layer.affine = affine
         labels_layer.affine = affine
         points_layer.affine = affine
 
     def set_checked_without_signals(checked: bool) -> None:
-        for checkbox in checkbox_by_group.values():
-            checkbox.blockSignals(True)
-            checkbox.setChecked(checked)
-            checkbox.blockSignals(False)
+        if table is not None:
+            set_table_checked(table, checked)
 
     def show_all() -> None:
         visible_group_names.clear()
@@ -395,6 +413,14 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         rotation_degrees[axis] = value
         apply_rotation_transform()
 
+    def on_mirror_changed(axis: str, checked: bool) -> None:
+        nonlocal mirror_vertical, mirror_horizontal
+        if axis == "vertical":
+            mirror_vertical = checked
+        else:
+            mirror_horizontal = checked
+        apply_rotation_transform()
+
     axis_combo.currentIndexChanged.connect(on_axis_changed)
 
     rotation_spinboxes: list[QDoubleSpinBox] = []
@@ -415,29 +441,12 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     show_all_button.clicked.connect(show_all)
     show_none_button.clicked.connect(show_none)
 
-    scroll_contents = QWidget()
-    scroll_layout = QVBoxLayout()
-    scroll_layout.setContentsMargins(0, 0, 0, 0)
-    for group_name in sorted(groups):
-        group_label_ids = groups[group_name]
-        full_names = [label_name(i, materials) for i in group_label_ids]
-        suffix = f" ({len(group_label_ids)})" if len(group_label_ids) > 1 else ""
-        checkbox = QCheckBox(f"{group_name}{suffix}")
-        checkbox.setToolTip("\n".join(full_names))
-        checkbox.setChecked(True)
-        checkbox.toggled.connect(
-            lambda checked, name=group_name: on_glomerulus_toggled(
-                name, checked
-            )
-        )
-        checkbox_by_group[group_name] = checkbox
-        scroll_layout.addWidget(checkbox)
-    scroll_layout.addStretch()
-    scroll_contents.setLayout(scroll_layout)
-
-    scroll = QScrollArea()
-    scroll.setWidgetResizable(True)
-    scroll.setWidget(scroll_contents)
+    table = make_glomerulus_table(
+        sorted(groups),
+        visible_group_names,
+        {},
+        on_glomerulus_toggled,
+    )
 
     panel = QWidget()
     layout = QVBoxLayout()
@@ -449,12 +458,22 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         row.addWidget(QLabel(label))
         row.addWidget(spinbox)
         layout.addLayout(row)
+    mirror_vertical_checkbox = QCheckBox("Mirror vertical")
+    mirror_horizontal_checkbox = QCheckBox("Mirror horizontal")
+    mirror_vertical_checkbox.toggled.connect(
+        lambda checked: on_mirror_changed("vertical", checked)
+    )
+    mirror_horizontal_checkbox.toggled.connect(
+        lambda checked: on_mirror_changed("horizontal", checked)
+    )
+    layout.addWidget(mirror_vertical_checkbox)
+    layout.addWidget(mirror_horizontal_checkbox)
     buttons = QHBoxLayout()
     buttons.addWidget(show_all_button)
     buttons.addWidget(show_none_button)
     layout.addLayout(buttons)
     layout.addWidget(QLabel("Glomeruli"))
-    layout.addWidget(scroll)
+    layout.addWidget(table)
     layout.addWidget(hover_label)
     panel.setLayout(layout)
 

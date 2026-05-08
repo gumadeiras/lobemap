@@ -53,9 +53,9 @@ Run:
 ./lobemap --atlas flywire
 ```
 
-Coordinate validation tables are tracked at
-`hemibrain/data/validation/coordinate_axes.csv` and
-`flywire/data/validation/coordinate_axes.csv`.
+Coordinate validation tables are tracked under `hemibrain/data/validation/` and
+`flywire/data/validation/`. They include source axis mappings and rendered
+label extents.
 
 ## Reference resources
 

@@ -11,11 +11,11 @@ Run:
 Source data used by the viewer lives in `data/source/` and should be tracked in
 git. Fast cache files are written to `data/derived/` and ignored by git.
 
-Coordinate validation lives in `data/validation/coordinate_axes.csv`. The viewer
-uses source columns `Z, Y, X` as Dorsal-Ventral, Anterior-Posterior, and
-Lateral-Medial axes. The anterior-posterior `Y` axis is documented by
-`hemibrainr`; the other two axes follow the hemibrain mesh convention used by
-the source surface.
+Coordinate validation lives in `data/validation/`. The viewer uses source
+columns `Z, Y, X` as Dorsal-Ventral, Anterior-Posterior, and Lateral-Medial
+axes. The anterior-posterior `Y` axis is documented by `hemibrainr`; the other
+two axes follow the hemibrain mesh convention used by the source surface.
+`label_extents.csv` records the rendered voxel span for each glomerulus.
 
 Rebuild cache files from the repo root:
 

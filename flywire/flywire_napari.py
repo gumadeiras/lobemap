@@ -30,7 +30,6 @@ def load_atlas(viewer: napari.Viewer):
         WORK_DIR,
         "flywire_al",
         "FlyWire",
-        bilateral=True,
     )
 
 

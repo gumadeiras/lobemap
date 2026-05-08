@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 
@@ -89,6 +90,37 @@ def write_dataset_validation(dataset: str, config: dict[str, object]) -> None:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
+
+    cache = (
+        ROOT
+        / dataset
+        / "data"
+        / "derived"
+        / f"{stem}_label_volume_256.npz"
+    )
+    if not cache.exists():
+        return
+    with np.load(cache, allow_pickle=False) as data:
+        labels = data["labels"]
+        label_ids = data["label_ids"].astype(int)
+        names = data["names"].astype(str)
+
+    extent_rows = []
+    for label_id, name in zip(label_ids, names, strict=True):
+        points = np.argwhere(labels == label_id)
+        if len(points) == 0:
+            continue
+        row = {"label_id": int(label_id), "glomerulus": name, "voxel_count": int(len(points))}
+        for axis_index, axis_name in enumerate(VIEWER_AXIS_NAMES):
+            values = points[:, axis_index]
+            row[f"{axis_name}_min_index"] = int(values.min())
+            row[f"{axis_name}_max_index"] = int(values.max())
+        extent_rows.append(row)
+
+    with (out_dir / "label_extents.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(extent_rows[0]))
+        writer.writeheader()
+        writer.writerows(extent_rows)
 
 
 def main() -> None:

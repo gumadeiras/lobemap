@@ -5,14 +5,14 @@ from pathlib import Path
 import textwrap
 
 import napari
-import numpy as np
 import pandas as pd
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
-    QComboBox,
     QLabel,
     QPushButton,
     QPlainTextEdit,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -47,39 +47,8 @@ def term_text(row: pd.Series) -> str:
 
 def load_atlas(viewer: napari.Viewer) -> QWidget:
     terms = load_terms()
-    names = terms["glomerulus"].astype(str).tolist()
-
-    columns = 8
-    spacing = 12.0
-    positions = np.asarray(
-        [
-            ((index // columns) * spacing, (index % columns) * spacing)
-            for index in range(len(names))
-        ],
-        dtype=float,
-    )
-
     viewer.title = "lobemap - VFB"
     viewer.dims.ndisplay = 2
-    points = viewer.add_points(
-        positions,
-        name="VFB glomerulus terms",
-        size=1.0,
-        face_color="#d8dee9",
-        border_color="#2e3440",
-        features=terms,
-        text={
-            "string": "{glomerulus}",
-            "size": 10,
-            "color": "white",
-            "anchor": "center",
-        },
-    )
-    viewer.camera.zoom = 1.5
-
-    selector = QComboBox()
-    for name in names:
-        selector.addItem(name)
 
     title = QLabel("VFB term")
     title.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -94,30 +63,45 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         details.setPlainText(
             textwrap.fill(term_text(row), width=88, replace_whitespace=False)
         )
-        points.selected_data = {index}
-        viewer.dims.set_point(0, 0)
-        viewer.camera.center = tuple(positions[index])
 
     def open_selected_url() -> None:
         import webbrowser
 
-        url = str(terms.iloc[selector.currentIndex()].get("vfb_url", ""))
+        row = table.currentRow()
+        if row < 0:
+            return
+        url = str(terms.iloc[row].get("vfb_url", ""))
         if url:
             webbrowser.open(url)
 
-    selector.currentIndexChanged.connect(show_term)
+    table = QTableWidget(len(terms), 3)
+    table.setHorizontalHeaderLabels(["glomerulus", "FBbt", "VFB name"])
+    table.setSelectionBehavior(QTableWidget.SelectRows)
+    table.setSelectionMode(QTableWidget.SingleSelection)
+    table.verticalHeader().setVisible(False)
+    table.setAlternatingRowColors(True)
+    for row, term in terms.iterrows():
+        for column, key in enumerate(("glomerulus", "fbbt_id", "vfb_name")):
+            item = QTableWidgetItem(str(term.get(key, "")))
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            table.setItem(row, column, item)
+    table.resizeColumnsToContents()
+    table.horizontalHeader().setStretchLastSection(True)
+    table.currentCellChanged.connect(lambda row, *_: show_term(row) if row >= 0 else None)
+
     open_button = QPushButton("Open VFB")
     open_button.clicked.connect(open_selected_url)
 
     panel = QWidget()
     layout = QVBoxLayout()
-    layout.addWidget(QLabel("Glomerulus"))
-    layout.addWidget(selector)
+    layout.addWidget(QLabel("VFB terms"))
+    layout.addWidget(table)
     layout.addWidget(open_button)
     layout.addWidget(title)
     layout.addWidget(details)
     panel.setLayout(layout)
 
+    table.selectRow(0)
     show_term(0)
     return panel
 

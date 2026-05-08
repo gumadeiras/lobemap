@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+import sys
 
 import napari
 import numpy as np
@@ -13,13 +14,16 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 
 WORK_DIR = Path(__file__).resolve().parent
+ROOT = WORK_DIR.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+from ui_helpers import make_glomerulus_table, set_table_checked  # noqa: E402
+
 SOURCE_DIR = WORK_DIR / "data/source"
 
 
@@ -99,6 +103,8 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         float(all_points[:, 1].max()),
     )
     current_view = "Published map"
+    mirror_vertical = False
+    mirror_horizontal = False
     initial_features = pd.DataFrame(
         {
             "name": names,
@@ -108,7 +114,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     )
 
     shapes = viewer.add_shapes(
-        [polygon_by_name[name] for name in names],
+        [transformed(polygon_by_name[name], current_view, bounds) for name in names],
         shape_type="polygon",
         name="glomeruli",
         edge_color=[(1.0, 1.0, 1.0, 0.55)] * len(names),
@@ -119,13 +125,13 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     )
 
     points = viewer.add_points(
-        np.empty((0, 2), dtype=float),
+        np.concatenate([transformed(label_by_name[name], current_view, bounds) for name in names if name in label_by_name]),
         name="glomerulus names",
         size=0.0,
         face_color="transparent",
         border_color="transparent",
         border_width=0.0,
-        features=pd.DataFrame({"name": []}),
+        features=pd.DataFrame({"name": [name for name in names if name in label_by_name]}),
         text={
             "string": "{name}",
             "size": 10,
@@ -136,60 +142,72 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     viewer.dims.ndisplay = 2
     viewer.camera.angles = (0, 0, 0)
 
-    checkbox_by_name: dict[str, QCheckBox] = {}
+    table = None
+    label_position_by_name: dict[str, np.ndarray] = {}
 
-    def visible_ordered_names() -> list[str]:
-        return [name for name in names if name in visible_names]
+    def display_points(points_array: np.ndarray) -> np.ndarray:
+        values = transformed(points_array, current_view, bounds)
+        view_points = transformed(all_points, current_view, bounds)
+        y_min = float(view_points[:, 0].min())
+        y_max = float(view_points[:, 0].max())
+        x_min = float(view_points[:, 1].min())
+        x_max = float(view_points[:, 1].max())
+        if mirror_vertical:
+            values = np.column_stack((y_min + y_max - values[:, 0], values[:, 1]))
+        if mirror_horizontal:
+            values = np.column_stack((values[:, 0], x_min + x_max - values[:, 1]))
+        return values
 
-    def refresh_layers() -> None:
-        shown = visible_ordered_names()
-        shapes.data = [
-            transformed(polygon_by_name[name], current_view, bounds) for name in shown
+    def refresh_geometry() -> None:
+        nonlocal label_position_by_name
+        shapes.data = [display_points(polygon_by_name[name]) for name in names]
+        label_position_by_name = {
+            name: display_points(label_by_name[name])
+            for name in names
+            if name in label_by_name
+        }
+        refresh_visibility()
+
+    def refresh_visibility() -> None:
+        shapes.face_color = [
+            stable_color(name) if name in visible_names else (0.0, 0.0, 0.0, 0.0)
+            for name in names
         ]
-        shapes.features = pd.DataFrame(
-            {
-                "name": shown,
-                "receptor": [metadata.get(name, {}).get("receptor", "") for name in shown],
-                "sensillum": [
-                    metadata.get(name, {}).get("sensillum", "") for name in shown
-                ],
-            }
-        )
-        shapes.face_color = [stable_color(name) for name in shown]
-        shapes.edge_color = [(1.0, 1.0, 1.0, 0.55)] * len(shown)
+        shapes.edge_color = [
+            (1.0, 1.0, 1.0, 0.55) if name in visible_names else (0.0, 0.0, 0.0, 0.0)
+            for name in names
+        ]
 
-        label_names = [name for name in shown if name in label_by_name]
+        label_names = [
+            name for name in names if name in visible_names and name in label_position_by_name
+        ]
         if label_names:
-            points.data = np.concatenate(
-                [transformed(label_by_name[name], current_view, bounds) for name in label_names]
-            )
+            points.data = np.concatenate([label_position_by_name[name] for name in label_names])
         else:
             points.data = np.empty((0, 2), dtype=float)
         points.features = pd.DataFrame({"name": label_names})
 
     def set_checked_without_signals(checked: bool) -> None:
-        for checkbox in checkbox_by_name.values():
-            checkbox.blockSignals(True)
-            checkbox.setChecked(checked)
-            checkbox.blockSignals(False)
+        if table is not None:
+            set_table_checked(table, checked)
 
     def show_all() -> None:
         visible_names.clear()
         visible_names.update(names)
         set_checked_without_signals(True)
-        refresh_layers()
+        refresh_visibility()
 
     def show_none() -> None:
         visible_names.clear()
         set_checked_without_signals(False)
-        refresh_layers()
+        refresh_visibility()
 
     def on_glomerulus_toggled(name: str, checked: bool) -> None:
         if checked:
             visible_names.add(name)
         else:
             visible_names.discard(name)
-        refresh_layers()
+        refresh_visibility()
 
     view_combo = QComboBox()
     for view_name in (
@@ -208,7 +226,15 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     def on_view_changed(index: int) -> None:
         nonlocal current_view
         current_view = view_combo.itemText(index)
-        refresh_layers()
+        refresh_geometry()
+
+    def on_mirror_changed(axis: str, checked: bool) -> None:
+        nonlocal mirror_vertical, mirror_horizontal
+        if axis == "vertical":
+            mirror_vertical = checked
+        else:
+            mirror_horizontal = checked
+        refresh_geometry()
 
     view_combo.currentIndexChanged.connect(on_view_changed)
 
@@ -217,27 +243,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     show_all_button.clicked.connect(show_all)
     show_none_button.clicked.connect(show_none)
 
-    scroll_contents = QWidget()
-    scroll_layout = QVBoxLayout()
-    scroll_layout.setContentsMargins(0, 0, 0, 0)
-    scroll_layout.setSpacing(1)
-    for name in names:
-        meta = metadata.get(name, {})
-        receptor = meta.get("receptor", "")
-        label = f"{name}  {receptor}" if receptor and receptor != "?" else name
-        checkbox = QCheckBox(label)
-        checkbox.setChecked(True)
-        checkbox.toggled.connect(
-            lambda checked, name=name: on_glomerulus_toggled(name, checked)
-        )
-        checkbox_by_name[name] = checkbox
-        scroll_layout.addWidget(checkbox)
-    scroll_layout.addStretch()
-    scroll_contents.setLayout(scroll_layout)
-
-    scroll = QScrollArea()
-    scroll.setWidgetResizable(True)
-    scroll.setWidget(scroll_contents)
+    table = make_glomerulus_table(names, visible_names, metadata, on_glomerulus_toggled)
 
     panel = QWidget()
     layout = QVBoxLayout()
@@ -245,6 +251,16 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     layout.setSpacing(4)
     layout.addWidget(QLabel("View"))
     layout.addWidget(view_combo)
+    mirror_vertical_checkbox = QCheckBox("Mirror vertical")
+    mirror_horizontal_checkbox = QCheckBox("Mirror horizontal")
+    mirror_vertical_checkbox.toggled.connect(
+        lambda checked: on_mirror_changed("vertical", checked)
+    )
+    mirror_horizontal_checkbox.toggled.connect(
+        lambda checked: on_mirror_changed("horizontal", checked)
+    )
+    layout.addWidget(mirror_vertical_checkbox)
+    layout.addWidget(mirror_horizontal_checkbox)
     buttons = QHBoxLayout()
     buttons.setContentsMargins(0, 0, 0, 0)
     buttons.setSpacing(4)
@@ -252,10 +268,10 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     buttons.addWidget(show_none_button)
     layout.addLayout(buttons)
     layout.addWidget(QLabel("Glomeruli"))
-    layout.addWidget(scroll)
+    layout.addWidget(table)
     panel.setLayout(layout)
 
-    refresh_layers()
+    refresh_geometry()
 
     return panel
 
