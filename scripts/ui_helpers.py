@@ -55,6 +55,7 @@ def make_glomerulus_table(
     table.setSelectionMode(QTableWidget.ExtendedSelection)
     table.verticalHeader().setVisible(False)
     table.setAlternatingRowColors(True)
+    table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
     for row, name in enumerate(names):
         meta = glomerulus_metadata(name, metadata.get(name, {}))
@@ -70,6 +71,14 @@ def make_glomerulus_table(
 
     table.resizeColumnsToContents()
     table.horizontalHeader().setStretchLastSection(True)
+    table.resizeRowsToContents()
+    table_height = (
+        table.horizontalHeader().height()
+        + sum(table.rowHeight(row) for row in range(table.rowCount()))
+        + 6
+    )
+    table.setMinimumHeight(table_height)
+    table.setMaximumHeight(table_height)
 
     def on_item_changed(item: QTableWidgetItem) -> None:
         if item.column() != 0:

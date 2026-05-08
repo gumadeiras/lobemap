@@ -37,6 +37,7 @@ VOLUME_AXIS_NAMES = ("Dorsal-Ventral", "Anterior-Posterior", "Lateral-Medial")
 SOURCE_AXIS_COLUMNS = {
     "hemibrain_al_microns": ("Z", "Y", "X"),
     "flywire_al": ("Y", "Z", "X"),
+    "flywire_al_neuropils": ("Y", "Z", "X"),
 }
 
 warnings.filterwarnings(
@@ -105,7 +106,15 @@ def load_meshes(stem: str) -> list[Mesh]:
                 color=parse_hex_color(str(material.col)),
             )
         )
+    if stem == "flywire_al":
+        meshes = load_optional_meshes("flywire_al_neuropils") + meshes
     return meshes
+
+
+def load_optional_meshes(stem: str) -> list[Mesh]:
+    if not (SOURCE_DIR / f"{stem}_materials.csv").exists():
+        return []
+    return load_meshes(stem)
 
 
 def mesh_bounds(meshes: list[Mesh]) -> tuple[np.ndarray, np.ndarray]:
@@ -290,6 +299,8 @@ def build_label_volume(meshes: list[Mesh], stem: str) -> AtlasVolume:
 
 
 def volume_cache(stem: str) -> Path:
+    if stem == "flywire_al" and (SOURCE_DIR / "flywire_al_neuropils_materials.csv").exists():
+        return DERIVED_DIR / f"{stem}_label_volume_{VOLUME_RESOLUTION}_with_neuropils.npz"
     return DERIVED_DIR / f"{stem}_label_volume_{VOLUME_RESOLUTION}.npz"
 
 
@@ -462,6 +473,7 @@ def load_atlas(
     work_dir: Path,
     stem: str,
     title: str,
+    default_mirror_vertical: bool = False,
 ) -> QWidget:
     global WORK_DIR, DATA_DIR, SOURCE_DIR, DERIVED_DIR
     WORK_DIR = Path(work_dir)
@@ -486,6 +498,14 @@ def load_atlas(
     )
 
     visible_names = set(atlas.names.values())
+    fixed_ids = {
+        label_id
+        for label_id, name in atlas.names.items()
+        if name.startswith("AL_")
+    }
+    visible_names.difference_update(atlas.names[label_id] for label_id in fixed_ids)
+    label_ids = [label_id for label_id in unique_ids if int(label_id) not in fixed_ids]
+    unique_ids = np.asarray(label_ids, dtype=unique_ids.dtype)
     axis_orders = {
         "Dorsal-Ventral": (0, 1, 2),
         "Anterior-Posterior": (1, 0, 2),
@@ -493,7 +513,7 @@ def load_atlas(
     }
     current_axis_order = axis_orders["Dorsal-Ventral"]
     rotation_degrees = {0: 0.0, 1: 0.0, 2: 0.0}
-    mirror_vertical = False
+    mirror_vertical = default_mirror_vertical
     mirror_horizontal = False
     centroid_cache: dict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = {}
 
@@ -502,7 +522,7 @@ def load_atlas(
             label_id
             for label_id, name in atlas.names.items()
             if name in visible_names
-        }
+        } | fixed_ids
 
     def filtered_labels(labels: np.ndarray) -> np.ndarray:
         lut = np.zeros(int(source_labels.max()) + 1, dtype=np.uint16)
@@ -630,7 +650,9 @@ def load_atlas(
 
     def show_all() -> None:
         visible_names.clear()
-        visible_names.update(atlas.names.values())
+        visible_names.update(
+            name for label_id, name in atlas.names.items() if label_id not in fixed_ids
+        )
         set_checked_without_signals(True)
         refresh_layers()
 
@@ -688,7 +710,7 @@ def load_atlas(
     show_all_button.clicked.connect(show_all)
     show_none_button.clicked.connect(show_none)
 
-    table_names = sorted(set(atlas.names.values()))
+    table_names = sorted(set(visible_names))
     table = make_glomerulus_table(table_names, visible_names, metadata, on_glomerulus_toggled)
 
     panel = QWidget()
@@ -703,6 +725,7 @@ def load_atlas(
         layout.addLayout(row)
     mirror_vertical_checkbox = QCheckBox("Mirror vertical")
     mirror_horizontal_checkbox = QCheckBox("Mirror horizontal")
+    mirror_vertical_checkbox.setChecked(mirror_vertical)
     mirror_vertical_checkbox.toggled.connect(
         lambda checked: on_mirror_changed("vertical", checked)
     )
@@ -715,7 +738,6 @@ def load_atlas(
     buttons.addWidget(show_all_button)
     buttons.addWidget(show_none_button)
     layout.addLayout(buttons)
-    layout.addWidget(QLabel("Glomeruli"))
     layout.addWidget(table)
     layout.addWidget(hover_label)
     panel.setLayout(layout)
@@ -760,6 +782,7 @@ def main() -> None:
         Path(__file__).resolve().parents[1] / "hemibrain",
         "hemibrain_al_microns",
         "Hemibrain",
+        default_mirror_vertical=True,
     )
     viewer.window.add_dock_widget(panel, area="right", name="Hemibrain")
     napari.run()

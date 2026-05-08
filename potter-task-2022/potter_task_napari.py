@@ -84,7 +84,6 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     layout.addWidget(QLabel(SOURCE_PDF.name))
     layout.addWidget(vertical_checkbox)
     layout.addWidget(horizontal_checkbox)
-    layout.addWidget(QLabel("Glomeruli"))
     layout.addWidget(table)
     panel.setLayout(layout)
     return panel

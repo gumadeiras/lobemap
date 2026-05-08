@@ -10,6 +10,7 @@ import napari
 from qtpy.QtWidgets import (
     QComboBox,
     QLabel,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -87,7 +88,11 @@ def main() -> None:
     layout.addWidget(selector)
     layout.addLayout(atlas_controls)
     panel.setLayout(layout)
-    viewer.window.add_dock_widget(panel, area="right", name="Atlas")
+
+    scroll_panel = QScrollArea()
+    scroll_panel.setWidgetResizable(True)
+    scroll_panel.setWidget(panel)
+    viewer.window.add_dock_widget(scroll_panel, area="right", name="Atlas")
 
     def load_selected() -> None:
         nonlocal active_slug

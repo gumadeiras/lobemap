@@ -37,7 +37,7 @@ VOLUME_RESOLUTION = 256
 VOLUME_CACHE = DERIVED_DIR / (
     f"bates_schlegel_label_volume_{VOLUME_RESOLUTION}_glomerulus_bounds_with_neuropil.npz"
 )
-BATES_TO_GRABE_FLIPS = (False, True, False)
+BATES_TO_GRABE_FLIPS = (False, False, False)
 NEUROPIL_NAME = "neuropil"
 RGBA_PATTERN = re.compile(
     r"rgba\(\s*([0-9.]+),\s*([0-9.]+),\s*([0-9.]+),\s*([0-9.]+)\s*\)"
@@ -473,7 +473,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         "Dorsal-Ventral": (1, 0, 2),
         "Lateral-Medial": (2, 0, 1),
     }
-    current_axis_order = axis_orders["Anterior-Posterior"]
+    current_axis_order = axis_orders["Dorsal-Ventral"]
     rotation_degrees = {0: 0.0, 1: 0.0, 2: 0.0}
     mirror_vertical = False
     mirror_horizontal = False
@@ -600,6 +600,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     axis_combo = QComboBox()
     for name in axis_orders:
         axis_combo.addItem(name)
+    axis_combo.setCurrentText("Dorsal-Ventral")
 
     def on_axis_changed(index: int) -> None:
         nonlocal current_axis_order
@@ -670,7 +671,6 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     buttons.addWidget(show_all_button)
     buttons.addWidget(show_none_button)
     layout.addLayout(buttons)
-    layout.addWidget(QLabel("Glomeruli"))
     layout.addWidget(table)
     layout.addWidget(hover_label)
     panel.setLayout(layout)

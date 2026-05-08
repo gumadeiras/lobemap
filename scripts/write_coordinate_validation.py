@@ -61,6 +61,12 @@ def write_dataset_validation(dataset: str, config: dict[str, object]) -> None:
 
     stem = str(config["stem"])
     vertices = pd.read_csv(source_dir / f"{stem}_vertices.csv.gz")
+    neuropil_vertices_path = source_dir / f"{stem}_neuropils_vertices.csv.gz"
+    if neuropil_vertices_path.exists():
+        vertices = pd.concat(
+            [vertices, pd.read_csv(neuropil_vertices_path)],
+            ignore_index=True,
+        )
     viewer_axis_columns = tuple(config["viewer_axis_columns"])
     viewer_axis_by_column = {
         column: (axis_index, VIEWER_AXIS_NAMES[axis_index])
@@ -98,6 +104,15 @@ def write_dataset_validation(dataset: str, config: dict[str, object]) -> None:
         / "derived"
         / f"{stem}_label_volume_256.npz"
     )
+    neuropil_cache = (
+        ROOT
+        / dataset
+        / "data"
+        / "derived"
+        / f"{stem}_label_volume_256_with_neuropils.npz"
+    )
+    if neuropil_cache.exists():
+        cache = neuropil_cache
     if not cache.exists():
         return
     with np.load(cache, allow_pickle=False) as data:

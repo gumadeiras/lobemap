@@ -30,6 +30,7 @@ def load_atlas(viewer: napari.Viewer):
         WORK_DIR,
         "hemibrain_al_microns",
         "Hemibrain",
+        default_mirror_vertical=True,
     )
 
 

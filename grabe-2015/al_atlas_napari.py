@@ -472,7 +472,6 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     buttons.addWidget(show_all_button)
     buttons.addWidget(show_none_button)
     layout.addLayout(buttons)
-    layout.addWidget(QLabel("Glomeruli"))
     layout.addWidget(table)
     layout.addWidget(hover_label)
     panel.setLayout(layout)

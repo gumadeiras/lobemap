@@ -39,10 +39,6 @@ def transformed(
     y_min, y_max, x_min, x_max = bounds
     y = points[:, 0]
     x = points[:, 1]
-    if view_name == "Left-right mirror":
-        return np.column_stack((y, x_min + x_max - x))
-    if view_name == "Up-down mirror":
-        return np.column_stack((y_min + y_max - y, x))
     if view_name == "Rotate 90 deg":
         y_center = (y_min + y_max) / 2
         x_center = (x_min + x_max) / 2
@@ -55,10 +51,6 @@ def transformed(
         return np.column_stack((y_center - (x - x_center), x_center + (y - y_center)))
     if view_name == "Swap axes":
         return np.column_stack((x, y))
-    if view_name == "Swap axes + left-right mirror":
-        return np.column_stack((x, y_min + y_max - y))
-    if view_name == "Swap axes + up-down mirror":
-        return np.column_stack((x_min + x_max - x, y))
     return points.copy()
 
 
@@ -212,14 +204,10 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     view_combo = QComboBox()
     for view_name in (
         "Published map",
-        "Left-right mirror",
-        "Up-down mirror",
         "Rotate 90 deg",
         "Rotate 180 deg",
         "Rotate 270 deg",
         "Swap axes",
-        "Swap axes + left-right mirror",
-        "Swap axes + up-down mirror",
     ):
         view_combo.addItem(view_name)
 
@@ -267,7 +255,6 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     buttons.addWidget(show_all_button)
     buttons.addWidget(show_none_button)
     layout.addLayout(buttons)
-    layout.addWidget(QLabel("Glomeruli"))
     layout.addWidget(table)
     panel.setLayout(layout)
 
