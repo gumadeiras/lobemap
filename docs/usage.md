@@ -1,0 +1,31 @@
+# How To Use lobemap
+
+Start the viewer:
+
+```bash
+./lobemap
+```
+
+The right panel has the main controls.
+
+- `Atlas`: choose the dataset.
+- `View`: choose the slice direction.
+- `Rotation`: rotate the current view.
+- `Mirror vertical` and `Mirror horizontal`: flip the display.
+- The glomerulus table: check rows to show or hide glomeruli.
+
+The table has three columns:
+
+- `glomerulus`
+- `receptor`
+- `sensilla`
+
+Labels appear on slices where a glomerulus is present. In FlyWire, labels are
+placed separately for each antennal lobe.
+
+Generated cache files live in `data/derived/` folders. They are not tracked in
+git. Rebuild them with:
+
+```bash
+uv run python scripts/regenerate_visual_data.py
+```
