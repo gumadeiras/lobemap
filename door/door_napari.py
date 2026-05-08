@@ -22,7 +22,7 @@ from qtpy.QtWidgets import (
 WORK_DIR = Path(__file__).resolve().parent
 ROOT = WORK_DIR.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-from ui_helpers import make_glomerulus_table, set_table_checked  # noqa: E402
+from ui_helpers import make_glomerulus_table, normalize_sensilla, set_table_checked  # noqa: E402
 
 SOURCE_DIR = WORK_DIR / "data/source"
 
@@ -64,7 +64,7 @@ def load_metadata() -> dict[str, dict[str, str]]:
         receptor = str(row.get("Ors", "") or row.get("receptor", ""))
         metadata[glomerulus] = {
             "receptor": receptor,
-            "sensillum": str(row.get("sensillum", "")),
+            "sensillum": normalize_sensilla(row.get("sensillum", "")),
             "osn": str(row.get("OSN", "")),
             "co_receptor": str(row.get("co.receptor", "")),
         }

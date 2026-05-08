@@ -19,6 +19,8 @@ uv run python reference-tables/scripts/build_glomerulus_ground_truth.py
 Notes:
 
 - Sensory line columns come from the Potter/Task 2022 summary table.
+- Projection-neuron line columns use the Grabe 2015 supplemental tables. GH146
+  comes from Table S1, and ChAT comes from Table S2.
 - Valence and odor-scene columns come from the Bates/Schlegel source table.
 - VFB identifiers come from the local VFB export.
 - Projection-neuron line columns are left blank unless a source directly maps

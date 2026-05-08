@@ -25,7 +25,7 @@ from qtpy.QtWidgets import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ui_helpers import make_glomerulus_table, set_table_checked  # noqa: E402
+from ui_helpers import make_glomerulus_table, normalize_sensilla, set_table_checked  # noqa: E402
 
 
 WORK_DIR = Path(__file__).resolve().parent
@@ -107,7 +107,8 @@ def load_meshes(stem: str) -> list[Mesh]:
             )
         )
     if stem == "flywire_al":
-        meshes = load_optional_meshes("flywire_al_neuropils") + meshes
+        neuropils = load_optional_meshes("flywire_al_neuropils")
+        meshes = neuropils + project_flywire_glomeruli_to_right_al(meshes, neuropils)
     return meshes
 
 
@@ -115,6 +116,39 @@ def load_optional_meshes(stem: str) -> list[Mesh]:
     if not (SOURCE_DIR / f"{stem}_materials.csv").exists():
         return []
     return load_meshes(stem)
+
+
+def project_flywire_glomeruli_to_right_al(
+    glomeruli: list[Mesh], neuropils: list[Mesh]
+) -> list[Mesh]:
+    if len(neuropils) < 2:
+        return glomeruli
+    by_name = {mesh.name: mesh for mesh in neuropils}
+    left = by_name.get("AL_L")
+    right = by_name.get("AL_R")
+    if left is None or right is None:
+        return glomeruli
+
+    lateral_axis = 2
+    midline = (
+        np.nanmax(left.triangles[:, :, lateral_axis])
+        + np.nanmin(right.triangles[:, :, lateral_axis])
+    ) / 2.0
+    mirrored = []
+    for mesh in glomeruli:
+        triangles = mesh.triangles.copy()
+        triangles[:, :, lateral_axis] = 2.0 * midline - triangles[:, :, lateral_axis]
+        mirrored.append(
+            Mesh(
+                label_id=mesh.label_id,
+                name=mesh.name,
+                vertices=mesh.vertices,
+                faces=mesh.faces,
+                triangles=triangles,
+                color=mesh.color,
+            )
+        )
+    return glomeruli + mirrored
 
 
 def mesh_bounds(meshes: list[Mesh]) -> tuple[np.ndarray, np.ndarray]:
@@ -313,6 +347,7 @@ def save_volume_cache(stem: str, volume: AtlasVolume) -> None:
         names=np.asarray([volume.names[i] for i in sorted(volume.names)]),
         colors=np.asarray([volume.colors[i] for i in sorted(volume.names)]),
         resolution=np.asarray([VOLUME_RESOLUTION], dtype=np.uint16),
+        cache_version=np.asarray([2 if stem == "flywire_al" else 1], dtype=np.uint16),
         source_axis_columns=np.asarray(volume.source_axis_columns),
         volume_axis_names=np.asarray(VOLUME_AXIS_NAMES),
     )
@@ -325,6 +360,10 @@ def load_volume_cache(stem: str) -> AtlasVolume | None:
     with np.load(cache, allow_pickle=False) as data:
         resolution = int(data["resolution"][0])
         if resolution != VOLUME_RESOLUTION:
+            return None
+        if stem == "flywire_al" and (
+            "cache_version" not in data.files or int(data["cache_version"][0]) < 2
+        ):
             return None
         if "source_axis_columns" not in data.files:
             return None
@@ -372,7 +411,7 @@ def load_metadata() -> dict[str, dict[str, str]]:
             metadata.setdefault(glomerulus, {}).update(
                 {
                     "door_receptor": str(row.get("receptor", "")),
-                    "sensillum": str(row.get("sensillum", "")),
+                    "sensillum": normalize_sensilla(row.get("sensillum", "")),
                     "osn": str(row.get("OSN", "")),
                     "co_receptor": str(row.get("co.receptor", "")),
                 }
@@ -406,7 +445,9 @@ def load_metadata() -> dict[str, dict[str, str]]:
 
 
 def label_slice_centroids(
-    labels: np.ndarray, ids: np.ndarray
+    labels: np.ndarray,
+    ids: np.ndarray,
+    hemisphere_axis: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     valid_ids = {int(i) for i in ids if i != 0}
     centroids: list[tuple[float, float, float]] = []
@@ -423,9 +464,29 @@ def label_slice_centroids(
         for label_id in np.nonzero(count)[0]:
             if label_id == 0 or label_id not in valid_ids:
                 continue
-            n = int(count[label_id])
-            centroids.append((float(z), y_sum[label_id] / n, x_sum[label_id] / n))
-            centroid_ids.append(int(label_id))
+            label_mask = values == label_id
+            if hemisphere_axis == 1:
+                midline = (labels.shape[1] - 1) / 2.0
+                side_masks = (ys[label_mask] <= midline, ys[label_mask] > midline)
+            elif hemisphere_axis == 2:
+                midline = (labels.shape[2] - 1) / 2.0
+                side_masks = (xs[label_mask] <= midline, xs[label_mask] > midline)
+            else:
+                side_masks = (np.ones(int(count[label_id]), dtype=bool),)
+
+            label_ys = ys[label_mask]
+            label_xs = xs[label_mask]
+            for side_mask in side_masks:
+                if not np.any(side_mask):
+                    continue
+                centroids.append(
+                    (
+                        float(z),
+                        float(np.mean(label_ys[side_mask])),
+                        float(np.mean(label_xs[side_mask])),
+                    )
+                )
+                centroid_ids.append(int(label_id))
 
     if not centroids:
         return np.empty((0, 3), dtype=float), np.empty((0,), dtype=np.uint16)
@@ -535,8 +596,12 @@ def load_atlas(
     ) -> tuple[np.ndarray, np.ndarray]:
         cached = centroid_cache.get(axis_order)
         if cached is None:
+            lateral_axis = axis_order.index(2) if stem == "flywire_al" else None
+            hemisphere_axis = lateral_axis if lateral_axis in (1, 2) else None
             cached = label_slice_centroids(
-                source_labels.transpose(axis_order), unique_ids
+                source_labels.transpose(axis_order),
+                unique_ids,
+                hemisphere_axis=hemisphere_axis,
             )
             centroid_cache[axis_order] = cached
         return cached
@@ -584,7 +649,9 @@ def load_atlas(
                     for i in anchor_ids
                 ],
                 "sensillum": [
-                    metadata.get(label_name(i, atlas.names), {}).get("sensillum", "")
+                    normalize_sensilla(
+                        metadata.get(label_name(i, atlas.names), {}).get("sensillum", "")
+                    )
                     for i in anchor_ids
                 ],
             }
@@ -627,7 +694,9 @@ def load_atlas(
                     for i in anchor_ids
                 ],
                 "sensillum": [
-                    metadata.get(label_name(i, atlas.names), {}).get("sensillum", "")
+                    normalize_sensilla(
+                        metadata.get(label_name(i, atlas.names), {}).get("sensillum", "")
+                    )
                     for i in anchor_ids
                 ],
             }

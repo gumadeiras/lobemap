@@ -12,6 +12,20 @@ ROOT = Path(__file__).resolve().parents[1]
 _MASTER_METADATA: dict[str, dict[str, str]] | None = None
 
 
+def normalize_sensilla(value: object) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    seen: list[str] = []
+    seen_keys: set[str] = set()
+    for part in str(value).split(";"):
+        text = part.strip()
+        key = text.casefold()
+        if text and key not in seen_keys:
+            seen.append(text)
+            seen_keys.add(key)
+    return "; ".join(seen)
+
+
 def load_master_metadata() -> dict[str, dict[str, str]]:
     global _MASTER_METADATA
     if _MASTER_METADATA is not None:
@@ -28,7 +42,7 @@ def load_master_metadata() -> dict[str, dict[str, str]]:
             continue
         metadata[name] = {
             "receptor": str(row.get("receptor_consensus", "")),
-            "sensillum": str(row.get("sensillum_consensus", "")),
+            "sensillum": normalize_sensilla(row.get("sensillum_consensus", "")),
         }
     _MASTER_METADATA = metadata
     return _MASTER_METADATA
@@ -39,7 +53,9 @@ def glomerulus_metadata(name: str, fallback: dict[str, str] | None = None) -> di
     master = load_master_metadata().get(name, {})
     return {
         "receptor": master.get("receptor") or fallback.get("receptor", ""),
-        "sensillum": master.get("sensillum") or fallback.get("sensillum", ""),
+        "sensillum": normalize_sensilla(
+            master.get("sensillum") or fallback.get("sensillum", "")
+        ),
     }
 
 

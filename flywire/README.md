@@ -18,8 +18,11 @@ columns `Y, Z, X` as Dorsal-Ventral, Anterior-Posterior, and Lateral-Medial
 axes, matching the FlyWire Codex coordinate description. `label_extents.csv`
 records the rendered voxel span for each glomerulus.
 
-The viewer uses source meshes directly and does not draw a fake copy. Use the
-mirror controls only as display transforms.
+`hemibrainr` currently provides the FlyWire glomerulus mesh on one side. The
+viewer draws the other side by projecting those glomeruli across the source
+`AL_L` and `AL_R` neuropil midline, so both antennal lobes can be inspected in
+the same FlyWire coordinate space. Use the mirror controls only as display
+transforms.
 
 Refresh the tracked `AL_L` and `AL_R` source meshes:
 

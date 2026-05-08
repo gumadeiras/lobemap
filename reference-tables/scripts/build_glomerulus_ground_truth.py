@@ -31,6 +31,7 @@ NAME_ALIASES = {
     "VM5": ["VM5d", "VM5v"],
     "VM7": ["VM7d", "VM7v"],
     "VP1": ["VP1d", "VP1l", "VP1m"],
+    "VP1+VM6": ["VP1", "VM6"],
 }
 
 
@@ -41,17 +42,24 @@ def clean(value: object) -> str:
     return "" if text in {"nan", "NaN", "?", "None"} else text
 
 
-def combine(values: list[object]) -> str:
+def combine(values: list[object], *, case_insensitive: bool = False) -> str:
     seen: list[str] = []
+    seen_keys: set[str] = set()
     for value in values:
         text = clean(value)
         if not text:
             continue
         for part in re.split(r"\s*;\s*", text):
             part = part.strip()
-            if part and part not in seen:
+            key = part.casefold() if case_insensitive else part
+            if part and key not in seen_keys:
                 seen.append(part)
+                seen_keys.add(key)
     return "; ".join(seen)
+
+
+def combine_sensilla(values: list[object]) -> str:
+    return combine(values, case_insensitive=True)
 
 
 def yes_variable(value: object) -> bool:
@@ -65,6 +73,13 @@ def door_receptors(rows: pd.DataFrame) -> list[str]:
     for row in rows.to_dict("records"):
         values.append(clean(row.get("Ors")) or clean(row.get("receptor")))
     return values
+
+
+def read_grabe_pn_expression() -> pd.DataFrame:
+    path = ROOT / "grabe-2015/data/source/grabe_2015_pn_expression.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(path).fillna("").replace(r"^\s+$", "", regex=True)
 
 
 def read_potter_table() -> pd.DataFrame:
@@ -170,6 +185,39 @@ def source_flags(
     return flags
 
 
+def mapped_rows(
+    table: pd.DataFrame,
+    source_column: str,
+    canonical: str,
+    canonical_names: set[str],
+) -> pd.DataFrame:
+    if table.empty:
+        return table
+    mask = [
+        canonical in direct_or_alias(str(value), canonical_names)
+        for value in table[source_column]
+    ]
+    return table[mask]
+
+
+def pn_lines(rows: pd.DataFrame) -> str:
+    lines = []
+    if not rows.empty and (rows["gh146_gal4"] == "positive").any():
+        lines.append("GH146-GAL4")
+    if not rows.empty and (rows["chat_gal4"] == "positive").any():
+        lines.append("ChAT-GAL4")
+    return "; ".join(lines)
+
+
+def pn_line_source(rows: pd.DataFrame) -> str:
+    sources = []
+    if not rows.empty and (rows["gh146_gal4"] == "positive").any():
+        sources.append("Grabe 2015 Table S1")
+    if not rows.empty and (rows["chat_gal4"] == "positive").any():
+        sources.append("Grabe 2015 Table S2")
+    return "; ".join(sources)
+
+
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -185,6 +233,7 @@ def main() -> None:
     scenes = pd.read_csv(ROOT / "hemibrain/data/source/odour_scenes.csv").fillna("")
     vfb = pd.read_csv(ROOT / "hemibrain/data/source/vfb_glomerulus_terms.csv").fillna("")
     potter = read_potter_table().fillna("")
+    grabe_pn = read_grabe_pn_expression()
 
     rows: list[dict[str, str]] = []
     for canonical in canonical_names:
@@ -192,6 +241,7 @@ def main() -> None:
         scene_rows = scenes[scenes["glomerulus"] == canonical]
         vfb_rows = vfb[vfb["glomerulus"] == canonical]
         potter_rows = potter[potter["Glomerulus"] == canonical]
+        pn_rows = mapped_rows(grabe_pn, "glomerulus", canonical, set(canonical_names))
 
         row = {
             "canonical_glomerulus": canonical,
@@ -203,14 +253,14 @@ def main() -> None:
             "receptor_potter_task_2022": combine(list(potter_rows.get("Tuning Receptor(s)", []))),
             "receptor_odour_scenes": combine(list(scene_rows.get("receptor", []))),
             "receptor_door": combine(door_receptors(door_rows)),
-            "sensillum_consensus": combine(
+            "sensillum_consensus": combine_sensilla(
                 list(potter_rows.get("Sensillum", []))
                 + list(scene_rows.get("sensillum", []))
                 + list(door_rows.get("sensillum", []))
             ),
-            "sensillum_potter_task_2022": combine(list(potter_rows.get("Sensillum", []))),
-            "sensillum_odour_scenes": combine(list(scene_rows.get("sensillum", []))),
-            "sensillum_door": combine(list(door_rows.get("sensillum", []))),
+            "sensillum_potter_task_2022": combine_sensilla(list(potter_rows.get("Sensillum", []))),
+            "sensillum_odour_scenes": combine_sensilla(list(scene_rows.get("sensillum", []))),
+            "sensillum_door": combine_sensilla(list(door_rows.get("sensillum", []))),
             "co_receptor_door": combine(list(door_rows.get("co.receptor", []))),
             "orco_t2a_qf2": combine(list(potter_rows.get("Orco-T2A-QF2", []))),
             "ir8a_t2a_qf2": combine(list(potter_rows.get("Ir8a-T2A-QF2", []))),
@@ -222,8 +272,16 @@ def main() -> None:
             "fbbt_id": combine(list(vfb_rows.get("fbbt_id", []))),
             "vfb_name": combine(list(vfb_rows.get("vfb_name", []))),
             "vfb_synonyms": combine(list(vfb_rows.get("synonyms", []))),
-            "projection_neuron_lines": "",
-            "projection_neuron_line_source": "",
+            "projection_neuron_lines": pn_lines(pn_rows),
+            "projection_neuron_line_source": pn_line_source(pn_rows),
+            "gh146_gal4": combine(list(pn_rows.get("gh146_gal4", []))),
+            "gh146_pn_female": combine(list(pn_rows.get("gh146_pn_female", []))),
+            "gh146_pn_male": combine(list(pn_rows.get("gh146_pn_male", []))),
+            "chat_gal4": combine(list(pn_rows.get("chat_gal4", []))),
+            "chat_soma_count": combine(list(pn_rows.get("chat_soma_count", []))),
+            "chat_adpn": combine(list(pn_rows.get("chat_adpn", []))),
+            "chat_lpn": combine(list(pn_rows.get("chat_lpn", []))),
+            "chat_vpn": combine(list(pn_rows.get("chat_vpn", []))),
         }
         row["sensory_neuron_lines"] = sensory_lines(row)
         row.update(source_flags(canonical, sources, set(canonical_names)))
