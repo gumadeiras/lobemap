@@ -3,7 +3,7 @@
 Run:
 
 ```bash
-./lobemap --atlas grabe-2016
+./lobemap --atlas grabe-2015
 ```
 
 What it opens:
@@ -56,7 +56,14 @@ The Grabe atlas files are:
   Amira material table used for label names and colors.
 - `data/source/220118-glomerular-OBJs.7z`: author-provided OBJ exports.
 
-Primary citation:
+Primary atlas citation:
+
+Grabe V, Strutz A, Baschwitz A, Hansson BS, Sachse S.
+A digital in vivo 3D atlas of the antennal lobe of Drosophila melanogaster.
+Journal of Comparative Neurology. 2015;523(3):530-544.
+doi:10.1002/cne.23697.
+
+Related citation:
 
 Grabe V, Baschwitz A, Dweck HKM, Lavista-Llanos S, Hansson BS, Sachse S.
 Elucidating the Neuronal Architecture of Olfactory Glomeruli in the Drosophila

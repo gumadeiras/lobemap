@@ -17,9 +17,9 @@ from qtpy.QtWidgets import (
 
 ROOT = Path(__file__).resolve().parent
 ATLASES = {
-    "grabe-2016": {
-        "label": "Grabe 2016",
-        "module": ROOT / "grabe-2016/al_atlas_napari.py",
+    "grabe-2015": {
+        "label": "Grabe 2015",
+        "module": ROOT / "grabe-2015/al_atlas_napari.py",
     },
     "bates-schlegel-2020": {
         "label": "Bates Schlegel 2020",
@@ -65,7 +65,7 @@ def clear_layout(layout: QVBoxLayout) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="lobemap", description="Open lobemap in napari.")
-    parser.add_argument("--atlas", choices=sorted(ATLASES), default="grabe-2016")
+    parser.add_argument("--atlas", choices=sorted(ATLASES), default="grabe-2015")
     args = parser.parse_args()
 
     viewer = napari.Viewer(title="lobemap", ndisplay=2)

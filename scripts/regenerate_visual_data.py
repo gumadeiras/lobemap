@@ -22,7 +22,7 @@ def import_module(name: str, path: Path):
 
 
 def regenerate_grabe_materials() -> None:
-    grabe = import_module("grabe_regenerate", ROOT / "grabe-2016/al_atlas_napari.py")
+    grabe = import_module("grabe_regenerate", ROOT / "grabe-2015/al_atlas_napari.py")
     grabe.write_materials_csv(grabe.parse_amira_materials(grabe.AMIRA_LABELS))
 
 

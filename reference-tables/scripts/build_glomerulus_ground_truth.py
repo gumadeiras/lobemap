@@ -91,8 +91,8 @@ def read_potter_table() -> pd.DataFrame:
 
 def source_names() -> dict[str, set[str]]:
     sources = {
-        "grabe_2016": set(
-            pd.read_csv(ROOT / "grabe-2016/data/derived/al_atlas_materials.csv")[
+        "grabe_2015": set(
+            pd.read_csv(ROOT / "grabe-2015/data/derived/al_atlas_materials.csv")[
                 "short_name"
             ]
         ),
@@ -177,7 +177,7 @@ def main() -> None:
     canonical_names = sorted(
         set(sources["hemibrain"])
         | set(sources["flywire"])
-        | set(sources["grabe_2016"])
+        | set(sources["grabe_2015"])
         | set(sources["potter_task_2022"])
     )
 
@@ -222,8 +222,8 @@ def main() -> None:
             "fbbt_id": combine(list(vfb_rows.get("fbbt_id", []))),
             "vfb_name": combine(list(vfb_rows.get("vfb_name", []))),
             "vfb_synonyms": combine(list(vfb_rows.get("synonyms", []))),
-            "pn_lines_general": "GH146-GAL4; ChAT-GAL4",
-            "line_notes": "PN lines are broad reference labels, not per-glomerulus coverage calls in the source tables.",
+            "projection_neuron_lines": "",
+            "projection_neuron_line_source": "",
         }
         row["sensory_neuron_lines"] = sensory_lines(row)
         row.update(source_flags(canonical, sources, set(canonical_names)))

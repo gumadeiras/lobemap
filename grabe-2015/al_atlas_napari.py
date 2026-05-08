@@ -252,7 +252,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         "Dorsal-Ventral": (1, 0, 2),
         "Lateral-Medial": (2, 0, 1),
     }
-    current_axis_order = axis_orders["Anterior-Posterior"]
+    current_axis_order = axis_orders["Dorsal-Ventral"]
     rotation_degrees = {0: 0.0, 1: 0.0, 2: 0.0}
     centroid_cache: dict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = {}
 
@@ -293,7 +293,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
 
     image, labels, anchor_points, anchor_ids = current_scene_data()
 
-    viewer.title = "lobemap - Grabe 2016"
+    viewer.title = "lobemap - Grabe 2015"
     viewer.dims.ndisplay = 2
     image_layer = viewer.add_image(
         image,
@@ -384,6 +384,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     axis_combo = QComboBox()
     for name in axis_orders:
         axis_combo.addItem(name)
+    axis_combo.setCurrentText("Dorsal-Ventral")
 
     def on_axis_changed(index: int) -> None:
         nonlocal current_axis_order
@@ -479,9 +480,9 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
 
 
 def main() -> None:
-    viewer = napari.Viewer(title="lobemap - Grabe 2016", ndisplay=2)
+    viewer = napari.Viewer(title="lobemap - Grabe 2015", ndisplay=2)
     panel = load_atlas(viewer)
-    viewer.window.add_dock_widget(panel, area="right", name="Grabe 2016")
+    viewer.window.add_dock_widget(panel, area="right", name="Grabe 2015")
     napari.run()
 
 

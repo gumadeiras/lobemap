@@ -29,7 +29,9 @@ def stable_color(name: str) -> tuple[float, float, float, float]:
     return (float(rgb[0]), float(rgb[1]), float(rgb[2]), 0.45)
 
 
-def transformed(points: np.ndarray, view_name: str, bounds: tuple[float, float, float, float]) -> np.ndarray:
+def transformed(
+    points: np.ndarray, view_name: str, bounds: tuple[float, float, float, float]
+) -> np.ndarray:
     y_min, y_max, x_min, x_max = bounds
     y = points[:, 0]
     x = points[:, 1]
@@ -43,6 +45,16 @@ def transformed(points: np.ndarray, view_name: str, bounds: tuple[float, float, 
         return np.column_stack((y_center + (x - x_center), x_center - (y - y_center)))
     if view_name == "Rotate 180 deg":
         return np.column_stack((y_min + y_max - y, x_min + x_max - x))
+    if view_name == "Rotate 270 deg":
+        y_center = (y_min + y_max) / 2
+        x_center = (x_min + x_max) / 2
+        return np.column_stack((y_center - (x - x_center), x_center + (y - y_center)))
+    if view_name == "Swap axes":
+        return np.column_stack((x, y))
+    if view_name == "Swap axes + left-right mirror":
+        return np.column_stack((x, y_min + y_max - y))
+    if view_name == "Swap axes + up-down mirror":
+        return np.column_stack((x_min + x_max - x, y))
     return points.copy()
 
 
@@ -99,7 +111,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         [polygon_by_name[name] for name in names],
         shape_type="polygon",
         name="glomeruli",
-        edge_color=(1.0, 1.0, 1.0, 0.55),
+        edge_color=[(1.0, 1.0, 1.0, 0.55)] * len(names),
         edge_width=0.35,
         face_color=[stable_color(name) for name in names],
         opacity=0.75,
@@ -144,6 +156,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
             }
         )
         shapes.face_color = [stable_color(name) for name in shown]
+        shapes.edge_color = [(1.0, 1.0, 1.0, 0.55)] * len(shown)
 
         label_names = [name for name in shown if name in label_by_name]
         if label_names:
@@ -185,6 +198,10 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         "Up-down mirror",
         "Rotate 90 deg",
         "Rotate 180 deg",
+        "Rotate 270 deg",
+        "Swap axes",
+        "Swap axes + left-right mirror",
+        "Swap axes + up-down mirror",
     ):
         view_combo.addItem(view_name)
 

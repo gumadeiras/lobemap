@@ -29,9 +29,9 @@ cache files live in `data/derived/` and should not be tracked. Rebuild them with
 uv run python scripts/regenerate_visual_data.py
 ```
 
-## Grabe 2016 atlas
+## Grabe 2015 atlas
 
-The Grabe in vivo antennal lobe atlas lives in `grabe-2016/`.
+The Grabe in vivo antennal lobe atlas lives in `grabe-2015/`.
 
 ## Bates Schlegel 2020 atlas
 

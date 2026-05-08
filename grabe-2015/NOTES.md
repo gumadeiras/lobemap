@@ -2,10 +2,10 @@
 
 This folder contains atlas resources associated with:
 
-Grabe V, Baschwitz A, Dweck HKM, Lavista-Llanos S, Hansson BS, Sachse S.
-Elucidating the Neuronal Architecture of Olfactory Glomeruli in the Drosophila
-Antennal Lobe. Cell Reports. 2016;16(12):3401-3413.
-doi:10.1016/j.celrep.2016.08.063.
+Grabe V, Strutz A, Baschwitz A, Hansson BS, Sachse S.
+A digital in vivo 3D atlas of the antennal lobe of Drosophila melanogaster.
+Journal of Comparative Neurology. 2015;523(3):530-544.
+doi:10.1002/cne.23697.
 
 ## Source Data
 
