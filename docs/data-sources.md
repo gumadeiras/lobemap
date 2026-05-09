@@ -55,14 +55,21 @@ Used for FlyWire glomerulus meshes and both antennal lobe neuropil meshes.
 
 Sources:
 
-- `hemibrainr`, for FlyWire glomerulus surfaces.
-- `fafbseg`, for `AL_L` and `AL_R` neuropil meshes.
+- FlyWire glomerulus mesh, for the annotated-side glomerulus surfaces.
+- FlyWire source neuron meshes, for sensory-neuron, projection-neuron, and
+  local-neuron shapes used to rebuild the other side.
+- `flywire_annotations`, for neuron class, cell type, glomerulus, and side
+  annotations.
+- `fafbseg`, for source neuron meshes and `AL_L` and `AL_R` neuropil meshes.
+- `hemibrainr`, for receptor, odor-scene, and valence summary tables used as
+  metadata.
 - FlyWire Codex / FlyWire v783, for coordinate conventions and release
   metadata.
 - Dorkenwald S, et al. Neuronal wiring diagram of an adult brain. Nature. 2024.
 
-The current public glomerulus mesh is one-sided. lobemap projects it into the
-other source antennal lobe so both sides can be viewed together.
+The tracked glomerulus mesh files include surfaces for both FlyWire antennal
+lobes. The tracked neuropil meshes are source meshes for both `AL_L` and
+`AL_R`.
 
 ## DoOR
 

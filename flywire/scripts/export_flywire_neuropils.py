@@ -12,8 +12,8 @@ SOURCE_DIR = WORK_DIR / "data/source"
 SOURCE_DIR.mkdir(parents=True, exist_ok=True)
 
 NEUROPILS = {
-    "AL_L": "#8DD3C7",
-    "AL_R": "#80B1D3",
+    "AL_L": "#D8D8D8",
+    "AL_R": "#7A7A7A",
 }
 
 

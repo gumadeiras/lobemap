@@ -1,4 +1,4 @@
 source_column,anatomical_axis,viewer_axis_index,viewer_axis_name,min,max,mean,units,evidence,evidence_url
-X,Lateral-Medial,2,Lateral-Medial,410123.812500,635372.312500,467981.934140,nanometers,documented by FlyWire Codex,https://codex.flywire.ai/faq?dataset=fafb
-Y,Dorsal-Ventral,0,Dorsal-Ventral,193792.609375,298086.093750,240644.667632,nanometers,documented by FlyWire Codex,https://codex.flywire.ai/faq?dataset=fafb
-Z,Anterior-Posterior,1,Anterior-Posterior,-3396.809082,99584.882812,48790.927463,nanometers,documented by FlyWire Codex,https://codex.flywire.ai/faq?dataset=fafb
+X,Lateral-Medial,2,Lateral-Medial,410123.812500,639398.000000,493273.659330,nanometers,documented by FlyWire Codex,https://codex.flywire.ai/faq?dataset=fafb
+Y,Dorsal-Ventral,0,Dorsal-Ventral,193792.609375,300218.000000,242967.415513,nanometers,documented by FlyWire Codex,https://codex.flywire.ai/faq?dataset=fafb
+Z,Anterior-Posterior,1,Anterior-Posterior,-3396.809082,99584.882812,46727.227595,nanometers,documented by FlyWire Codex,https://codex.flywire.ai/faq?dataset=fafb

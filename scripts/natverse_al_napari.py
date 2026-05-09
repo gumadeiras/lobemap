@@ -107,8 +107,7 @@ def load_meshes(stem: str) -> list[Mesh]:
             )
         )
     if stem == "flywire_al":
-        neuropils = load_optional_meshes("flywire_al_neuropils")
-        meshes = neuropils + project_flywire_glomeruli_to_right_al(meshes, neuropils)
+        meshes = load_optional_meshes("flywire_al_neuropils") + meshes
     return meshes
 
 
@@ -116,39 +115,6 @@ def load_optional_meshes(stem: str) -> list[Mesh]:
     if not (SOURCE_DIR / f"{stem}_materials.csv").exists():
         return []
     return load_meshes(stem)
-
-
-def project_flywire_glomeruli_to_right_al(
-    glomeruli: list[Mesh], neuropils: list[Mesh]
-) -> list[Mesh]:
-    if len(neuropils) < 2:
-        return glomeruli
-    by_name = {mesh.name: mesh for mesh in neuropils}
-    left = by_name.get("AL_L")
-    right = by_name.get("AL_R")
-    if left is None or right is None:
-        return glomeruli
-
-    lateral_axis = 2
-    midline = (
-        np.nanmax(left.triangles[:, :, lateral_axis])
-        + np.nanmin(right.triangles[:, :, lateral_axis])
-    ) / 2.0
-    mirrored = []
-    for mesh in glomeruli:
-        triangles = mesh.triangles.copy()
-        triangles[:, :, lateral_axis] = 2.0 * midline - triangles[:, :, lateral_axis]
-        mirrored.append(
-            Mesh(
-                label_id=mesh.label_id,
-                name=mesh.name,
-                vertices=mesh.vertices,
-                faces=mesh.faces,
-                triangles=triangles,
-                color=mesh.color,
-            )
-        )
-    return glomeruli + mirrored
 
 
 def mesh_bounds(meshes: list[Mesh]) -> tuple[np.ndarray, np.ndarray]:
@@ -347,7 +313,7 @@ def save_volume_cache(stem: str, volume: AtlasVolume) -> None:
         names=np.asarray([volume.names[i] for i in sorted(volume.names)]),
         colors=np.asarray([volume.colors[i] for i in sorted(volume.names)]),
         resolution=np.asarray([VOLUME_RESOLUTION], dtype=np.uint16),
-        cache_version=np.asarray([2 if stem == "flywire_al" else 1], dtype=np.uint16),
+        cache_version=np.asarray([3 if stem == "flywire_al" else 1], dtype=np.uint16),
         source_axis_columns=np.asarray(volume.source_axis_columns),
         volume_axis_names=np.asarray(VOLUME_AXIS_NAMES),
     )
@@ -362,7 +328,7 @@ def load_volume_cache(stem: str) -> AtlasVolume | None:
         if resolution != VOLUME_RESOLUTION:
             return None
         if stem == "flywire_al" and (
-            "cache_version" not in data.files or int(data["cache_version"][0]) < 2
+            "cache_version" not in data.files or int(data["cache_version"][0]) < 3
         ):
             return None
         if "source_axis_columns" not in data.files:

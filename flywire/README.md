@@ -1,8 +1,12 @@
 # FlyWire
 
-FlyWire antennal-lobe glomerulus surfaces exported from `hemibrainr`.
-The viewer also includes `AL_L` and `AL_R` neuropil meshes from `fafbseg` so
-both antennal lobes are visible in the FlyWire coordinate space.
+FlyWire antennal-lobe glomerulus surfaces. The annotated-side surfaces are kept
+from the FlyWire glomerulus mesh. The other side is rebuilt from FlyWire neuron
+meshes by keeping the overlap between sensory-neuron arbors and projection-neuron
+arbors, with local neurons used as an antennal-lobe mask.
+
+The viewer also includes source `AL_L` and `AL_R` neuropil meshes from
+`fafbseg` so both antennal lobes are visible in the FlyWire coordinate space.
 
 Run:
 
@@ -18,11 +22,22 @@ columns `Y, Z, X` as Dorsal-Ventral, Anterior-Posterior, and Lateral-Medial
 axes, matching the FlyWire Codex coordinate description. `label_extents.csv`
 records the rendered voxel span for each glomerulus.
 
-`hemibrainr` currently provides the FlyWire glomerulus mesh on one side. The
-viewer draws the other side by projecting those glomeruli across the source
-`AL_L` and `AL_R` neuropil midline, so both antennal lobes can be inspected in
-the same FlyWire coordinate space. Use the mirror controls only as display
-transforms.
+The tracked glomerulus mesh files include surfaces for both FlyWire antennal
+lobes. Left and right surfaces share the same glomerulus ID so the viewer can
+show one table row per glomerulus while still placing labels on each side
+separately. The mirror controls are display-only transforms.
+
+Refresh the tracked glomerulus source meshes:
+
+```bash
+uv run \
+  --with fafbseg \
+  --with navis \
+  --with pytz \
+  --with scipy \
+  --with scikit-image \
+  python flywire/scripts/export_flywire_glomeruli_from_neurons.py
+```
 
 Refresh the tracked `AL_L` and `AL_R` source meshes:
 
@@ -36,7 +51,10 @@ Rebuild cache files from the repo root:
 uv run python scripts/regenerate_visual_data.py
 ```
 
-Primary source:
+Primary sources:
 
-Schlegel P, et al. `hemibrainr`: code for working with FlyWire and hemibrain
-data.
+- `hemibrainr`, for receptor, odor-scene, and valence summary tables used as
+  metadata.
+- `fafbseg`, for FlyWire source neuron meshes and neuropil meshes.
+- `flywire_annotations`, for neuron class, cell type, glomerulus, and side
+  annotations.
