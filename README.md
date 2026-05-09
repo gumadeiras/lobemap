@@ -2,7 +2,9 @@
 
 lobemap is a small napari viewer for Drosophila antennal lobe atlases.
 
-<video src="docs/images/demo.mp4" controls width="100%"></video>
+[![lobemap demo](docs/images/demo-grabe-2015.png)](docs/images/demo.mp4)
+
+[Watch the demo video](docs/images/demo.mp4)
 
 It lets you:
 
