@@ -25,8 +25,6 @@ placed on the reference antennal lobe.
 
 JRC2018Unisex opens as a whole-brain template with VFB ROI masks.
 
-JRC2018Unisex opens as a whole-brain template with VFB ROI masks.
-
 Generated cache files live in `data/derived/` folders. They are not tracked in
 git. Rebuild them with:
 
