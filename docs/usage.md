@@ -21,7 +21,7 @@ The table has three columns:
 - `sensilla`
 
 Labels appear on slices where a glomerulus is present. In FlyWire, labels are
-placed separately for each antennal lobe.
+placed on the reference antennal lobe.
 
 JRC2018Unisex opens as a whole-brain template with VFB ROI masks.
 

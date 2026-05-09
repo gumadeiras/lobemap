@@ -132,6 +132,26 @@ Sources:
 - Bogovic JA, et al. An unbiased template of the Drosophila brain and ventral
   nerve cord. bioRxiv. 2019. doi:10.1101/376384.
 
+## BANC
+
+Folder: [`banc/`](../banc/)
+
+Used for BANC links and olfactory Neuroglancer states. lobemap does not include
+BANC antennal-lobe glomerulus meshes yet because a public BANC glomerulus
+surface atlas was not found.
+
+Sources:
+
+- BANC wiki: https://github.com/jasper-tms/the-BANC-fly-connectome/wiki
+- BANC Neuroglancer states:
+  https://github.com/jasper-tms/the-BANC-fly-connectome/tree/main/neuroglancer_states
+- BANC public data bucket:
+  https://console.cloud.google.com/storage/browser/lee-lab_brain-and-nerve-cord-fly-connectome
+- BANC Dataverse:
+  https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/8TFGGB
+- Phelps JS, et al. Distributed control circuits across a brain-and-cord
+  connectome. bioRxiv. 2025. doi:10.1101/2025.07.31.667571.
+
 ## Other Reference Resources
 
 These folders hold paper links, metadata, or reference notes:

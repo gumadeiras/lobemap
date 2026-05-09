@@ -1,0 +1,3 @@
+name,short_url,raw_url,local_file,layers,static_segments,position,selected_layer
+Left olfactory,https://ng.banc.community/2026a/left-olfactory,https://raw.githubusercontent.com/jasper-tms/the-BANC-fly-connectome/main/neuroglancer_states/2026a/left-olfactory.json,neuroglancer_states/2026a/left-olfactory.json,15,4238,"[125097.5, 122589.5, 2827.5]",BANC static
+Right olfactory,https://ng.banc.community/2026a/right-olfactory,https://raw.githubusercontent.com/jasper-tms/the-BANC-fly-connectome/main/neuroglancer_states/2026a/right-olfactory.json,neuroglancer_states/2026a/right-olfactory.json,15,4378,"[125097.5, 122589.5, 2827.5]",BANC static

@@ -1,0 +1,9 @@
+name,type,source,url,local_file,description
+BANC wiki,project page,GitHub wiki,https://github.com/jasper-tms/the-BANC-fly-connectome/wiki,,Main BANC project page with data links.
+BANC Codex,connectome browser,FlyWire Codex,https://codex.flywire.ai/banc,,Browser for public BANC connectome data.
+BANC Neuroglancer,viewer,BANC Neuroglancer,https://ng.banc.community/view,,Public Neuroglancer view for BANC EM images and segmentation.
+BANC data bucket,data files,Google Cloud Storage,https://console.cloud.google.com/storage/browser/lee-lab_brain-and-nerve-cord-fly-connectome,,Public bucket for released BANC files.
+BANC Dataverse,preprint files,Harvard Dataverse,https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/8TFGGB,,Preprint-related files and metadata.
+BANC preprint,paper,bioRxiv,https://www.biorxiv.org/content/10.1101/2025.07.31.667571,,Distributed control circuits across a brain-and-cord connectome.
+Left olfactory state,neuroglancer state,GitHub neuroglancer state,https://ng.banc.community/2026a/left-olfactory,neuroglancer_states/2026a/left-olfactory.json,Left olfactory BANC Neuroglancer state.
+Right olfactory state,neuroglancer state,GitHub neuroglancer state,https://ng.banc.community/2026a/right-olfactory,neuroglancer_states/2026a/right-olfactory.json,Right olfactory BANC Neuroglancer state.

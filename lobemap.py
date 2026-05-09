@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import napari
+from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import (
     QComboBox,
     QLabel,
@@ -37,6 +38,10 @@ ATLASES = {
     "jrc2018unisex": {
         "label": "JRC2018Unisex",
         "module": ROOT / "jrc2018unisex/jrc2018unisex_napari.py",
+    },
+    "banc": {
+        "label": "BANC",
+        "module": ROOT / "banc/banc_napari.py",
     },
     "door": {
         "label": "DoOR 2D",
@@ -70,6 +75,12 @@ def clear_layout(layout: QVBoxLayout) -> None:
         if widget is not None:
             widget.setParent(None)
             widget.deleteLater()
+
+
+def maximize_viewer(viewer: napari.Viewer) -> None:
+    qt_window = getattr(viewer.window, "_qt_window", None)
+    if qt_window is not None:
+        qt_window.showMaximized()
 
 
 def main() -> None:
@@ -113,6 +124,7 @@ def main() -> None:
     selector.currentIndexChanged.connect(lambda _index: load_selected())
 
     load_selected()
+    QTimer.singleShot(0, lambda: maximize_viewer(viewer))
     napari.run()
 
 
