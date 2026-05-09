@@ -23,7 +23,7 @@ driver lines, VFB IDs, and atlas coverage.
 | Glomerulus | Receptors | Sensillum | Key ligand | Valence | Lines |
 | --- | --- | --- | --- | --- | --- |
 | D | Or69aA, Or69aB | Ab9A | linalool | aversive | GH146-GAL4; ChAT-GAL4 |
-| DA1 | Or67d | At1A | cis-vaccenyl acetate | unclear | GH146-GAL4; ChAT-GAL4 |
+| DA1 | Or67d | At1A | cis-vaccenyl acetate | mating/aggression | GH146-GAL4; ChAT-GAL4 |
 | DA2 | Or56a, Or33a | Ab4B | geosmin | aversive | GH146-GAL4; ChAT-GAL4 |
 
 [Open the full table](reference-tables/glomerulus_ground_truth.csv) or the
