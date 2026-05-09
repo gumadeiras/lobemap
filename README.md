@@ -2,7 +2,7 @@
 
 lobemap is a small napari viewer for Drosophila antennal lobe atlases.
 
-https://github.com/user-attachments/assets/2b9711c9-3246-49c4-946b-a29fad0fce52
+https://github.com/user-attachments/assets/d83978bd-f2de-48fe-9f0d-6aff19e3b663
 
 It lets you:
 
