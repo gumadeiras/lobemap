@@ -34,6 +34,10 @@ ATLASES = {
         "label": "FlyWire",
         "module": ROOT / "flywire/flywire_napari.py",
     },
+    "jrc2018unisex": {
+        "label": "JRC2018Unisex",
+        "module": ROOT / "jrc2018unisex/jrc2018unisex_napari.py",
+    },
     "door": {
         "label": "DoOR 2D",
         "module": ROOT / "door/door_napari.py",

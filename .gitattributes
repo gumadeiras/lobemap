@@ -2,7 +2,9 @@
 *.am -whitespace
 *.docx binary
 *.gz binary
+*.nrrd binary
 *.npy binary
+*.npz binary
 *.pdf binary
 *.ps -whitespace
 *.tif binary

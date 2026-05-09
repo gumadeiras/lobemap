@@ -115,6 +115,23 @@ Source:
 - FlyWire Whole-brain Connectome Connectivity Data. Zenodo.
   doi:10.5281/zenodo.10676866.
 
+## JRC2018Unisex
+
+Folder: [`jrc2018unisex/`](../jrc2018unisex/)
+
+Used for the whole-brain JRC2018Unisex template and VFB ROI label masks.
+lobemap tracks the VFB NRRD volumes in `data/source/vfb/` plus a composed ROI
+label volume for immediate viewing.
+
+Sources:
+
+- Virtual Fly Brain JRC 2018 templates and ROIs:
+  https://www.virtualflybrain.org/reports/JRC2018
+- VFB template concepts page:
+  https://www.virtualflybrain.org/docs/concepts/templates/
+- Bogovic JA, et al. An unbiased template of the Drosophila brain and ventral
+  nerve cord. bioRxiv. 2019. doi:10.1101/376384.
+
 ## Other Reference Resources
 
 These folders hold paper links, metadata, or reference notes:
