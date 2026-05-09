@@ -1,12 +1,10 @@
 # FlyWire
 
-FlyWire antennal-lobe glomerulus surfaces. The annotated-side surfaces are kept
-from the FlyWire glomerulus mesh. The other side is rebuilt from FlyWire neuron
-meshes by keeping the overlap between sensory-neuron arbors and projection-neuron
-arbors, with local neurons used as an antennal-lobe mask.
+FlyWire antennal-lobe glomerulus surfaces. lobemap keeps the annotated reference
+glomerulus mesh only.
 
-The viewer also includes source `AL_L` and `AL_R` neuropil meshes from
-`fafbseg` so both antennal lobes are visible in the FlyWire coordinate space.
+The viewer also includes source `AL_L` and `AL_R` neuropil meshes from `fafbseg`
+so the reference glomeruli can be seen in the FlyWire coordinate space.
 
 Run:
 
@@ -22,21 +20,13 @@ columns `Y, Z, X` as Dorsal-Ventral, Anterior-Posterior, and Lateral-Medial
 axes, matching the FlyWire Codex coordinate description. `label_extents.csv`
 records the rendered voxel span for each glomerulus.
 
-The tracked glomerulus mesh files include surfaces for both FlyWire antennal
-lobes. Left and right surfaces share the same glomerulus ID so the viewer can
-show one table row per glomerulus while still placing labels on each side
-separately. The mirror controls are display-only transforms.
+The tracked glomerulus mesh files include the FlyWire reference glomerulus
+surfaces. The mirror controls are display-only transforms.
 
-Refresh the tracked glomerulus source meshes:
+Refresh the tracked reference glomerulus source meshes:
 
 ```bash
-uv run \
-  --with fafbseg \
-  --with navis \
-  --with pytz \
-  --with scipy \
-  --with scikit-image \
-  python flywire/scripts/export_flywire_glomeruli_from_neurons.py
+uv run python flywire/scripts/prepare_flywire_glomeruli.py
 ```
 
 Refresh the tracked `AL_L` and `AL_R` source meshes:
@@ -55,6 +45,5 @@ Primary sources:
 
 - `hemibrainr`, for receptor, odor-scene, and valence summary tables used as
   metadata.
-- `fafbseg`, for FlyWire source neuron meshes and neuropil meshes.
-- `flywire_annotations`, for neuron class, cell type, glomerulus, and side
-  annotations.
+- FlyWire glomerulus mesh, for the reference glomerulus surfaces.
+- `fafbseg`, for FlyWire neuropil meshes.

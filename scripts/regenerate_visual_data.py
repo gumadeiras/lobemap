@@ -36,6 +36,12 @@ def regenerate_bates_cache() -> None:
 
 
 def regenerate_hemibrain_flywire_caches() -> None:
+    flywire_prepare = import_module(
+        "flywire_prepare",
+        ROOT / "flywire/scripts/prepare_flywire_glomeruli.py",
+    )
+    flywire_prepare.main()
+
     atlas = import_module(
         "hemibrain_flywire_regenerate",
         ROOT / "scripts/natverse_al_napari.py",

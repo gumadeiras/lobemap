@@ -51,25 +51,21 @@ Source:
 
 Folder: [`flywire/`](../flywire/)
 
-Used for FlyWire glomerulus meshes and both antennal lobe neuropil meshes.
+Used for the FlyWire reference glomerulus mesh and both antennal lobe neuropil
+meshes.
 
 Sources:
 
-- FlyWire glomerulus mesh, for the annotated-side glomerulus surfaces.
-- FlyWire source neuron meshes, for sensory-neuron, projection-neuron, and
-  local-neuron shapes used to rebuild the other side.
-- `flywire_annotations`, for neuron class, cell type, glomerulus, and side
-  annotations.
-- `fafbseg`, for source neuron meshes and `AL_L` and `AL_R` neuropil meshes.
+- FlyWire glomerulus mesh, for the reference glomerulus surfaces.
+- `fafbseg`, for `AL_L` and `AL_R` neuropil meshes.
 - `hemibrainr`, for receptor, odor-scene, and valence summary tables used as
   metadata.
 - FlyWire Codex / FlyWire v783, for coordinate conventions and release
   metadata.
 - Dorkenwald S, et al. Neuronal wiring diagram of an adult brain. Nature. 2024.
 
-The tracked glomerulus mesh files include surfaces for both FlyWire antennal
-lobes. The tracked neuropil meshes are source meshes for both `AL_L` and
-`AL_R`.
+The tracked glomerulus mesh files include only the FlyWire reference side. The
+tracked neuropil meshes are source meshes for both `AL_L` and `AL_R`.
 
 ## DoOR
 
