@@ -14,6 +14,21 @@ It lets you:
 - see glomerulus names, receptors, and sensilla
 - compare reference maps and tables from different sources
 
+## Reference Table
+
+The [reference table](reference-tables/glomerulus_ground_truth.csv) is a
+cross-dataset index for glomeruli, receptors, sensilla, ligands, valence,
+driver lines, VFB IDs, and atlas coverage.
+
+| Glomerulus | Receptors | Sensillum | Key ligand | Valence | Lines |
+| --- | --- | --- | --- | --- | --- |
+| D | Or69aA, Or69aB | Ab9A | linalool | aversive | GH146-GAL4; ChAT-GAL4 |
+| DA1 | Or67d | At1A | cis-vaccenyl acetate | unclear | GH146-GAL4; ChAT-GAL4 |
+| DA2 | Or56a, Or33a | Ab4B | geosmin | aversive | GH146-GAL4; ChAT-GAL4 |
+
+[Open the full table](reference-tables/glomerulus_ground_truth.csv) or the
+[name reconciliation table](reference-tables/glomerulus_name_reconciliation.csv).
+
 ## Start
 
 ```bash
