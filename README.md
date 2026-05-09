@@ -60,8 +60,6 @@ You can also open one atlas directly:
 
 ![Hemibrain atlas in lobemap](docs/images/demo-hemibrain.png)
 
-![FlyWire atlas in lobemap](docs/images/demo-flywire.png)
-
 ![DoOR 2D map in lobemap](docs/images/demo-door-2d.png)
 
 ## Data And Credit
