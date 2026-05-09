@@ -2,6 +2,8 @@
 
 lobemap is a small napari viewer for Drosophila antennal lobe atlases.
 
+<video src="docs/images/demo.mp4" controls width="100%"></video>
+
 It lets you:
 
 - switch between atlases
