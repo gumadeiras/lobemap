@@ -192,7 +192,7 @@ def make_roi_table(rois: pd.DataFrame, visible: set[str], on_change) -> QTableWi
         vfb_item.setFlags(vfb_item.flags() & ~Qt.ItemIsEditable)
         table.setItem(row, 1, vfb_item)
     table.resizeColumnsToContents()
-    table.setColumnWidth(0, 88)
+    table.setColumnWidth(0, 112)
     table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
     table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
     table.itemChanged.connect(
