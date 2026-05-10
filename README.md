@@ -106,13 +106,13 @@ the Potter Task 2022 PDF preview.
 
 ## Demo
 
-![Grabe 2015 atlas in lobemap](docs/images/demo-grabe-2015.png)
+![Grabe 2015 atlas in lobemap](https://raw.githubusercontent.com/gumadeiras/lobemap/main/docs/images/demo-grabe-2015.png)
 
-![Bates Schlegel 2020 atlas in lobemap](docs/images/demo-bates-schlegel-2020.png)
+![Bates Schlegel 2020 atlas in lobemap](https://raw.githubusercontent.com/gumadeiras/lobemap/main/docs/images/demo-bates-schlegel-2020.png)
 
-![Hemibrain atlas in lobemap](docs/images/demo-hemibrain.png)
+![Hemibrain atlas in lobemap](https://raw.githubusercontent.com/gumadeiras/lobemap/main/docs/images/demo-hemibrain.png)
 
-![DoOR 2D map in lobemap](docs/images/demo-door-2d.png)
+![DoOR 2D map in lobemap](https://raw.githubusercontent.com/gumadeiras/lobemap/main/docs/images/demo-door-2d.png)
 
 ## Data And Credit
 
