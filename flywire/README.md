@@ -1,7 +1,11 @@
 # FlyWire
 
 FlyWire antennal-lobe glomerulus surfaces. lobemap keeps the annotated reference
-glomerulus mesh only.
+glomerulus mesh only. The glomerulus surfaces are an exported reference mesh in
+FlyWire/FAFB coordinates, not a reconstruction from FlyWire connectome neurons.
+They are separate from the Bates Schlegel 2020 Plotly atlas source, although
+the two resources use the same glomerulus naming and closely related coordinate
+space.
 
 The viewer also includes source `AL_L` and `AL_R` neuropil meshes from `fafbseg`
 so the reference glomeruli can be seen in the FlyWire coordinate space.
@@ -44,7 +48,6 @@ uv run python scripts/regenerate_visual_data.py
 
 Primary sources:
 
-- `hemibrainr`, for receptor, odor-scene, and valence summary tables used as
-  metadata.
-- FlyWire glomerulus mesh, for the reference glomerulus surfaces.
+- `hemibrainr` / natverse export, for the FlyWire reference glomerulus surfaces
+  and for receptor, odor-scene, and valence summary tables used as metadata.
 - `fafbseg`, for FlyWire neuropil meshes.
