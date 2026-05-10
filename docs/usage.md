@@ -34,9 +34,7 @@ The right panel has the main controls.
 
 Benton 2025 opens to the paper-matched `Dorsal-Ventral` view. Its stack runs
 dorsal to ventral by default, and the initial display uses vertical and
-horizontal mirroring with no rotation. The first load builds a derived
-label-volume cache from the source segmentation meshes; later loads use the
-cache.
+horizontal mirroring with no rotation.
 
 The table has three columns:
 
@@ -49,9 +47,16 @@ placed on the reference antennal lobe.
 
 JRC2018Unisex opens as a whole-brain template with VFB ROI masks.
 
+## Generated Data
+
 Generated cache files live in `data/derived/` folders. They are not tracked in
-git. Rebuild them with:
+git. Some viewers build their cache on first load; rebuild all generated visual
+data with:
 
 ```bash
 uv run python scripts/regenerate_visual_data.py
 ```
+
+This regenerates Grabe material labels, Bates Schlegel 2020, hemibrain,
+FlyWire, and Benton 2025 label-volume caches, FlyWire coordinate validation,
+and the Potter Task 2022 map preview. The Potter preview step needs `pdftoppm`.

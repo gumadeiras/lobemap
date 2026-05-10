@@ -51,12 +51,17 @@ You can also open one atlas directly:
 ./lobemap --atlas flywire
 ```
 
-Benton 2025 builds its derived slice cache on first load. To prebuild all
-generated visual data:
+## Generated Data
+
+Some viewers use derived cache files under `data/derived/` for fast startup and
+slicing. They are not tracked in git. Rebuild all generated visual data with:
 
 ```bash
 uv run python scripts/regenerate_visual_data.py
 ```
+
+The rebuild script uses the tracked source files and needs `pdftoppm` to render
+the Potter Task 2022 PDF preview.
 
 ## What Is Included
 
