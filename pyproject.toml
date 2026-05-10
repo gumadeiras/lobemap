@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,22 @@ version = "0.1.0"
 description = "napari viewer for Drosophila antennal lobe atlases"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Gustavo Madeira Santana", email = "fromweb1@gumadeiras.com" },
+]
 requires-python = ">=3.11,<3.13"
+keywords = ["drosophila", "napari", "neuroanatomy", "visualization"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Topic :: Scientific/Engineering :: Visualization",
+]
 dependencies = [
   "matplotlib>=3.9",
   "napari[pyqt6]>=0.6.0",
@@ -24,6 +39,7 @@ lobemap = "lobemap.lobemap:main"
 [project.urls]
 Homepage = "https://github.com/gumadeiras/lobemap"
 Repository = "https://github.com/gumadeiras/lobemap"
+Issues = "https://github.com/gumadeiras/lobemap/issues"
 
 [tool.setuptools]
 package-dir = { lobemap = "." }
