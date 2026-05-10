@@ -43,6 +43,10 @@ ATLASES = {
         "label": "BANC",
         "module": ROOT / "banc/banc_napari.py",
     },
+    "benton-2025": {
+        "label": "Benton 2025",
+        "module": ROOT / "benton-2025/benton_2025_napari.py",
+    },
     "door": {
         "label": "DoOR 2D",
         "module": ROOT / "door/door_napari.py",

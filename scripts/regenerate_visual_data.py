@@ -77,6 +77,14 @@ def regenerate_coordinate_validation() -> None:
     validation.main()
 
 
+def regenerate_benton_cache() -> None:
+    benton = import_module(
+        "benton_regenerate",
+        ROOT / "benton-2025/benton_2025_data.py",
+    )
+    benton.save_volume_cache(benton.build_label_volume(benton.load_meshes()))
+
+
 def regenerate_potter_preview() -> None:
     source_pdf = (
         ROOT
@@ -107,6 +115,7 @@ def main() -> None:
     regenerate_bates_cache()
     regenerate_hemibrain_flywire_caches()
     regenerate_coordinate_validation()
+    regenerate_benton_cache()
     regenerate_potter_preview()
     print("visual data regenerated")
 

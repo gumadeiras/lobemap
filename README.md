@@ -47,7 +47,7 @@ You can also open one atlas directly:
 ## What Is Included
 
 - 3D atlas viewers for Grabe 2015, Bates Schlegel 2020, hemibrain, FlyWire,
-  and JRC2018Unisex
+  JRC2018Unisex, and Benton 2025
 - 2D reference viewers for DoOR and Potter Task 2022
 - Virtual Fly Brain and BANC resource lookup
 - reference tables for glomerulus names, receptors, sensilla, and direct line labels

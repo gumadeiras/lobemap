@@ -152,11 +152,29 @@ Sources:
 - Phelps JS, et al. Distributed control circuits across a brain-and-cord
   connectome. bioRxiv. 2025. doi:10.1101/2025.07.31.667571.
 
+## Benton 2025
+
+Folder: [`benton-2025/`](../benton-2025/)
+
+Used for the Dataset EV2 antennal lobe segmentation viewer. lobemap reads the
+3D Slicer `DatasetEV2.seg.vtm` index, per-segment `.vtp` meshes, and the source
+color table, then builds a derived label-volume cache for fast 2D slicing.
+Dataset EV2 uses and updates the antennal-lobe meshes from Bates Schlegel 2020,
+but its paper slices use a slightly different orientation from the Bates atlas
+views. lobemap therefore exposes Benton 2025 as a separate viewer with
+paper-matched Dorsal-Ventral defaults.
+Dataset EV1 contributes source-specific receptor, co-receptor, sensillum,
+neuron-name, agonist, and sensory-scene columns to the reference table.
+
+Source:
+
+- Benton R, et al. An integrated anatomical, functional and evolutionary view
+  of the Drosophila olfactory system. 2025.
+
 ## Other Reference Resources
 
 These folders hold paper links, metadata, or reference notes:
 
-- [`benton-2025/`](../benton-2025/)
 - [`comparative-atlases/`](../comparative-atlases/)
 - [`edmond-fibsem/`](../edmond-fibsem/)
 - [`laissue-1999/`](../laissue-1999/)
