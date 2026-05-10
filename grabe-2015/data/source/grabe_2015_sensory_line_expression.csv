@@ -1,0 +1,55 @@
+glomerulus,receptor_type,sensillum_type,orco_gal4,source
+D,Or69a,Ab9,positive,Grabe 2015 Table 1
+DA1,Or67d,At1,positive,Grabe 2015 Table 1
+DA2,Or56a/Or33a,Ab4,positive,Grabe 2015 Table 1
+DA3,Or23a,At2,positive,Grabe 2015 Table 1
+DA4l,Or43a,At3,positive,Grabe 2015 Table 1
+DA4m,Or2a,At3,positive,Grabe 2015 Table 1
+DC1,Or19a/b,At3,positive,Grabe 2015 Table 1
+DC2,Or13a,Ab6,positive,Grabe 2015 Table 1
+DC3,Or83c,At2,positive,Grabe 2015 Table 1
+DC4,Ir64a,Sac III,negative,Grabe 2015 Table 1
+DL1,Or10a/Gr10a,Ab1,positive,Grabe 2015 Table 1
+DL2d,Ir75a/b/c,Ac3,negative,Grabe 2015 Table 1
+DL2v,Ir75a/b/c,Ac3,negative,Grabe 2015 Table 1
+DL3,Or65a/b/c,At4,positive,Grabe 2015 Table 1
+DL4,Or49a/Or85f,Ab10,positive,Grabe 2015 Table 1
+DL5,Or7a,Ab4,positive,Grabe 2015 Table 1
+DM1,Or42b,Ab1,positive,Grabe 2015 Table 1
+DM2,Or22a,Ab3,positive,Grabe 2015 Table 1
+DM3,Or47a,Ab5,positive,Grabe 2015 Table 1
+DM4,Or59b,Ab2,positive,Grabe 2015 Table 1
+DM5,Or43b,Ab2,positive,Grabe 2015 Table 1
+DM6,Or67a,Ab10,positive,Grabe 2015 Table 1
+DP1l,Ir75a,Ac2,negative,Grabe 2015 Table 1
+DP1m,Ir64a,Sac III,negative,Grabe 2015 Table 1
+V,Gr21a,Ab1,positive,Grabe 2015 Table 1
+VA1d,Or88a,At4,positive,Grabe 2015 Table 1
+VA1v,Or47b,At4,positive,Grabe 2015 Table 1
+VA2,Or92a,Ab1,positive,Grabe 2015 Table 1
+VA3,Or67b,Ab9,positive,Grabe 2015 Table 1
+VA4,Or85d,Pb3,positive,Grabe 2015 Table 1
+VA5,Or49b,Ab6,positive,Grabe 2015 Table 1
+VA6,Or82a,Ab5,positive,Grabe 2015 Table 1
+VA7l,Or46aA,Pb2,positive,Grabe 2015 Table 1
+VA7m,UNK,UNK,positive,Grabe 2015 Table 1
+VC1,Or33c,Pb2,positive,Grabe 2015 Table 1
+VC2,Or71a,Pb1,positive,Grabe 2015 Table 1
+VC3,Or35a,Ac3,positive,Grabe 2015 Table 1
+VC4,Or67c,Ab7,positive,Grabe 2015 Table 1
+VC5,Ir41a,Ac2,negative,Grabe 2015 Table 1
+VL1,Ir75d,Ac1/2/4,negative,Grabe 2015 Table 1
+VL2a,Ir84a,Ac4,negative,Grabe 2015 Table 1
+VL2p,Ir31a,Ac1,negative,Grabe 2015 Table 1
+VM1,Ir92a,Ac1,negative,Grabe 2015 Table 1
+VM2,Or43b,Ab8,positive,Grabe 2015 Table 1
+VM3,Or9a,Ab8,positive,Grabe 2015 Table 1
+VM4,Ir76a,Ac4,negative,Grabe 2015 Table 1
+VM5d,Or85b,Ab3,positive,Grabe 2015 Table 1
+VM5v,Or98a,Ab7,positive,Grabe 2015 Table 1
+VM7d,Or42a,Pb1,positive,Grabe 2015 Table 1
+VM7v,Or59c,Pb3,positive,Grabe 2015 Table 1
+VP1+VM6,Ir40a,Sac I,negative,Grabe 2015 Table 1
+VP2,hot,Arista,negative,Grabe 2015 Table 1
+VP3,cold,Arista,negative,Grabe 2015 Table 1
+VP4,Ir40a,Sac I,negative,Grabe 2015 Table 1

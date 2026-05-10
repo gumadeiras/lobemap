@@ -56,6 +56,8 @@ The Grabe atlas files are:
 - `data/source/Merged_2-101221a-labels_only_sure_ones_Sensillarcolors.am`:
   Amira material table used for label names and colors.
 - `data/source/220118-glomerular-OBJs.7z`: author-provided OBJ exports.
+- `data/source/grabe_2015_sensory_line_expression.csv`: extracted Table 1
+  Orco-GAL4 innervation calls for the reference table.
 
 Primary atlas citation:
 
