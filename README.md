@@ -29,6 +29,13 @@ driver lines, VFB IDs, and atlas coverage.
 [Open the full table](reference-tables/glomerulus_ground_truth.csv) or the
 [name reconciliation table](reference-tables/glomerulus_name_reconciliation.csv).
 
+## Requirements
+
+- `uv`
+- A desktop environment that can open napari / Qt windows
+
+Python and package dependencies are managed by `uv` from `pyproject.toml`.
+
 ## Start
 
 ```bash
@@ -42,6 +49,13 @@ You can also open one atlas directly:
 
 ```bash
 ./lobemap --atlas flywire
+```
+
+Benton 2025 builds its derived slice cache on first load. To prebuild all
+generated visual data:
+
+```bash
+uv run python scripts/regenerate_visual_data.py
 ```
 
 ## What Is Included

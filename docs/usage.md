@@ -1,10 +1,28 @@
 # How To Use lobemap
 
-Start the viewer:
+## Requirements
+
+- `uv`
+- A desktop environment that can open napari / Qt windows
+
+Python and package dependencies are managed by `uv` from `pyproject.toml`.
+
+## First Run
+
+Install dependencies and start the viewer:
 
 ```bash
+uv sync
 ./lobemap
 ```
+
+Open one atlas directly:
+
+```bash
+./lobemap --atlas benton-2025
+```
+
+## Controls
 
 The right panel has the main controls.
 
