@@ -31,7 +31,8 @@ Run the 2D map in napari:
 ```
 
 The napari view uses the source PDF to create `data/derived/potter_task_2022_map.png`.
-That generated preview is ignored by git and can be rebuilt from the repo root:
+That generated preview is tracked so the viewer works from a fresh checkout,
+and can be rebuilt from the repo root:
 
 ```bash
 uv run python scripts/regenerate_visual_data.py

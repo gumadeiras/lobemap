@@ -11,7 +11,8 @@ Biology 30(16), 3183-3199.e6. DOI: `10.1016/j.cub.2020.06.042`.
 - `data/source/`: self-contained Plotly HTML. Static PDF copies are local-only
   and ignored by git.
 - `data/derived/`: generated cache files used for fast napari slicing. These
-  files are ignored by git and can be rebuilt from source data.
+  files are tracked so the viewer works from a fresh checkout, and can be
+  rebuilt from source data.
 - `slices/`: optional PDF slices generated from the Plotly mesh. These are
   ignored by git.
 - `bates_schlegel_napari.py`: napari label-volume viewer used by the main lobemap
@@ -27,8 +28,8 @@ Biology 30(16), 3183-3199.e6. DOI: `10.1016/j.cub.2020.06.042`.
 
 The viewer uses a generated cache for fast slicing. It displays one label layer,
 one per-plane name-anchor layer, and a scrollable checklist. Neuropil is
-available as a context label and starts hidden. The cache is rebuilt
-automatically if it is missing.
+available as a context label and starts hidden. The cache is tracked in git and
+is rebuilt automatically if it is missing.
 
 Views are named by anatomical slice direction:
 

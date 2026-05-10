@@ -36,8 +36,8 @@ Viewer orientation:
 Derived cache:
 
 - `data/derived/benton_2025_label_volume_256.npz` is generated from the source
-  meshes and ignored by git.
-- Rebuild derived viewer data with:
+  meshes and tracked so the viewer works from a fresh checkout.
+- Rebuild derived viewer data after source-data changes with:
 
 ```bash
 uv run python scripts/regenerate_visual_data.py

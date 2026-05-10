@@ -13,7 +13,8 @@ Run:
 ```
 
 Source data used by the viewer lives in `data/source/` and should be tracked in
-git. Fast cache files are written to `data/derived/` and ignored by git.
+git. Fast cache files are written to `data/derived/` and tracked so the viewer
+works from a fresh checkout.
 
 Coordinate validation lives in `data/validation/`. The viewer uses source
 columns `Y, Z, X` as Dorsal-Ventral, Anterior-Posterior, and Lateral-Medial

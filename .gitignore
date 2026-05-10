@@ -6,7 +6,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 napari.log
-**/data/derived/
 bates-schlegel-2020/slices/
 benton-2025/data/source/*.pdf
 comparative-atlases/data/source/*.pdf

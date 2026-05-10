@@ -49,9 +49,10 @@ JRC2018Unisex opens as a whole-brain template with VFB ROI masks.
 
 ## Generated Data
 
-Generated cache files live in `data/derived/` folders. They are not tracked in
-git. Some viewers build their cache on first load; rebuild all generated visual
-data with:
+Generated cache files live in `data/derived/` folders. They are tracked so the
+viewer works from a fresh checkout without rebuilding caches. Some viewers can
+rebuild their cache on first load if a file is missing; rebuild all generated
+visual data after source-data changes with:
 
 ```bash
 uv run python scripts/regenerate_visual_data.py

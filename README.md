@@ -54,7 +54,9 @@ You can also open one atlas directly:
 ## Generated Data
 
 Some viewers use derived cache files under `data/derived/` for fast startup and
-slicing. They are not tracked in git. Rebuild all generated visual data with:
+slicing. These generated files are tracked so a fresh checkout can open the
+viewer without rebuilding caches. Rebuild all generated visual data after
+source-data changes with:
 
 ```bash
 uv run python scripts/regenerate_visual_data.py
