@@ -5,6 +5,7 @@ import colorsys
 import gzip
 import hashlib
 import re
+import sys
 import webbrowser
 from pathlib import Path
 
@@ -29,6 +30,10 @@ from qtpy.QtWidgets import (
 
 
 WORK_DIR = Path(__file__).resolve().parent
+ROOT = WORK_DIR.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+from volume_helpers import LabelVisibilityFilter  # noqa: E402
+
 SOURCE_DIR = WORK_DIR / "data/source"
 TEMPLATE_ID = "VFB_00101567"
 
@@ -223,6 +228,8 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     mirror_horizontal = False
 
     source_scale = spacing(header)
+    colors = label_colors(sorted(names))
+    label_filter = LabelVisibilityFilter(set(names))
 
     def displayed_scale() -> tuple[float, float, float]:
         return tuple(source_scale[axis] for axis in current_axis_order)
@@ -242,14 +249,14 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     def visible_ids() -> list[int]:
         return [label_id for label_id, name in names.items() if name in visible]
 
-    def filtered_labels() -> np.ndarray:
-        lut = np.zeros(int(labels_source.max()) + 1, dtype=np.uint16)
-        for label_id in visible_ids():
-            lut[label_id] = label_id
-        return lut[labels_source].transpose(current_axis_order)
+    def displayed_labels() -> np.ndarray:
+        return label_filter.apply(
+            labels_source.transpose(current_axis_order),
+            set(visible_ids()),
+        )
 
     def refresh_labels() -> None:
-        labels_layer.data = filtered_labels()
+        labels_layer.data = displayed_labels()
         labels_layer.scale = displayed_scale()
         status.setText(f"{len(visible_ids())} JRC2018Unisex ROIs visible")
 
@@ -337,13 +344,13 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         }
     )
     labels_layer = viewer.add_labels(
-        filtered_labels(),
+        displayed_labels(),
         name="JRC2018Unisex ROI labels",
         opacity=0.48,
         scale=displayed_scale(),
         features=features,
     )
-    labels_layer.color = label_colors(sorted(names))
+    labels_layer.color = colors
 
     show_all = QPushButton("Show all")
     show_none = QPushButton("Show none")

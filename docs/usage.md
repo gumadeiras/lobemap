@@ -9,7 +9,14 @@ Python and package dependencies are managed by `uv` from `pyproject.toml`.
 
 ## First Run
 
-Install dependencies and start the viewer:
+Install from PyPI and start the viewer:
+
+```bash
+pip install lobemap
+lobemap
+```
+
+Or install dependencies from a source checkout and start the viewer:
 
 ```bash
 uv sync
@@ -50,7 +57,9 @@ JRC2018Unisex opens as a whole-brain template with VFB ROI masks.
 ## Generated Data
 
 Generated cache files live in `data/derived/` folders. They are tracked so the
-viewer works from a fresh checkout without rebuilding caches. Some viewers can
+viewer works from a fresh checkout or PyPI install without rebuilding caches.
+The package includes runtime source tables/volumes plus tracked `data/derived/`
+and `data/validation/` caches needed by the installed viewer. Some viewers can
 rebuild their cache on first load if a file is missing; rebuild all generated
 visual data after source-data changes with:
 

@@ -16,6 +16,11 @@ WORK_DIR = Path(__file__).resolve().parent
 ROOT = WORK_DIR.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 from ui_helpers import normalize_sensilla  # noqa: E402
+from volume_helpers import (  # noqa: E402
+    centroid_cache_to_arrays,
+    label_slice_centroids,
+    load_centroid_cache,
+)
 
 DATASET_DIR = WORK_DIR / "data/source/BentonDatasetEV2"
 DERIVED_DIR = WORK_DIR / "data/derived"
@@ -23,7 +28,13 @@ VTM_PATH = DATASET_DIR / "DatasetEV2.seg.vtm"
 COLOR_TABLE_PATH = DATASET_DIR / "DatasetEV2-label_ColorTable.ctbl"
 VOLUME_RESOLUTION = 256
 VOLUME_CACHE = DERIVED_DIR / f"benton_2025_label_volume_{VOLUME_RESOLUTION}.npz"
-CACHE_VERSION = 1
+CACHE_VERSION = 2
+AXIS_ORDERS = {
+    "Dorsal-Ventral": (1, 0, 2),
+    "Anterior-Posterior": (0, 1, 2),
+    "Lateral-Medial": (2, 0, 1),
+}
+REVERSE_AXIS_ORDERS = {(1, 0, 2)}
 
 VTK_DTYPES = {
     "Float32": np.dtype("<f4"),
@@ -67,6 +78,7 @@ class AtlasVolume:
     receptors: dict[int, str]
     sensilla: dict[int, str]
     colors: dict[int, tuple[float, float, float, float]]
+    centroids: dict[tuple[tuple[int, int, int], bool], tuple[np.ndarray, np.ndarray]]
 
 
 def parse_segment_name(raw_name: str) -> tuple[str, str, str]:
@@ -393,6 +405,17 @@ def build_label_volume(meshes: list[Mesh]) -> AtlasVolume:
                 )
                 rasterize_loop(volume_slice, indexed, mesh.label_id)
 
+    label_ids = np.asarray(sorted(mesh.label_id for mesh in meshes), dtype=np.uint16)
+    centroids = {}
+    for axis_order in AXIS_ORDERS.values():
+        labels_for_axis = labels.transpose(axis_order)
+        centroids[(axis_order, False)] = label_slice_centroids(labels_for_axis, label_ids)
+        if axis_order in REVERSE_AXIS_ORDERS:
+            centroids[(axis_order, True)] = label_slice_centroids(
+                np.flip(labels_for_axis, axis=0),
+                label_ids,
+            )
+
     return AtlasVolume(
         labels=labels,
         names={mesh.label_id: mesh.name for mesh in meshes},
@@ -400,13 +423,14 @@ def build_label_volume(meshes: list[Mesh]) -> AtlasVolume:
         receptors={mesh.label_id: mesh.receptor for mesh in meshes},
         sensilla={mesh.label_id: mesh.sensillum for mesh in meshes},
         colors={mesh.label_id: mesh.color for mesh in meshes},
+        centroids=centroids,
     )
 
 
 def save_volume_cache(volume: AtlasVolume) -> None:
     DERIVED_DIR.mkdir(parents=True, exist_ok=True)
     label_ids = np.asarray(sorted(volume.names), dtype=np.uint16)
-    np.savez(
+    np.savez_compressed(
         VOLUME_CACHE,
         labels=volume.labels,
         label_ids=label_ids,
@@ -417,6 +441,7 @@ def save_volume_cache(volume: AtlasVolume) -> None:
         colors=np.asarray([volume.colors[int(i)] for i in label_ids]),
         resolution=np.asarray([VOLUME_RESOLUTION], dtype=np.uint16),
         cache_version=np.asarray([CACHE_VERSION], dtype=np.uint16),
+        **centroid_cache_to_arrays(volume.centroids),
     )
 
 
@@ -446,6 +471,11 @@ def load_volume_cache() -> AtlasVolume | None:
                 label_id: tuple(color)
                 for label_id, color in zip(label_ids, colors, strict=True)
             },
+            centroids=load_centroid_cache(
+                data,
+                list(AXIS_ORDERS.values()),
+                reverse_axes=REVERSE_AXIS_ORDERS,
+            ),
         )
 
 
@@ -478,30 +508,3 @@ def load_metadata(atlas: AtlasVolume) -> dict[str, dict[str, str]]:
         }
         for label_id, glomerulus in atlas.glomeruli.items()
     }
-
-
-def label_slice_centroids(
-    labels: np.ndarray, ids: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    valid_ids = {int(i) for i in ids if i != 0}
-    centroids: list[tuple[float, float, float]] = []
-    centroid_ids: list[int] = []
-    for z in range(labels.shape[0]):
-        ys, xs = np.nonzero(labels[z])
-        if len(ys) == 0:
-            continue
-        values = labels[z, ys, xs].astype(np.int64)
-        max_id = int(values.max())
-        count = np.bincount(values, minlength=max_id + 1)
-        y_sum = np.bincount(values, weights=ys, minlength=max_id + 1)
-        x_sum = np.bincount(values, weights=xs, minlength=max_id + 1)
-        for label_id in np.nonzero(count)[0]:
-            if label_id == 0 or label_id not in valid_ids:
-                continue
-            n = int(count[label_id])
-            centroids.append((float(z), y_sum[label_id] / n, x_sum[label_id] / n))
-            centroid_ids.append(int(label_id))
-
-    if not centroids:
-        return np.empty((0, 3), dtype=float), np.empty((0,), dtype=np.uint16)
-    return np.asarray(centroids, dtype=float), np.asarray(centroid_ids, dtype=np.uint16)

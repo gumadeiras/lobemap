@@ -35,14 +35,6 @@ ATLASES = {
         "label": "FlyWire",
         "module": ROOT / "flywire/flywire_napari.py",
     },
-    "jrc2018unisex": {
-        "label": "JRC2018Unisex",
-        "module": ROOT / "jrc2018unisex/jrc2018unisex_napari.py",
-    },
-    "banc": {
-        "label": "BANC",
-        "module": ROOT / "banc/banc_napari.py",
-    },
     "benton-2025": {
         "label": "Benton 2025",
         "module": ROOT / "benton-2025/benton_2025_napari.py",
@@ -54,6 +46,14 @@ ATLASES = {
     "potter-task-2022": {
         "label": "Potter Task 2022",
         "module": ROOT / "potter-task-2022/potter_task_napari.py",
+    },
+    "jrc2018unisex": {
+        "label": "JRC",
+        "module": ROOT / "jrc2018unisex/jrc2018unisex_napari.py",
+    },
+    "banc": {
+        "label": "BANC",
+        "module": ROOT / "banc/banc_napari.py",
     },
     "vfb": {
         "label": "VFB",

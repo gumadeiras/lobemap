@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 from pathlib import Path
 from zipfile import ZipFile
 import xml.etree.ElementTree as ET
 
+import numpy as np
 import pandas as pd
 
 
@@ -39,6 +41,8 @@ NAME_ALIASES = {
     "DP1": ["DP1l", "DP1m"],
     "VA1": ["VA1d", "VA1v"],
     "VA7": ["VA7l", "VA7m"],
+    "VC3l": ["VC3"],
+    "VC3m": ["VC5"],
     "VL1+DP1l+VC5": ["VL1", "DP1l", "VC5"],
     "VL1+VM1+VL2p": ["VL1", "VM1", "VL2p"],
     "VL2": ["VL2a", "VL2p"],
@@ -285,6 +289,51 @@ def read_potter_table() -> pd.DataFrame:
     return pd.DataFrame(rows[1:], columns=rows[0])
 
 
+def extract_plotly_data(html_path: Path) -> list[dict]:
+    text = html_path.read_text()
+    start = text.index("Plotly.newPlot(")
+    data_start = text.index("[", start)
+    depth = 0
+    in_string = False
+    escaped = False
+    for pos in range(data_start, len(text)):
+        ch = text[pos]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[data_start : pos + 1])
+    raise ValueError(f"Could not find Plotly data array in {html_path}")
+
+
+def read_bates_schlegel_names() -> set[str]:
+    cache = (
+        ROOT
+        / "bates-schlegel-2020/data/derived/bates_schlegel_label_volume_256_glomerulus_bounds_with_neuropil.npz"
+    )
+    if cache.exists():
+        with np.load(cache, allow_pickle=False) as data:
+            return {clean(name) for name in data["names"].astype(str) if clean(name) != "neuropil"}
+
+    html = ROOT / "bates-schlegel-2020/data/source/glomeruli_atlas_interactive.html"
+    return {
+        clean(trace.get("name", ""))
+        for trace in extract_plotly_data(html)
+        if trace.get("type") == "mesh3d" and clean(trace.get("name", "")) != "neuropil"
+    }
+
+
 def source_names() -> dict[str, set[str]]:
     sources = {
         "grabe_2015": set(
@@ -310,11 +359,7 @@ def source_names() -> dict[str, set[str]]:
         ),
         "potter_task_2022": set(read_potter_table()["Glomerulus"]),
         "benton_2025": set(read_benton_table()["glomerulus"]),
-        "bates_schlegel_2020": set(
-            pd.read_csv(ROOT / "hemibrain/data/source/hemibrain_al_microns_materials.csv")[
-                "name"
-            ]
-        ),
+        "bates_schlegel_2020": read_bates_schlegel_names(),
     }
     return {
         key: {clean(value) for value in values if clean(value) not in NON_GLOMERULUS}

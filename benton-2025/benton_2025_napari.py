@@ -35,6 +35,7 @@ from benton_2025_data import (  # noqa: E402
     load_volume,
 )
 from ui_helpers import make_glomerulus_table, set_table_checked  # noqa: E402
+from volume_helpers import LabelVisibilityFilter  # noqa: E402
 
 
 def rotation_matrix(axis: int, degrees: float) -> np.ndarray:
@@ -119,7 +120,8 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     rotation_degrees = {0: 0.0, 1: 0.0, 2: 0.0}
     mirror_vertical = True
     mirror_horizontal = True
-    centroid_cache: dict[tuple[int, int, int, bool], tuple[np.ndarray, np.ndarray]] = {}
+    centroid_cache = dict(atlas.centroids)
+    label_filter = LabelVisibilityFilter(unique_ids)
 
     def visible_ids() -> set[int]:
         return {
@@ -128,17 +130,11 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
             if glomerulus in visible_glomeruli
         }
 
-    def filtered_labels(labels: np.ndarray) -> np.ndarray:
-        lut = np.zeros(int(source_labels.max()) + 1, dtype=np.uint16)
-        for label_id in visible_ids():
-            lut[label_id] = label_id
-        return lut[labels]
-
     def centroids_for_axis(
         axis_order: tuple[int, int, int],
         reverse_axis: bool,
     ) -> tuple[np.ndarray, np.ndarray]:
-        cache_key = (*axis_order, reverse_axis)
+        cache_key = (axis_order, reverse_axis)
         cached = centroid_cache.get(cache_key)
         if cached is None:
             labels = source_labels.transpose(axis_order)
@@ -159,7 +155,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         )
         visible_mask = np.isin(point_ids, list(visible_ids()))
         return (
-            filtered_labels(labels),
+            label_filter.apply(labels, visible_ids()),
             points[visible_mask],
             point_ids[visible_mask].astype(int).tolist(),
         )
@@ -328,6 +324,8 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         if isinstance(value, tuple):
             value = value[0]
         label_id = int(value)
+        if atlas.glomeruli.get(label_id, "") not in visible_glomeruli:
+            return
         parts = [f"{label_id}: {label_name(label_id, atlas)}"]
         if atlas.receptors.get(label_id):
             parts.append(atlas.receptors[label_id])

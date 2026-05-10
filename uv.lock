@@ -669,12 +669,13 @@ wheels = [
 [[package]]
 name = "lobemap"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "matplotlib" },
     { name = "napari", extra = ["pyqt6"] },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "qtpy" },
     { name = "tifffile", version = "2026.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "tifffile", version = "2026.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
@@ -685,6 +686,7 @@ requires-dist = [
     { name = "napari", extras = ["pyqt6"], specifier = ">=0.6.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.2" },
+    { name = "qtpy", specifier = ">=2.4" },
     { name = "tifffile", specifier = ">=2024.8.30" },
 ]
 

@@ -1,6 +1,12 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "lobemap"
 version = "0.1.0"
+description = "napari viewer for Drosophila antennal lobe atlases"
+readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11,<3.13"
 dependencies = [
@@ -8,5 +14,53 @@ dependencies = [
   "napari[pyqt6]>=0.6.0",
   "numpy>=1.26",
   "pandas>=2.2",
+  "qtpy>=2.4",
   "tifffile>=2024.8.30",
+]
+
+[project.scripts]
+lobemap = "lobemap.lobemap:main"
+
+[project.urls]
+Homepage = "https://github.com/gumadeiras/lobemap"
+Repository = "https://github.com/gumadeiras/lobemap"
+
+[tool.setuptools]
+package-dir = { lobemap = "." }
+packages = ["lobemap"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+lobemap = [
+  "lobemap",
+  "paper_pdf_sources.csv",
+  "scripts/*.py",
+  "docs/*.md",
+  "*/README.md",
+  "*/NOTES.md",
+  "*/*.py",
+  "*/scripts/*.py",
+  "reference-tables/*.csv",
+  "reference-tables/scripts/*.py",
+  "*/data/derived/**/*",
+  "*/data/validation/**/*",
+  "banc/data/source/**/*",
+  "door/data/source/**/*",
+  "edmond-fibsem/data/source/**/*",
+  "flywire-codex/data/source/**/*",
+  "flywire/data/source/**/*",
+  "grabe-2015/data/source/*.am",
+  "grabe-2015/data/source/*.csv",
+  "grabe-2015/data/source/*.png",
+  "grabe-2015/data/source/*.tif",
+  "hemibrain/data/source/**/*",
+  "jrc2018unisex/data/source/**/*",
+  "vfb/data/source/**/*",
+]
+
+[tool.setuptools.exclude-package-data]
+lobemap = [
+  "**/.DS_Store",
+  "**/__pycache__/*",
+  "**/*.py[cod]",
 ]

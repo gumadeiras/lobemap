@@ -26,6 +26,12 @@ from qtpy.QtWidgets import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ui_helpers import make_glomerulus_table, normalize_sensilla, set_table_checked  # noqa: E402
+from volume_helpers import (  # noqa: E402
+    LabelVisibilityFilter,
+    centroid_cache_to_arrays,
+    label_slice_centroids,
+    load_centroid_cache,
+)
 
 
 WORK_DIR = Path(__file__).resolve().parent
@@ -34,6 +40,11 @@ SOURCE_DIR = DATA_DIR / "source"
 DERIVED_DIR = DATA_DIR / "derived"
 VOLUME_RESOLUTION = 256
 VOLUME_AXIS_NAMES = ("Dorsal-Ventral", "Anterior-Posterior", "Lateral-Medial")
+AXIS_ORDERS = {
+    "Dorsal-Ventral": (0, 1, 2),
+    "Anterior-Posterior": (1, 0, 2),
+    "Lateral-Medial": (2, 0, 1),
+}
 SOURCE_AXIS_COLUMNS = {
     "hemibrain_al_microns": ("Z", "Y", "X"),
     "flywire_al": ("Y", "Z", "X"),
@@ -64,6 +75,7 @@ class AtlasVolume:
     names: dict[int, str]
     colors: dict[int, tuple[float, float, float, float]]
     source_axis_columns: tuple[str, str, str]
+    centroids: dict[tuple[tuple[int, int, int], bool], tuple[np.ndarray, np.ndarray]]
 
 
 def parse_hex_color(value: str) -> tuple[float, float, float, float]:
@@ -290,11 +302,23 @@ def build_label_volume(meshes: list[Mesh], stem: str) -> AtlasVolume:
                 )
                 rasterize_loop(volume_slice, indexed, mesh.label_id)
 
+    label_ids = np.asarray(sorted(mesh.label_id for mesh in meshes), dtype=np.uint16)
+    centroids = {}
+    for axis_order in AXIS_ORDERS.values():
+        lateral_axis = axis_order.index(2) if stem == "flywire_al" else None
+        hemisphere_axis = lateral_axis if lateral_axis in (1, 2) else None
+        centroids[(axis_order, False)] = label_slice_centroids(
+            labels.transpose(axis_order),
+            label_ids,
+            hemisphere_axis=hemisphere_axis,
+        )
+
     return AtlasVolume(
         labels=labels,
         names={mesh.label_id: mesh.name for mesh in meshes},
         colors={mesh.label_id: mesh.color for mesh in meshes},
         source_axis_columns=source_axis_columns(stem),
+        centroids=centroids,
     )
 
 
@@ -306,16 +330,17 @@ def volume_cache(stem: str) -> Path:
 
 def save_volume_cache(stem: str, volume: AtlasVolume) -> None:
     DERIVED_DIR.mkdir(parents=True, exist_ok=True)
-    np.savez(
+    np.savez_compressed(
         volume_cache(stem),
         labels=volume.labels,
         label_ids=np.asarray(sorted(volume.names), dtype=np.uint16),
         names=np.asarray([volume.names[i] for i in sorted(volume.names)]),
         colors=np.asarray([volume.colors[i] for i in sorted(volume.names)]),
         resolution=np.asarray([VOLUME_RESOLUTION], dtype=np.uint16),
-        cache_version=np.asarray([3 if stem == "flywire_al" else 1], dtype=np.uint16),
+        cache_version=np.asarray([4 if stem == "flywire_al" else 2], dtype=np.uint16),
         source_axis_columns=np.asarray(volume.source_axis_columns),
         volume_axis_names=np.asarray(VOLUME_AXIS_NAMES),
+        **centroid_cache_to_arrays(volume.centroids),
     )
 
 
@@ -347,6 +372,7 @@ def load_volume_cache(stem: str) -> AtlasVolume | None:
                 for label_id, color in zip(label_ids, colors_array, strict=True)
             },
             source_axis_columns=cached_axis_columns,
+            centroids=load_centroid_cache(data, list(AXIS_ORDERS.values())),
         )
 
 
@@ -410,55 +436,6 @@ def load_metadata() -> dict[str, dict[str, str]]:
     return metadata
 
 
-def label_slice_centroids(
-    labels: np.ndarray,
-    ids: np.ndarray,
-    hemisphere_axis: int | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    valid_ids = {int(i) for i in ids if i != 0}
-    centroids: list[tuple[float, float, float]] = []
-    centroid_ids: list[int] = []
-    for z in range(labels.shape[0]):
-        ys, xs = np.nonzero(labels[z])
-        if len(ys) == 0:
-            continue
-        values = labels[z, ys, xs].astype(np.int64)
-        max_id = int(values.max())
-        count = np.bincount(values, minlength=max_id + 1)
-        y_sum = np.bincount(values, weights=ys, minlength=max_id + 1)
-        x_sum = np.bincount(values, weights=xs, minlength=max_id + 1)
-        for label_id in np.nonzero(count)[0]:
-            if label_id == 0 or label_id not in valid_ids:
-                continue
-            label_mask = values == label_id
-            if hemisphere_axis == 1:
-                midline = (labels.shape[1] - 1) / 2.0
-                side_masks = (ys[label_mask] <= midline, ys[label_mask] > midline)
-            elif hemisphere_axis == 2:
-                midline = (labels.shape[2] - 1) / 2.0
-                side_masks = (xs[label_mask] <= midline, xs[label_mask] > midline)
-            else:
-                side_masks = (np.ones(int(count[label_id]), dtype=bool),)
-
-            label_ys = ys[label_mask]
-            label_xs = xs[label_mask]
-            for side_mask in side_masks:
-                if not np.any(side_mask):
-                    continue
-                centroids.append(
-                    (
-                        float(z),
-                        float(np.mean(label_ys[side_mask])),
-                        float(np.mean(label_xs[side_mask])),
-                    )
-                )
-                centroid_ids.append(int(label_id))
-
-    if not centroids:
-        return np.empty((0, 3), dtype=float), np.empty((0,), dtype=np.uint16)
-    return np.asarray(centroids, dtype=float), np.asarray(centroid_ids, dtype=np.uint16)
-
-
 def rotation_matrix(axis: int, degrees: float) -> np.ndarray:
     radians = np.deg2rad(degrees)
     sin = np.sin(radians)
@@ -511,6 +488,7 @@ def load_atlas(
     atlas = load_volume(stem)
     source_labels = atlas.labels
     unique_ids = np.asarray(sorted(i for i in np.unique(source_labels) if i != 0))
+    all_label_ids = unique_ids.copy()
     metadata = load_metadata()
     features = pd.DataFrame(
         [
@@ -533,16 +511,13 @@ def load_atlas(
     visible_names.difference_update(atlas.names[label_id] for label_id in fixed_ids)
     label_ids = [label_id for label_id in unique_ids if int(label_id) not in fixed_ids]
     unique_ids = np.asarray(label_ids, dtype=unique_ids.dtype)
-    axis_orders = {
-        "Dorsal-Ventral": (0, 1, 2),
-        "Anterior-Posterior": (1, 0, 2),
-        "Lateral-Medial": (2, 0, 1),
-    }
+    axis_orders = AXIS_ORDERS
     current_axis_order = axis_orders["Dorsal-Ventral"]
     rotation_degrees = {0: 0.0, 1: 0.0, 2: 0.0}
     mirror_vertical = default_mirror_vertical
     mirror_horizontal = False
-    centroid_cache: dict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = {}
+    centroid_cache = dict(atlas.centroids)
+    label_filter = LabelVisibilityFilter(all_label_ids)
 
     def visible_ids() -> set[int]:
         return {
@@ -551,16 +526,11 @@ def load_atlas(
             if name in visible_names
         } | fixed_ids
 
-    def filtered_labels(labels: np.ndarray) -> np.ndarray:
-        lut = np.zeros(int(source_labels.max()) + 1, dtype=np.uint16)
-        for label_id in visible_ids():
-            lut[label_id] = label_id
-        return lut[labels]
-
     def centroids_for_axis(
         axis_order: tuple[int, int, int],
     ) -> tuple[np.ndarray, np.ndarray]:
-        cached = centroid_cache.get(axis_order)
+        cache_key = (axis_order, False)
+        cached = centroid_cache.get(cache_key)
         if cached is None:
             lateral_axis = axis_order.index(2) if stem == "flywire_al" else None
             hemisphere_axis = lateral_axis if lateral_axis in (1, 2) else None
@@ -569,7 +539,7 @@ def load_atlas(
                 unique_ids,
                 hemisphere_axis=hemisphere_axis,
             )
-            centroid_cache[axis_order] = cached
+            centroid_cache[cache_key] = cached
         return cached
 
     def current_scene_data() -> tuple[np.ndarray, np.ndarray, list[int]]:
@@ -577,7 +547,7 @@ def load_atlas(
         points, point_ids = centroids_for_axis(current_axis_order)
         visible_mask = np.isin(point_ids, list(visible_ids()))
         return (
-            filtered_labels(labels),
+            label_filter.apply(labels, visible_ids(), always_visible_ids=fixed_ids),
             points[visible_mask],
             point_ids[visible_mask].astype(int).tolist(),
         )
@@ -789,6 +759,8 @@ def load_atlas(
             value = value[0]
         label_id = int(value)
         name = label_name(label_id, atlas.names)
+        if label_id not in visible_ids():
+            return
         meta = metadata.get(name, {})
         parts = [f"{label_id}: {name}"]
         if meta.get("receptor"):

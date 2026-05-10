@@ -30,6 +30,12 @@ WORK_DIR = Path(__file__).resolve().parent
 ROOT = WORK_DIR.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 from ui_helpers import make_glomerulus_table, set_table_checked  # noqa: E402
+from volume_helpers import (  # noqa: E402
+    LabelVisibilityFilter,
+    centroid_cache_to_arrays,
+    label_slice_centroids,
+    load_centroid_cache,
+)
 
 SOURCE_HTML = WORK_DIR / "data/source/glomeruli_atlas_interactive.html"
 DERIVED_DIR = WORK_DIR / "data/derived"
@@ -39,6 +45,12 @@ VOLUME_CACHE = DERIVED_DIR / (
 )
 BATES_TO_GRABE_FLIPS = (False, False, False)
 NEUROPIL_NAME = "neuropil"
+AXIS_ORDERS = {
+    "Anterior-Posterior": (0, 1, 2),
+    "Dorsal-Ventral": (1, 0, 2),
+    "Lateral-Medial": (2, 0, 1),
+}
+CACHE_VERSION = 2
 RGBA_PATTERN = re.compile(
     r"rgba\(\s*([0-9.]+),\s*([0-9.]+),\s*([0-9.]+),\s*([0-9.]+)\s*\)"
 )
@@ -59,6 +71,7 @@ class AtlasVolume:
     labels: np.ndarray
     names: dict[int, str]
     colors: dict[int, tuple[float, float, float, float]]
+    centroids: dict[tuple[tuple[int, int, int], bool], tuple[np.ndarray, np.ndarray]]
 
 
 def extract_plotly_data(html_path: Path) -> list[dict]:
@@ -319,22 +332,31 @@ def build_label_volume(meshes: list[Mesh]) -> AtlasVolume:
                 )
                 rasterize_loop(volume_slice, indexed, mesh.label_id)
 
+    label_ids = np.asarray(sorted(mesh.label_id for mesh in meshes), dtype=np.uint16)
+    centroids = {
+        (axis_order, False): label_slice_centroids(labels.transpose(axis_order), label_ids)
+        for axis_order in AXIS_ORDERS.values()
+    }
+
     return AtlasVolume(
         labels=labels,
         names={mesh.label_id: mesh.name for mesh in meshes},
         colors={mesh.label_id: mesh.color for mesh in meshes},
+        centroids=centroids,
     )
 
 
 def save_volume_cache(volume: AtlasVolume) -> None:
     DERIVED_DIR.mkdir(parents=True, exist_ok=True)
-    np.savez(
+    np.savez_compressed(
         VOLUME_CACHE,
         labels=volume.labels,
         label_ids=np.asarray(sorted(volume.names), dtype=np.uint16),
         names=np.asarray([volume.names[i] for i in sorted(volume.names)]),
         colors=np.asarray([volume.colors[i] for i in sorted(volume.names)]),
         resolution=np.asarray([VOLUME_RESOLUTION], dtype=np.uint16),
+        cache_version=np.asarray([CACHE_VERSION], dtype=np.uint16),
+        **centroid_cache_to_arrays(volume.centroids),
     )
 
 
@@ -344,6 +366,8 @@ def load_volume_cache() -> AtlasVolume | None:
     with np.load(VOLUME_CACHE, allow_pickle=False) as data:
         resolution = int(data["resolution"][0])
         if resolution != VOLUME_RESOLUTION:
+            return None
+        if "cache_version" not in data.files or int(data["cache_version"][0]) < 1:
             return None
         label_ids = data["label_ids"].astype(int).tolist()
         names_array = data["names"].astype(str).tolist()
@@ -355,6 +379,7 @@ def load_volume_cache() -> AtlasVolume | None:
                 label_id: tuple(color)
                 for label_id, color in zip(label_ids, colors_array, strict=True)
             },
+            centroids=load_centroid_cache(data, list(AXIS_ORDERS.values())),
         )
 
 
@@ -379,34 +404,6 @@ def label_name(label_id: int, names: dict[int, str]) -> str:
     if label_id == 0:
         return "background"
     return names.get(label_id, f"unknown {label_id}")
-
-
-def label_slice_centroids(
-    labels: np.ndarray, ids: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    valid_ids = {int(i) for i in ids if i != 0}
-    centroids: list[tuple[float, float, float]] = []
-    centroid_ids: list[int] = []
-    for z in range(labels.shape[0]):
-        ys, xs = np.nonzero(labels[z])
-        if len(ys) == 0:
-            continue
-        values = labels[z, ys, xs].astype(np.int64)
-        max_id = int(values.max())
-        count = np.bincount(values, minlength=max_id + 1)
-        y_sum = np.bincount(values, weights=ys, minlength=max_id + 1)
-        x_sum = np.bincount(values, weights=xs, minlength=max_id + 1)
-
-        for label_id in np.nonzero(count)[0]:
-            if label_id == 0 or label_id not in valid_ids:
-                continue
-            n = int(count[label_id])
-            centroids.append((float(z), y_sum[label_id] / n, x_sum[label_id] / n))
-            centroid_ids.append(int(label_id))
-
-    if not centroids:
-        return np.empty((0, 3), dtype=float), np.empty((0,), dtype=np.uint16)
-    return np.asarray(centroids, dtype=float), np.asarray(centroid_ids, dtype=np.uint16)
 
 
 def rotation_matrix(axis: int, degrees: float) -> np.ndarray:
@@ -468,16 +465,13 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     visible_names = {
         name for name in atlas.names.values() if name != NEUROPIL_NAME
     }
-    axis_orders = {
-        "Anterior-Posterior": (0, 1, 2),
-        "Dorsal-Ventral": (1, 0, 2),
-        "Lateral-Medial": (2, 0, 1),
-    }
+    axis_orders = AXIS_ORDERS
     current_axis_order = axis_orders["Dorsal-Ventral"]
     rotation_degrees = {0: 0.0, 1: 0.0, 2: 0.0}
     mirror_vertical = False
     mirror_horizontal = False
-    centroid_cache: dict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = {}
+    centroid_cache = dict(atlas.centroids)
+    label_filter = LabelVisibilityFilter(unique_ids)
 
     def visible_ids() -> set[int]:
         return {
@@ -486,21 +480,16 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
             if name in visible_names
         }
 
-    def filtered_labels(labels: np.ndarray) -> np.ndarray:
-        lut = np.zeros(int(source_labels.max()) + 1, dtype=np.uint16)
-        for label_id in visible_ids():
-            lut[label_id] = label_id
-        return lut[labels]
-
     def centroids_for_axis(
         axis_order: tuple[int, int, int],
     ) -> tuple[np.ndarray, np.ndarray]:
-        cached = centroid_cache.get(axis_order)
+        cache_key = (axis_order, False)
+        cached = centroid_cache.get(cache_key)
         if cached is None:
             cached = label_slice_centroids(
                 source_labels.transpose(axis_order), unique_ids
             )
-            centroid_cache[axis_order] = cached
+            centroid_cache[cache_key] = cached
         return cached
 
     def current_scene_data() -> tuple[np.ndarray, np.ndarray, list[int]]:
@@ -508,7 +497,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         points, point_ids = centroids_for_axis(current_axis_order)
         visible_mask = np.isin(point_ids, list(visible_ids()))
         return (
-            filtered_labels(labels),
+            label_filter.apply(labels, visible_ids()),
             points[visible_mask],
             point_ids[visible_mask].astype(int).tolist(),
         )
@@ -687,6 +676,8 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
             value = value[0]
         label_id = int(value)
         name = label_name(label_id, atlas.names)
+        if name not in visible_names:
+            return
         viewer.status = f"{label_id}: {name}"
         hover_label.setText(f"{label_id}: {name}")
 

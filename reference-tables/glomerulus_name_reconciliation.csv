@@ -38,7 +38,9 @@ VA7l,VA7l,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter
 VA7m,VA7m,direct,grabe_2015; hemibrain; flywire; door_mappings; potter_task_2022; benton_2025; bates_schlegel_2020
 VC1,VC1,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter_task_2022; benton_2025; bates_schlegel_2020
 VC2,VC2,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter_task_2022; benton_2025; bates_schlegel_2020
-VC3,VC3,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter_task_2022; benton_2025; bates_schlegel_2020
+VC3,VC3,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter_task_2022; benton_2025
+VC3l,VC3,alias,bates_schlegel_2020
+VC3m,VC5,alias,bates_schlegel_2020
 VC4,VC4,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter_task_2022; benton_2025; bates_schlegel_2020
 VC5,VC5,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter_task_2022; benton_2025; bates_schlegel_2020
 VL1,VL1,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter_task_2022; benton_2025; bates_schlegel_2020
@@ -52,7 +54,7 @@ VM3,VM3,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter_t
 VM4,VM4,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter_task_2022; benton_2025; bates_schlegel_2020
 VM5d,VM5d,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter_task_2022; benton_2025; bates_schlegel_2020
 VM5v,VM5v,direct,grabe_2015; hemibrain; flywire; door_map; door_mappings; potter_task_2022; benton_2025; bates_schlegel_2020
-VM6,VM6,direct,grabe_2015; hemibrain; flywire; benton_2025; bates_schlegel_2020
+VM6,VM6,direct,grabe_2015; hemibrain; flywire; benton_2025
 VM6l*(new),VM6l*(new),direct,potter_task_2022
 VM6m (new),VM6m (new),direct,potter_task_2022
 VM6v (VM6),VM6v (VM6),direct,potter_task_2022

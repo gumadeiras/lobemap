@@ -30,6 +30,7 @@ WORK_DIR = Path(__file__).resolve().parent
 ROOT = WORK_DIR.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 from ui_helpers import make_glomerulus_table, set_table_checked  # noqa: E402
+from volume_helpers import LabelVisibilityFilter  # noqa: E402
 
 DATA_DIR = WORK_DIR / "data"
 SOURCE_DIR = DATA_DIR / "source"
@@ -259,6 +260,11 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         ]
     )
     groups = group_ids_by_short_name(source_labels, materials)
+    label_colors = {
+        int(label_id): (*materials[int(label_id) + 1].color, 0.55)
+        for label_id in unique_ids
+        if int(label_id) + 1 in materials
+    }
     visible_group_names = set(groups)
     axis_orders = {
         "Dorsal-Ventral": (0, 1, 2),
@@ -270,15 +276,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     mirror_vertical = False
     mirror_horizontal = False
     centroid_cache: dict[tuple[int, int, int], tuple[np.ndarray, np.ndarray]] = {}
-
-    def filtered_labels(labels: np.ndarray) -> np.ndarray:
-        lut = np.zeros(int(source_labels.max()) + 1, dtype=np.uint16)
-        visible_ids = set().union(
-            *(set(groups[name]) for name in visible_group_names)
-        ) if visible_group_names else set()
-        for label_id in visible_ids:
-            lut[label_id] = label_id
-        return lut[labels]
+    label_filter = LabelVisibilityFilter(unique_ids)
 
     def centroids_for_axis(
         axis_order: tuple[int, int, int],
@@ -301,7 +299,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         visible_mask = np.isin(point_ids, list(visible_ids))
         return (
             image,
-            filtered_labels(labels),
+            label_filter.apply(labels, visible_ids),
             points[visible_mask],
             point_ids[visible_mask].astype(int).tolist(),
         )
@@ -323,6 +321,7 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         opacity=0.55,
         features=features,
     )
+    labels_layer.color = label_colors
 
     points_layer = viewer.add_points(
         anchor_points,
@@ -487,6 +486,8 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         if isinstance(value, tuple):
             value = value[0]
         label_id = int(value)
+        if label_short_name(label_id, materials) not in visible_group_names:
+            return
         name = label_name(label_id, materials)
         viewer.status = f"{label_id}: {name}"
         hover_label.setText(f"{label_id}: {name}")

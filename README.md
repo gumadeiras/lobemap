@@ -58,6 +58,15 @@ Python and package dependencies are managed by `uv` from `pyproject.toml`.
 
 ## Start
 
+From PyPI:
+
+```bash
+pip install lobemap
+lobemap
+```
+
+From a source checkout:
+
 ```bash
 uv sync
 ./lobemap
@@ -75,8 +84,10 @@ You can also open one atlas directly:
 
 Some viewers use derived cache files under `data/derived/` for fast startup and
 slicing. These generated files are tracked so a fresh checkout can open the
-viewer without rebuilding caches. Rebuild all generated visual data after
-source-data changes with:
+viewer without rebuilding caches. The PyPI package includes runtime source
+tables/volumes plus tracked `data/derived/` and `data/validation/` caches needed
+by the installed viewer. Rebuild all generated visual data after source-data
+changes with:
 
 ```bash
 uv run python scripts/regenerate_visual_data.py
