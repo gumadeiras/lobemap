@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.2 - 2026-05-11
+
+### Changes
+
+- Increased Grabe 2015 slice label size to make glomerulus labels easier to read.
+
 ## 0.1.1 - 2026-05-10
 
 ### Changes
