@@ -40,6 +40,7 @@ GRAYSCALE_TIF = SOURCE_DIR / "invivoALstack.tif"
 LABEL_TIF = SOURCE_DIR / "Merged_2-101221a-labels_only_sure_ones_Sensillarcolors.tif"
 AMIRA_LABELS = SOURCE_DIR / "Merged_2-101221a-labels_only_sure_ones_Sensillarcolors.am"
 MATERIALS_CSV = DERIVED_DIR / "al_atlas_materials.csv"
+LABEL_TEXT_SIZE = 12
 
 warnings.filterwarnings(
     "ignore",
@@ -323,20 +324,24 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     )
     labels_layer.color = label_colors
 
-    points_layer = viewer.add_points(
-        anchor_points,
-        name="slice name anchors",
-        size=0.0,
-        features=pd.DataFrame(
+    def anchor_features(anchor_ids: list[int]) -> pd.DataFrame:
+        return pd.DataFrame(
             {
                 "label_id": anchor_ids,
                 "name": [label_name(i, materials) for i in anchor_ids],
                 "short_name": [label_short_name(i, materials) for i in anchor_ids],
             }
-        ),
+        )
+
+    point_features = anchor_features(anchor_ids)
+    points_layer = viewer.add_points(
+        anchor_points,
+        name="slice name anchors",
+        size=0.0,
+        features=point_features,
         text={
             "string": "{short_name}",
-            "size": 9,
+            "size": LABEL_TEXT_SIZE,
             "color": "white",
             "anchor": "center",
         },
@@ -355,14 +360,9 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         image, labels, anchor_points, anchor_ids = current_scene_data()
         image_layer.data = image
         labels_layer.data = labels
+        point_features = anchor_features(anchor_ids)
         points_layer.data = anchor_points
-        points_layer.features = pd.DataFrame(
-            {
-                "label_id": anchor_ids,
-                "name": [label_name(i, materials) for i in anchor_ids],
-                "short_name": [label_short_name(i, materials) for i in anchor_ids],
-            }
-        )
+        points_layer.features = point_features
         hover_label.setText(f"{len(visible_group_names)} glomeruli visible")
 
     def apply_rotation_transform() -> None:
