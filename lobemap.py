@@ -6,15 +6,10 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import napari
-from qtpy.QtCore import QTimer
-from qtpy.QtWidgets import (
-    QComboBox,
-    QLabel,
-    QScrollArea,
-    QVBoxLayout,
-    QWidget,
-)
+try:
+    from . import __version__
+except ImportError:
+    from __init__ import __version__
 
 
 ROOT = Path(__file__).resolve().parent
@@ -90,7 +85,18 @@ def maximize_viewer(viewer: napari.Viewer) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="lobemap", description="Open lobemap in napari.")
     parser.add_argument("--atlas", choices=sorted(ATLASES), default="grabe-2015")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args()
+
+    import napari
+    from qtpy.QtCore import QTimer
+    from qtpy.QtWidgets import (
+        QComboBox,
+        QLabel,
+        QScrollArea,
+        QVBoxLayout,
+        QWidget,
+    )
 
     viewer = napari.Viewer(title="lobemap", ndisplay=2)
     atlas_controls = QVBoxLayout()

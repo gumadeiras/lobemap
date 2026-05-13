@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changes
+
+- Added a `lobemap --version` option for package install checks.
+
 ## 0.1.2 - 2026-05-11
 
 ### Changes
