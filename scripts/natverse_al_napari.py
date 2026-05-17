@@ -25,7 +25,12 @@ from qtpy.QtWidgets import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ui_helpers import make_glomerulus_table, normalize_sensilla, set_table_checked  # noqa: E402
+from ui_helpers import (  # noqa: E402
+    make_glomerulus_preset_combo,
+    make_glomerulus_table,
+    normalize_sensilla,
+    set_table_checked,
+)
 from volume_helpers import (  # noqa: E402
     LabelVisibilityFilter,
     centroid_cache_to_arrays,
@@ -717,6 +722,9 @@ def load_atlas(
 
     table_names = sorted(set(visible_names))
     table = make_glomerulus_table(table_names, visible_names, metadata, on_glomerulus_toggled)
+    preset_combo = make_glomerulus_preset_combo(
+        table_names, visible_names, table, refresh_layers
+    )
 
     panel = QWidget()
     layout = QVBoxLayout()
@@ -743,6 +751,8 @@ def load_atlas(
     buttons.addWidget(show_all_button)
     buttons.addWidget(show_none_button)
     layout.addLayout(buttons)
+    layout.addWidget(QLabel("Line preset"))
+    layout.addWidget(preset_combo)
     layout.addWidget(table)
     layout.addWidget(hover_label)
     panel.setLayout(layout)

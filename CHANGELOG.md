@@ -2,8 +2,11 @@
 
 ## Unreleased
 
+## 0.1.3 - 2026-05-16
+
 ### Changes
 
+- Added driver-line glomerulus presets, including `Orco-GAL4 & GH146-GAL4`, to atlas glomerulus tables.
 - Added a `lobemap --version` option for package install checks.
 
 ## 0.1.2 - 2026-05-11

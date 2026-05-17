@@ -34,7 +34,11 @@ from benton_2025_data import (  # noqa: E402
     load_metadata,
     load_volume,
 )
-from ui_helpers import make_glomerulus_table, set_table_checked  # noqa: E402
+from ui_helpers import (  # noqa: E402
+    make_glomerulus_preset_combo,
+    make_glomerulus_table,
+    set_table_checked,
+)
 from volume_helpers import LabelVisibilityFilter  # noqa: E402
 
 
@@ -274,11 +278,15 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     show_all_button.clicked.connect(show_all)
     show_none_button.clicked.connect(show_none)
 
+    table_names = sorted(set(atlas.glomeruli.values()))
     table = make_glomerulus_table(
-        sorted(set(atlas.glomeruli.values())),
+        table_names,
         visible_glomeruli,
         load_metadata(atlas),
         on_glomerulus_toggled,
+    )
+    preset_combo = make_glomerulus_preset_combo(
+        table_names, visible_glomeruli, table, refresh_layers
     )
 
     panel = QWidget()
@@ -309,6 +317,8 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     buttons.addWidget(show_all_button)
     buttons.addWidget(show_none_button)
     layout.addLayout(buttons)
+    layout.addWidget(QLabel("Line preset"))
+    layout.addWidget(preset_combo)
     layout.addWidget(table)
     layout.addWidget(hover_label)
     panel.setLayout(layout)

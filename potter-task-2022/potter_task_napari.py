@@ -16,7 +16,11 @@ from qtpy.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
 WORK_DIR = Path(__file__).resolve().parent
 ROOT = WORK_DIR.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-from ui_helpers import load_master_metadata, make_glomerulus_table  # noqa: E402
+from ui_helpers import (  # noqa: E402
+    load_master_metadata,
+    make_glomerulus_preset_combo,
+    make_glomerulus_table,
+)
 
 SOURCE_DIR = WORK_DIR / "data/source"
 DERIVED_DIR = WORK_DIR / "data/derived"
@@ -72,7 +76,16 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
         image_layer.affine = Affine(linear_matrix=matrix, translate=translate, ndim=ndim)
 
     names = sorted(metadata)
-    table = make_glomerulus_table(names, set(names), metadata, lambda _name, _checked: None)
+    visible_names = set(names)
+
+    def on_glomerulus_toggled(name: str, checked: bool) -> None:
+        if checked:
+            visible_names.add(name)
+        else:
+            visible_names.discard(name)
+
+    table = make_glomerulus_table(names, visible_names, metadata, on_glomerulus_toggled)
+    preset_combo = make_glomerulus_preset_combo(names, visible_names, table)
     vertical_checkbox = QCheckBox("Mirror vertical")
     horizontal_checkbox = QCheckBox("Mirror horizontal")
     vertical_checkbox.toggled.connect(lambda _checked: set_mirror())
@@ -84,6 +97,8 @@ def load_atlas(viewer: napari.Viewer) -> QWidget:
     layout.addWidget(QLabel(SOURCE_PDF.name))
     layout.addWidget(vertical_checkbox)
     layout.addWidget(horizontal_checkbox)
+    layout.addWidget(QLabel("Line preset"))
+    layout.addWidget(preset_combo)
     layout.addWidget(table)
     panel.setLayout(layout)
     return panel
