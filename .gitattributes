@@ -9,4 +9,3 @@
 *.ps -whitespace
 *.tif binary
 *.html -whitespace
-**/data/** -text whitespace=cr-at-eol
