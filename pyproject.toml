@@ -44,7 +44,7 @@ Issues = "https://github.com/gumadeiras/lobemap/issues"
 [tool.setuptools]
 package-dir = { lobemap = "." }
 packages = ["lobemap"]
-include-package-data = true
+include-package-data = false
 
 [tool.setuptools.package-data]
 lobemap = [
