@@ -2,8 +2,15 @@
 
 ## Unreleased
 
-- Moved all dataset files under `datasets/` and kept installed atlas data available without downloads or cache generation.
+## 0.1.4 - 2026-08-20
+
+### Fixes
+
 - Corrected GH146-GAL4 status for V, VM5v, VP2, and VP3 from the Grabe source tables.
+
+### Changes
+
+- Moved all dataset files under `datasets/` and kept installed atlas data available without downloads or cache generation.
 
 ## 0.1.3 - 2026-05-16
 
