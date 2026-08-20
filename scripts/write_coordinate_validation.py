@@ -9,6 +9,7 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
+DATASETS_DIR = ROOT / "datasets"
 DATASETS = {
     "hemibrain": {
         "stem": "hemibrain_al_microns",
@@ -55,8 +56,8 @@ VIEWER_AXIS_NAMES = ("Dorsal-Ventral", "Anterior-Posterior", "Lateral-Medial")
 
 
 def write_dataset_validation(dataset: str, config: dict[str, object]) -> None:
-    source_dir = ROOT / dataset / "data/source"
-    out_dir = ROOT / dataset / "data/validation"
+    source_dir = DATASETS_DIR / dataset / "data/source"
+    out_dir = DATASETS_DIR / dataset / "data/validation"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     stem = str(config["stem"])
@@ -98,14 +99,14 @@ def write_dataset_validation(dataset: str, config: dict[str, object]) -> None:
         writer.writerows(rows)
 
     cache = (
-        ROOT
+        DATASETS_DIR
         / dataset
         / "data"
         / "derived"
         / f"{stem}_label_volume_256.npz"
     )
     neuropil_cache = (
-        ROOT
+        DATASETS_DIR
         / dataset
         / "data"
         / "derived"

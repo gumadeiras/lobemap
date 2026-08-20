@@ -4,11 +4,11 @@ lobemap is a viewer and reference table built from public atlas resources. This
 page lists where the tracked data came from.
 
 Paper PDFs are not tracked in git. Their links are listed in
-[`paper_pdf_sources.csv`](../paper_pdf_sources.csv).
+[`paper_pdf_sources.csv`](../datasets/paper_pdf_sources.csv).
 
 ## Grabe 2015
 
-Folder: [`grabe-2015/`](../grabe-2015/)
+Folder: [`grabe-2015/`](../datasets/grabe-2015/)
 
 Used for the in vivo 3D antennal lobe atlas, image stack, label volume, OBJ
 exports, and supplemental PN expression tables.
@@ -27,7 +27,7 @@ archive, and extracted supplemental table images.
 
 ## Bates Schlegel 2020
 
-Folder: [`bates-schlegel-2020/`](../bates-schlegel-2020/)
+Folder: [`bates-schlegel-2020/`](../datasets/bates-schlegel-2020/)
 
 Used for the Bates Schlegel web atlas and fast napari slicing cache.
 
@@ -39,7 +39,7 @@ Source:
 
 ## hemibrain
 
-Folder: [`hemibrain/`](../hemibrain/)
+Folder: [`hemibrain/`](../datasets/hemibrain/)
 
 Used for antennal lobe glomerulus meshes.
 
@@ -49,7 +49,7 @@ Source:
 
 ## FlyWire
 
-Folder: [`flywire/`](../flywire/)
+Folder: [`flywire/`](../datasets/flywire/)
 
 Used for the FlyWire reference glomerulus mesh and both antennal lobe neuropil
 meshes. The glomerulus surfaces are exported reference meshes in FlyWire/FAFB
@@ -71,7 +71,7 @@ tracked neuropil meshes are source meshes for both `AL_L` and `AL_R`.
 
 ## DoOR
 
-Folder: [`door/`](../door/)
+Folder: [`door/`](../datasets/door/)
 
 Used for odor response tables, receptor mapping, sensilla, and the 2D DoOR
 glomerulus map.
@@ -84,7 +84,7 @@ Source:
 
 ## Potter Task 2022
 
-Folder: [`potter-task-2022/`](../potter-task-2022/)
+Folder: [`potter-task-2022/`](../datasets/potter-task-2022/)
 
 Used for the 2D antennal lobe map and chemosensory receptor summary table.
 
@@ -98,7 +98,7 @@ Sources:
 
 ## Virtual Fly Brain
 
-Folder: [`vfb/`](../vfb/)
+Folder: [`vfb/`](../datasets/vfb/)
 
 Used for glomerulus names, FBbt IDs, definitions, synonyms, and VFB links.
 
@@ -108,7 +108,7 @@ Source:
 
 ## FlyWire Codex
 
-Folder: [`flywire-codex/`](../flywire-codex/)
+Folder: [`flywire-codex/`](../datasets/flywire-codex/)
 
 Used for FlyWire v783 release metadata and proofread root IDs.
 
@@ -119,7 +119,7 @@ Source:
 
 ## JRC2018Unisex
 
-Folder: [`jrc2018unisex/`](../jrc2018unisex/)
+Folder: [`jrc2018unisex/`](../datasets/jrc2018unisex/)
 
 Used for the whole-brain JRC2018Unisex template and VFB ROI label masks.
 lobemap tracks the VFB NRRD volumes in `data/source/vfb/` plus a composed ROI
@@ -136,7 +136,7 @@ Sources:
 
 ## BANC
 
-Folder: [`banc/`](../banc/)
+Folder: [`banc/`](../datasets/banc/)
 
 Used for BANC links and olfactory Neuroglancer states. lobemap does not include
 BANC antennal-lobe glomerulus meshes yet because a public BANC glomerulus
@@ -156,7 +156,7 @@ Sources:
 
 ## Benton 2025
 
-Folder: [`benton-2025/`](../benton-2025/)
+Folder: [`benton-2025/`](../datasets/benton-2025/)
 
 Used for the Dataset EV2 antennal lobe segmentation viewer. lobemap reads the
 3D Slicer `DatasetEV2.seg.vtm` index, per-segment `.vtp` meshes, and the source
@@ -177,9 +177,9 @@ Source:
 
 These folders hold paper links, metadata, or reference notes:
 
-- [`comparative-atlases/`](../comparative-atlases/)
-- [`edmond-fibsem/`](../edmond-fibsem/)
-- [`laissue-1999/`](../laissue-1999/)
+- [`comparative-atlases/`](../datasets/comparative-atlases/)
+- [`edmond-fibsem/`](../datasets/edmond-fibsem/)
+- [`laissue-1999/`](../datasets/laissue-1999/)
 
 Large paper PDFs are local-only and ignored by git unless the file is a small
 source data file that can be shared.

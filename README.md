@@ -16,7 +16,7 @@ It lets you:
 
 ## Reference Table
 
-The [reference table](reference-tables/glomerulus_ground_truth.csv) is a
+The [reference table](datasets/reference-tables/glomerulus_ground_truth.csv) is a
 cross-dataset index for glomeruli, receptors, sensilla, ligands, valence,
 driver lines, VFB IDs, and atlas coverage.
 
@@ -46,8 +46,8 @@ Available columns: `canonical_glomerulus`, `receptor_consensus`,
 `present_door_map`, `present_door_mappings`, `present_potter_task_2022`,
 `present_benton_2025`, `present_bates_schlegel_2020`.
 
-[Open the full table](reference-tables/glomerulus_ground_truth.csv) or the
-[name reconciliation table](reference-tables/glomerulus_name_reconciliation.csv).
+[Open the full table](datasets/reference-tables/glomerulus_ground_truth.csv) or the
+[name reconciliation table](datasets/reference-tables/glomerulus_name_reconciliation.csv).
 
 ## Requirements
 
@@ -82,10 +82,10 @@ You can also open one atlas directly:
 
 ## Generated Data
 
-Some viewers use derived cache files under `data/derived/` for fast startup and
+Some viewers use derived cache files under `datasets/*/data/derived/` for fast startup and
 slicing. These generated files are tracked so a fresh checkout can open the
 viewer without rebuilding caches. The PyPI package includes runtime source
-tables/volumes plus tracked `data/derived/` and `data/validation/` caches needed
+tables/volumes plus tracked `data/derived/` and `data/validation/` files needed
 by the installed viewer. Rebuild all generated visual data after source-data
 changes with:
 
@@ -117,7 +117,7 @@ the Potter Task 2022 PDF preview.
 ## Data And Credit
 
 This repo combines source data from several papers and public resources. Source
-files are kept in `data/source/` folders when they can be shared. Paper PDFs are
+files are kept in `datasets/*/data/source/` folders when they can be shared. Paper PDFs are
 not tracked in git.
 
 See [docs/data-sources.md](docs/data-sources.md) for the source list and links.
@@ -126,7 +126,7 @@ See [docs/data-sources.md](docs/data-sources.md) for the source list and links.
 
 - [How to use lobemap](docs/usage.md)
 - [Data sources](docs/data-sources.md)
-- [Reference tables](reference-tables/README.md)
+- [Reference tables](datasets/reference-tables/README.md)
 
 ## License
 

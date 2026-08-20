@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+DATASETS_DIR = ROOT / "datasets"
 
 
 def import_module(name: str, path: Path):
@@ -22,14 +23,16 @@ def import_module(name: str, path: Path):
 
 
 def regenerate_grabe_materials() -> None:
-    grabe = import_module("grabe_regenerate", ROOT / "grabe-2015/al_atlas_napari.py")
+    grabe = import_module(
+        "grabe_regenerate", DATASETS_DIR / "grabe-2015/al_atlas_napari.py"
+    )
     grabe.write_materials_csv(grabe.parse_amira_materials(grabe.AMIRA_LABELS))
 
 
 def regenerate_bates_cache() -> None:
     bates = import_module(
         "bates_regenerate",
-        ROOT / "bates-schlegel-2020/bates_schlegel_napari.py",
+        DATASETS_DIR / "bates-schlegel-2020/bates_schlegel_napari.py",
     )
     volume = bates.build_label_volume(bates.load_meshes())
     bates.save_volume_cache(volume)
@@ -38,7 +41,7 @@ def regenerate_bates_cache() -> None:
 def regenerate_hemibrain_flywire_caches() -> None:
     flywire_prepare = import_module(
         "flywire_prepare",
-        ROOT / "flywire/scripts/prepare_flywire_glomeruli.py",
+        DATASETS_DIR / "flywire/scripts/prepare_flywire_glomeruli.py",
     )
     flywire_prepare.main()
 
@@ -46,7 +49,7 @@ def regenerate_hemibrain_flywire_caches() -> None:
         "hemibrain_flywire_regenerate",
         ROOT / "scripts/natverse_al_napari.py",
     )
-    atlas.WORK_DIR = ROOT / "hemibrain"
+    atlas.WORK_DIR = DATASETS_DIR / "hemibrain"
     atlas.DATA_DIR = atlas.WORK_DIR / "data"
     atlas.SOURCE_DIR = atlas.DATA_DIR / "source"
     atlas.DERIVED_DIR = atlas.DATA_DIR / "derived"
@@ -59,7 +62,7 @@ def regenerate_hemibrain_flywire_caches() -> None:
         "flywire_regenerate",
         ROOT / "scripts/natverse_al_napari.py",
     )
-    atlas.WORK_DIR = ROOT / "flywire"
+    atlas.WORK_DIR = DATASETS_DIR / "flywire"
     atlas.DATA_DIR = atlas.WORK_DIR / "data"
     atlas.SOURCE_DIR = atlas.DATA_DIR / "source"
     atlas.DERIVED_DIR = atlas.DATA_DIR / "derived"
@@ -80,17 +83,19 @@ def regenerate_coordinate_validation() -> None:
 def regenerate_benton_cache() -> None:
     benton = import_module(
         "benton_regenerate",
-        ROOT / "benton-2025/benton_2025_data.py",
+        DATASETS_DIR / "benton-2025/benton_2025_data.py",
     )
     benton.save_volume_cache(benton.build_label_volume(benton.load_meshes()))
 
 
 def regenerate_potter_preview() -> None:
     source_pdf = (
-        ROOT
+        DATASETS_DIR
         / "potter-task-2022/data/source/Task-Potter-eLife-Drosophila-Antennal-Lobe-Map-2022.pdf"
     )
-    output_png = ROOT / "potter-task-2022/data/derived/potter_task_2022_map.png"
+    output_png = (
+        DATASETS_DIR / "potter-task-2022/data/derived/potter_task_2022_map.png"
+    )
     pdftoppm = shutil.which("pdftoppm")
     if pdftoppm is None:
         raise RuntimeError("pdftoppm is needed to render the Potter PDF preview")

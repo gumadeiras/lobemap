@@ -35,7 +35,7 @@ def load_master_metadata() -> dict[str, dict[str, str]]:
     global _MASTER_METADATA
     if _MASTER_METADATA is not None:
         return _MASTER_METADATA
-    path = ROOT / "reference-tables/glomerulus_ground_truth.csv"
+    path = ROOT / "datasets/reference-tables/glomerulus_ground_truth.csv"
     if not path.exists():
         _MASTER_METADATA = {}
         return _MASTER_METADATA
@@ -57,7 +57,7 @@ def load_glomerulus_line_presets() -> dict[str, set[str]]:
     global _GLOMERULUS_LINE_PRESETS
     if _GLOMERULUS_LINE_PRESETS is not None:
         return _GLOMERULUS_LINE_PRESETS
-    path = ROOT / "reference-tables/glomerulus_ground_truth.csv"
+    path = ROOT / "datasets/reference-tables/glomerulus_ground_truth.csv"
     if not path.exists():
         _GLOMERULUS_LINE_PRESETS = {}
         return _GLOMERULUS_LINE_PRESETS

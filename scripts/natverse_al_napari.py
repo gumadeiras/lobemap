@@ -796,7 +796,7 @@ def main() -> None:
     viewer = napari.Viewer(title="lobemap - Hemibrain", ndisplay=2)
     panel = load_atlas(
         viewer,
-        Path(__file__).resolve().parents[1] / "hemibrain",
+        Path(__file__).resolve().parents[1] / "datasets/hemibrain",
         "hemibrain_al_microns",
         "Hemibrain",
         default_mirror_vertical=True,

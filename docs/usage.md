@@ -54,7 +54,7 @@ JRC2018Unisex opens as a whole-brain template with VFB ROI masks.
 
 ## Generated Data
 
-Generated cache files live in `data/derived/` folders. They are tracked so the viewer works from a fresh checkout or PyPI install without rebuilding caches. The package includes runtime source tables/volumes plus tracked `data/derived/` and `data/validation/` caches needed by the installed viewer. Some viewers can rebuild their cache on first load if a file is missing; rebuild all generated visual data after source-data changes with:
+Generated cache files live in `datasets/*/data/derived/` folders. They are tracked so the viewer works from a fresh checkout or PyPI install without rebuilding caches. The package includes runtime source tables and volumes plus tracked `data/derived/` and `data/validation/` files needed by the installed viewer. Some viewers can rebuild their cache on first load if a file is missing; rebuild all generated visual data after source-data changes with:
 
 ```bash
 uv run python scripts/regenerate_visual_data.py

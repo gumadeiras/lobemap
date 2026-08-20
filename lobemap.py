@@ -13,46 +13,47 @@ except ImportError:
 
 
 ROOT = Path(__file__).resolve().parent
+DATASETS_DIR = ROOT / "datasets"
 ATLASES = {
     "grabe-2015": {
         "label": "Grabe 2015",
-        "module": ROOT / "grabe-2015/al_atlas_napari.py",
+        "module": DATASETS_DIR / "grabe-2015/al_atlas_napari.py",
     },
     "bates-schlegel-2020": {
         "label": "Bates Schlegel 2020",
-        "module": ROOT / "bates-schlegel-2020/bates_schlegel_napari.py",
+        "module": DATASETS_DIR / "bates-schlegel-2020/bates_schlegel_napari.py",
     },
     "hemibrain": {
         "label": "Hemibrain",
-        "module": ROOT / "hemibrain/hemibrain_napari.py",
+        "module": DATASETS_DIR / "hemibrain/hemibrain_napari.py",
     },
     "flywire": {
         "label": "FlyWire",
-        "module": ROOT / "flywire/flywire_napari.py",
+        "module": DATASETS_DIR / "flywire/flywire_napari.py",
     },
     "benton-2025": {
         "label": "Benton 2025",
-        "module": ROOT / "benton-2025/benton_2025_napari.py",
+        "module": DATASETS_DIR / "benton-2025/benton_2025_napari.py",
     },
     "door": {
         "label": "DoOR 2D",
-        "module": ROOT / "door/door_napari.py",
+        "module": DATASETS_DIR / "door/door_napari.py",
     },
     "potter-task-2022": {
         "label": "Potter Task 2022",
-        "module": ROOT / "potter-task-2022/potter_task_napari.py",
+        "module": DATASETS_DIR / "potter-task-2022/potter_task_napari.py",
     },
     "jrc2018unisex": {
         "label": "JRC",
-        "module": ROOT / "jrc2018unisex/jrc2018unisex_napari.py",
+        "module": DATASETS_DIR / "jrc2018unisex/jrc2018unisex_napari.py",
     },
     "banc": {
         "label": "BANC",
-        "module": ROOT / "banc/banc_napari.py",
+        "module": DATASETS_DIR / "banc/banc_napari.py",
     },
     "vfb": {
         "label": "VFB",
-        "module": ROOT / "vfb/vfb_napari.py",
+        "module": DATASETS_DIR / "vfb/vfb_napari.py",
     },
 }
 
