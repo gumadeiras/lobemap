@@ -1594,7 +1594,7 @@ dependencies = [
     { name = "imageio" },
     { name = "lazy-loader" },
     { name = "networkx" },
-    { name = "numpy", marker = "python_full_version < '3.12'" },
+    { name = "numpy" },
     { name = "packaging" },
     { name = "pillow" },
     { name = "scipy" },
@@ -1631,7 +1631,7 @@ name = "scipy"
 version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", marker = "python_full_version >= '3.12'" },
+    { name = "numpy" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7a/97/5a3609c4f8d58b039179648e62dd220f89864f56f7357f5d4f45c29eb2cc/scipy-1.17.1.tar.gz", hash = "sha256:95d8e012d8cb8816c226aef832200b1d45109ed4464303e997c5b13122b297c0", size = 30573822, upload-time = "2026-02-23T00:26:24.851Z" }
 wheels = [
@@ -1719,7 +1719,7 @@ resolution-markers = [
     "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c5/cb/2f6d79c7576e22c116352a801f4c3c8ace5957e9aced862012430b62e14f/tifffile-2026.3.3.tar.gz", hash = "sha256:d9a1266bed6f2ee1dd0abde2018a38b4f8b2935cb843df381d70ac4eac5458b7", size = 388745, upload-time = "2026-03-03T19:14:38.134Z" }
 wheels = [
@@ -1737,7 +1737,7 @@ resolution-markers = [
     "python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6c/3e/695c7ab56be57814e369c1f38bc3f64b9dea0a83e867d00c0c9d613a9929/tifffile-2026.5.2.tar.gz", hash = "sha256:21b10227ede8493814a34676774797f721f487e36cb0530e7c3bd882caa87f5a", size = 429140, upload-time = "2026-05-02T20:19:31.497Z" }
 wheels = [
