@@ -63,6 +63,64 @@ def check_scale(
     )
 
 
+#: A glomerulus whose convex hull is under this fraction of its atlas's
+#: median is not a glomerulus. Real ones sit at 5% and up -- the smallest is
+#: hemibrain DA4m(R) at 5.5%, truncated by the imaged volume -- so a floor of
+#: 2% leaves room for anatomy and none for a collapsed mesh.
+MIN_SIZE_FRACTION = 0.02
+
+
+def hull_volume(vertices: np.ndarray) -> float:
+    """Convex-hull volume in um3; 0 for a flat or empty set.
+
+    The hull rather than the enclosed volume, because it is defined for an
+    open mesh -- several male CNS glomeruli have holes -- and still goes to
+    zero for a mesh that collapsed.
+    """
+    import trimesh
+
+    if len(vertices) < 4:
+        return 0.0
+    try:
+        return float(trimesh.convex.convex_hull(np.asarray(vertices, float)).volume)
+    except Exception:  # noqa: BLE001 - qhull rejects flat input
+        return 0.0
+
+
+def check_compartment_sizes(
+    ms: MeshSet,
+    label: str = "",
+    min_fraction: float = MIN_SIZE_FRACTION,
+    known: Mapping[str, str] | None = None,
+) -> Check:
+    """No compartment may be a sliver of its atlas's typical size.
+
+    The median-extent scale check cannot see one bad compartment: a
+    glomerulus that collapsed to a point leaves the median where it was.
+
+    `known` names compartments already examined and recorded as defective
+    in the source (registry/checks.toml). They are still listed, so the
+    defect stays visible, but they do not fail the check.
+    """
+    known = known or {}
+    hulls = np.array([hull_volume(ms.compartment(i)[0]) for i in range(ms.n_compartments)])
+    med = float(np.median(hulls)) if len(hulls) else 0.0
+    floor = min_fraction * med
+    small = [(ms.names[i], float(hulls[i])) for i in np.argsort(hulls) if hulls[i] < floor]
+    unknown = [n for n, _ in small if n not in known]
+    offenders = [
+        f"{n} ({vol:.0f} um3{', known: ' + known[n] if n in known else ''})"
+        for n, vol in small
+    ]
+    return Check(
+        f"compartment size{' ' + label if label else ''}",
+        med > 0 and not unknown,
+        f"{len(small)} below {floor:.0f} um3 ({min_fraction:.0%} of the median "
+        f"convex hull, {med:.0f} um3), {len(small) - len(unknown)} of them known",
+        offenders,
+    )
+
+
 def check_containment(
     glom: MeshSet,
     neuropil: MeshSet,
@@ -77,9 +135,11 @@ def check_containment(
     it. Schlegel S11/S12 name their glomeruli bare ("DA1"), so without this the
     check silently tests nothing and reports a vacuous 0/0 pass.
 
-    These are APPARENT sides -- which half of the image the geometry occupies.
-    This is a geometric test, so it must not be given biological sides in a
-    mirrored space (see Space.apparent_side).
+    Both sides must use the SAME convention, and the one names and assets
+    record is biological: FlyWire's `AL_L` is the fly's left lobe, and
+    Benton's asset says `L` for the same lobe. The side only pairs a
+    glomerulus with its shell here, so converting just one of the two to
+    apparent side would pair a mirrored space's glomeruli with the other lobe.
 
     `shell_name` picks WHICH neuropil to test against, by bare name. It is not
     optional in practice: the FAFB neuropil layer holds all 78 neuropils, and

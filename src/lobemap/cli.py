@@ -660,81 +660,12 @@ def cmd_spaces(args) -> int:
 def cmd_check(args) -> int:
     """Run the geometry validation harness."""
     from .core.registry import Registry
-    from .core.resolve import resolve
     from .validate import geometry as g
-    from .validate import images as gi
-    from .validate.harness import compare_atlases
+    from .validate.harness import compare_atlases, run_checks
 
     root = _registry_root(args)
     reg = Registry.load(root, data_root=_data_root(args, root))
-    checks = []
-
-    for atlas in reg.atlases.values():
-        try:
-            ms = reg.mesh(atlas.asset)
-        except (FileNotFoundError, KeyError):
-            continue
-        checks.append(g.check_scale(ms, label=atlas.id))
-        npl = [
-            a for a in reg.assets_in_space(atlas.native_space, role="neuropil")
-            if a.path.exists()
-        ]
-        if npl:
-            # Sides here only PAIR a glomerulus with its shell, so both must
-            # use the same convention -- and biological is the one assets and
-            # source names record. Converting only the glomerulus side to
-            # apparent, as an earlier version did, pairs Bates with the wrong
-            # lobe in FAFB: its asset says biological L, the FlyWire shells
-            # are named AL_L/AL_R biologically, and flipping one side of the
-            # comparison breaks the match.
-            glom_asset = reg.assets[atlas.asset]
-            checks.append(
-                g.check_containment(
-                    ms,
-                    reg.mesh(npl[0].id),
-                    glom_side=glom_asset.side,
-                    shell_side=npl[0].side,
-                )
-            )
-
-    # Image assets: are they actually where they claim to be?
-    for asset in reg.assets.values():
-        if asset.kind != "image" or not asset.path.exists():
-            continue
-        volume = reg.volume(asset.id)
-        peers = reg.atlases_in_space(asset.space)
-        ms = None
-        label = asset.id
-        if peers:
-            ms = reg.mesh(peers[0].asset)
-        else:
-            # An image in a space with no native atlas would otherwise go
-            # unchecked entirely, so bridge one in and hold it to the same
-            # standard. No shipped asset reaches this today -- it was written
-            # for JRC2018U's nc82 template, which has since been dropped --
-            # but the alternative is that the next such image is silently
-            # never validated.
-            for candidate in reg.atlases.values():
-                src = reg.spaces.get(candidate.native_space)
-                if src is None or src.is_island:
-                    continue
-                try:
-                    ms = resolve(reg, candidate.asset, asset.space)
-                except Exception:  # noqa: BLE001, S112 - try the next atlas
-                    continue
-                label = f"{asset.id} (vs bridged {candidate.id})"
-                break
-        if ms is not None:
-            checks.append(gi.check_image_covers_mesh(volume, ms, label))
-            checks.append(gi.check_image_brightness_at_mesh(volume, ms, label))
-        shells = [
-            a for a in reg.assets_in_space(asset.space, role="neuropil")
-            if a.path.exists()
-        ]
-        if shells:
-            checks.append(
-                gi.check_image_inside_shell(volume, reg.mesh(shells[0].id), asset.id)
-            )
+    checks = run_checks(reg)
 
     if args.roundtrip:
         src, via = args.roundtrip

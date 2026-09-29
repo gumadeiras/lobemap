@@ -1,0 +1,17 @@
+# Known defects that `lobemap check` lists but does not fail on.
+#
+# A check that fails on the shipped data every time stops being read, and a
+# threshold loosened until a defect passes stops catching the next one. So a
+# defect that has been measured, and cannot be fixed here because it is in
+# the published source, is named below with its evidence. Anything not named
+# still fails.
+#
+# Keyed by atlas id, then by published compartment name.
+
+[known_defects.neuprint_hemibrain."VM2(R)"]
+check = "compartment size"
+# neuPrint hemibrain:v1.2.1 serves AL-VM2(R) as a 104-vertex fragment.
+# VM2 in the other atlases is 1,342-3,259 um3 (S12 1,342, male CNS
+# 1,617/1,666, Grabe 1,611/1,773, Benton 3,259), so the ROI is effectively
+# missing. Schlegel S12 has a full VM2 in the same volume.
+reason = "14 um3, VM2 elsewhere is 1,342-3,259 um3"
