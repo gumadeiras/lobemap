@@ -78,7 +78,7 @@ elsewhere) lets you drop the prefix. The commands work from any directory: a che
 
 | space | atlas | glomeruli |
 |---|---|---|
-| FAFB14 (FlyWire) | [Benton 2025](https://doi.org/10.1038/s44319-025-00476-8) (Dataset EV2) | 58 |
+| FAFB14 | [Benton 2025](https://doi.org/10.1038/s44319-025-00476-8) (Dataset EV2) | 58 |
 | JRCFIB2018F (hemibrain) | neuPrint [hemibrain](https://doi.org/10.7554/eLife.57443) | 58 + 19 |
 | JRCFIB2018F | [Schlegel 2021](https://doi.org/10.7554/eLife.66018) S11, from receptor neurons | 59 |
 | JRCFIB2018F | [Schlegel 2021](https://doi.org/10.7554/eLife.66018) S12, from projection neurons | 58 |
@@ -99,7 +99,7 @@ Which one to reach for depends on what you are comparing against:
   therefore the closest match to in vivo imaging data. It is also the
   oldest of the six and predates revisions to the fine structure of a few
   glomeruli.
-- **FAFB14** (FlyWire) is a complete female brain, dissected and
+- **FAFB14** (the FAFB volume, which FlyWire also reconstructs) is a complete female brain, dissected and
   chemically fixed. Benton 2025
   ([based on Bates 2020](https://doi.org/10.1016/j.cub.2020.06.042))
   annotates its left AL comprehensively and to current nomenclature; the
