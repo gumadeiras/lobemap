@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import contextlib
 
+import numpy as np
+
 from ..core.registry import Registry
 from .axes import apply_axis_mode
 from .contours import ContourOverlay
@@ -37,6 +39,7 @@ from .slicing import (
     compartment_spans,
     crosses,
     order_for,
+    polygon_at,
 )
 from .view import (
     GIMBAL_NUDGE_DEG,
@@ -337,52 +340,69 @@ def _add_contours(viewer, registry, surfaces, into=None) -> dict[str, ContourOve
     return overlays
 
 
-def install_picking(viewer, surfaces, contours, panel=None) -> None:
+def install_picking(viewer, surfaces, contours, panel=None) -> list:
     """Identify the glomerulus under the cursor, in 3D and in 2D.
 
-    Surface._get_value_3d does ray-triangle intersection and returns the
-    barycentric-interpolated vertex value; because compartments are disjoint
-    meshes every triangle's vertices share one index, so that value IS the
-    compartment index. In 2D Surface._get_value returns None, so the contour
-    Shapes layer covers that case.
+    Returns the viewer callbacks it added, so a scene switch can remove them.
+
+    On the VIEWER, not on each layer. napari sends a layer's mouse-move
+    callbacks only while that layer is the active one, and the active layer
+    after a load is the last one added -- a contour layer, hidden in 3D --
+    so hovering named nothing until the user happened to select the right
+    layer by hand. The viewer's callbacks run on every move, and this asks
+    each layer the current mode draws: surfaces in 3D, contours in 2D, the
+    atlases before the reference shells.
+
+    In 3D the ray is tested against the shown compartments' boxes and then
+    their triangles (`AtlasSurface.pick`), not against every triangle of
+    the layer as napari's own Surface pick does -- 40 ms a mouse move on
+    Benton. In 2D the contour loops are tested directly, inside the loop
+    rather than on its stroke. `Shapes.get_value` cannot be used for them:
+    napari rounds each shape's slice position to a whole number and compares
+    it with the unrounded plane, so off a whole-micrometer plane it found no
+    shape at all. Drags are skipped: they rotate or pan the view.
     """
-    by_layer = {s.layer: (name, s) for name, s in surfaces.items()}
-    contour_by_layer = {c.layer: (name, c) for name, c in contours.items()}
+    order = sorted(
+        surfaces,
+        key=lambda n: surfaces[n].layer.metadata.get("lobemap", {}).get("role")
+        in REFERENCE_ROLES,
+    )
 
-    def _on_move(layer, event):
-        value = layer.get_value(
-            event.position,
-            view_direction=getattr(event, "view_direction", None),
-            dims_displayed=getattr(event, "dims_displayed", None),
-            world=True,
-        )
-        if isinstance(value, tuple):
-            value = value[0]
-        if value is None:
-            return
+    def _on_move(_viewer, event):
+        if getattr(event, "buttons", None):
+            return          # a drag: rotating or panning, not pointing
+        three_d = viewer.dims.ndisplay == 3
+        for name in order:
+            surface = surfaces[name]
+            overlay = contours.get(name)
+            if three_d or overlay is None:
+                if not surface.layer.visible or not three_d:
+                    continue
+                index = surface.pick(
+                    event.position,
+                    getattr(event, "view_direction", None),
+                    getattr(event, "dims_displayed", None) or viewer.dims.displayed,
+                )
+                label = surface.meshset.names[index] if index is not None else None
+            else:
+                if not overlay.layer.visible:
+                    continue
+                shown = list(viewer.dims.displayed)
+                point = overlay.layer.world_to_data(event.position)
+                shape = polygon_at(
+                    [np.asarray(path)[:, shown] for path in overlay.layer.data],
+                    np.asarray(point)[shown],
+                )
+                label = overlay.name_at_shape(shape)
+                index = overlay.meshset.names.index(label) if label else None
+            if label:
+                viewer.status = f"{name}: {label}"
+                if panel is not None and index is not None:
+                    panel.highlight(name, index)
+                return
 
-        if layer in by_layer:
-            name, surface = by_layer[layer]
-            label = surface.name_at_value(value)
-            index = round(float(value)) if label else None
-        elif layer in contour_by_layer:
-            name, overlay = contour_by_layer[layer]
-            label = overlay.name_at_shape(int(value))
-            index = (
-                overlay.meshset.names.index(label) if label else None
-            )
-        else:
-            return
-
-        if label:
-            viewer.status = f"{name}: {label}"
-            if panel is not None and index is not None:
-                panel.highlight(name, index)
-
-    for surface in surfaces.values():
-        surface.layer.mouse_move_callbacks.append(_on_move)
-    for overlay in contours.values():
-        overlay.layer.mouse_move_callbacks.append(_on_move)
+    viewer.mouse_move_callbacks.append(_on_move)
+    return [_on_move]
 
 
 class SceneSession:
@@ -411,6 +431,8 @@ class SceneSession:
         self.panel = None
         self.dock = None
         self.handlers: list[tuple] = []
+        #: Callbacks added to `viewer.mouse_move_callbacks`.
+        self.callbacks: list = []
         #: Display-only left-right reflection. Held per session, so
         #: switching space rebuilds unmirrored and the control re-asserts
         #: itself rather than the state surviving invisibly.
@@ -548,6 +570,10 @@ class SceneSession:
             for event, handler in getattr(overlay, "handlers", ()) or ():
                 with contextlib.suppress(Exception):
                     event.disconnect(handler)
+        for callback in self.callbacks:
+            with contextlib.suppress(ValueError):
+                self.viewer.mouse_move_callbacks.remove(callback)
+        self.callbacks = []
         for surface in self.surfaces.values():
             surface.stop()
         # LAYERS FIRST, then the dock. The other order crashes the process.
@@ -610,7 +636,7 @@ def load_space(
         session.dock = viewer.window.add_dock_widget(
             session.panel, area="right", name="Compartments"
         )
-        install_picking(
+        session.callbacks += install_picking(
             viewer, session.surfaces, session.contours, panel=session.panel
         )
         # Before any mirror is applied, so the plane is the data's own.

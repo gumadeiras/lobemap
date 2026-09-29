@@ -403,6 +403,65 @@ class AtlasSurface:
 
     # -- identification --------------------------------------------------
 
+    def pick(self, position, view_direction, dims_displayed) -> int | None:
+        """The shown compartment a view ray through `position` meets first.
+
+        napari's own Surface pick tests every triangle of the layer -- about
+        40 ms for Benton's 298k -- and hovering asks on every mouse move.
+        Bounding boxes first: only the compartments whose box the ray enters
+        are tested, nearest box first, stopping once no remaining box starts
+        nearer than a hit already found. Only selected compartments count,
+        so geometry awaiting compaction cannot answer for a hidden one.
+        """
+        from napari.utils.geometry import find_nearest_triangle_intersection
+
+        if view_direction is None or not self.selection:
+            return None
+        start, end = self.layer.get_ray_intersections(
+            position, view_direction, list(dims_displayed), world=True
+        )
+        if start is None or end is None:
+            return None
+        start = np.asarray(start, dtype=float)
+        direction = np.asarray(end, dtype=float) - start
+        length = float(np.linalg.norm(direction))
+        if length == 0.0:
+            return None
+        direction /= length
+        lo, hi = self._boxes()
+        indices = np.array(sorted(self.selection))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            near = (lo[indices] - start) / direction
+            far = (hi[indices] - start) / direction
+        enter = np.nanmax(np.minimum(near, far), axis=1)
+        leave = np.nanmin(np.maximum(near, far), axis=1)
+        crossed = leave >= np.maximum(enter, 0.0)
+        best, best_t = None, np.inf
+        for j in np.flatnonzero(crossed)[np.argsort(enter[crossed])]:
+            if enter[j] > best_t:
+                break
+            v, f = self.meshset.compartment(int(indices[j]))
+            hit, point = find_nearest_triangle_intersection(start, direction, v[f])
+            if hit is None:
+                continue
+            t = float(np.dot(np.asarray(point) - start, direction))
+            if t < best_t:
+                best, best_t = int(indices[j]), t
+        return best
+
+    def _boxes(self) -> tuple[np.ndarray, np.ndarray]:
+        """(K, 3) lowest and highest vertex of each compartment, cached."""
+        if getattr(self, "_box_cache", None) is None:
+            v = np.asarray(self.meshset.vertices, dtype=float)
+            starts = np.asarray(self.meshset.vertex_offsets[:-1])
+            lo = np.full((self.meshset.n_compartments, 3), np.nan)
+            hi = np.full((self.meshset.n_compartments, 3), np.nan)
+            filled = np.diff(self.meshset.vertex_offsets) > 0
+            lo[filled] = np.minimum.reduceat(v, starts[filled], axis=0)
+            hi[filled] = np.maximum.reduceat(v, starts[filled], axis=0)
+            self._box_cache = (lo, hi)
+        return self._box_cache
+
     def name_at_value(self, value: float | None) -> str | None:
         """Map a picked vertex value back to a compartment name.
 

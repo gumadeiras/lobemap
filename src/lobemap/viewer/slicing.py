@@ -118,6 +118,32 @@ def busiest_plane(spans: np.ndarray) -> float | None:
     return float(mids[best])
 
 
+def polygon_at(polygons, point) -> int | None:
+    """Index of the smallest polygon containing `point`, or None.
+
+    Even-odd rule, so an open section -- a mesh with a hole in it -- is
+    closed by its own end points. Smallest, so a glomerulus is found
+    inside the neuropil outline around it.
+    """
+    x, y = float(point[0]), float(point[1])
+    best, best_area = None, np.inf
+    for i, poly in enumerate(polygons):
+        poly = np.asarray(poly, dtype=float)
+        if len(poly) < 3:
+            continue
+        xs, ys = poly[:, 0], poly[:, 1]
+        xj, yj = np.roll(xs, 1), np.roll(ys, 1)
+        straddle = (ys > y) != (yj > y)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cross_x = (xj - xs) * (y - ys) / (yj - ys) + xs
+        if np.count_nonzero(straddle & (x < cross_x)) % 2 == 0:
+            continue
+        area = abs(float(np.dot(xs, yj) - np.dot(ys, xj))) / 2.0
+        if area < best_area:
+            best, best_area = i, area
+    return best
+
+
 __all__ = [
     "AXIS_LETTERS",
     "DEFAULT_SLICE_AXIS",
@@ -126,5 +152,6 @@ __all__ = [
     "compartment_spans",
     "crosses",
     "order_for",
+    "polygon_at",
     "slice_axes",
 ]
