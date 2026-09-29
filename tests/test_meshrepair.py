@@ -85,11 +85,21 @@ def test_large_change_is_flagged():
     assert set(r.large_changes) == {"big"}
 
 
-def two_disconnected_open_boxes():
-    """Mimics a glomerulus split into separate bodies by a segmentation break."""
-    v1, f1 = open_box(size=10.0)
-    v2, f2 = open_box(size=6.0)
-    v2 = v2 + np.array([14.0, 0.0, 0.0])
+def open_sphere(radius, center):
+    """A sphere with a seam-sized hole, as marching cubes leaves them."""
+    m = trimesh.creation.icosphere(subdivisions=3, radius=radius)
+    return np.asarray(m.vertices) + np.asarray(center), np.asarray(m.faces)[4:]
+
+
+def two_disconnected_open_bodies():
+    """Mimics a glomerulus split into separate bodies by a segmentation break.
+
+    Spheres with small holes rather than boxes missing a whole side: a hole
+    that size has no well-defined enclosed volume, so the change metric could
+    only look small for it where the origin happened to sit.
+    """
+    v1, f1 = open_sphere(5.0, (0.0, 0.0, 0.0))
+    v2, f2 = open_sphere(3.0, (14.0, 0.0, 0.0))
     v = np.vstack([v1, v2])
     f = np.vstack([f1, f2 + len(v1)])
     return v, f
@@ -100,7 +110,7 @@ def test_disconnected_components_are_kept_not_discarded():
     silently deleted 35% of male CNS VP1l. Every real body must survive."""
     import trimesh
 
-    v, f = two_disconnected_open_boxes()
+    v, f = two_disconnected_open_bodies()
     before = abs(trimesh.Trimesh(vertices=v, faces=f, process=False).volume)
     ms = MeshSet.from_parts([("AL-VP1l(R)", v, f)])
     fixed, rep = repair_meshset(ms)
@@ -111,3 +121,21 @@ def test_disconnected_components_are_kept_not_discarded():
     assert len(out.split()) == 2, "a whole body was discarded"
     assert abs(abs(out.volume) - before) / before < 0.10
     assert not rep.large_changes, rep.volume_change_pct
+
+
+def test_volume_change_does_not_depend_on_where_the_mesh_is():
+    """Regression: an open mesh's volume was measured from the world origin.
+
+    The same repair read +0.3% at the origin and -16% 540 um away, and the
+    male CNS AB(L)/AB(R) were logged as shrinking 85-89% while ending up the
+    size the hemibrain's watertight AB is.
+    """
+    sphere = trimesh.creation.icosphere(subdivisions=3, radius=10.0)
+    v, f = np.asarray(sphere.vertices), np.asarray(sphere.faces)[4:]
+    changes = []
+    for offset in ((0.0, 0.0, 0.0), (400.0, 300.0, 200.0)):
+        ms = MeshSet.from_parts([("AB(R)", v + np.asarray(offset), f)])
+        _, rep = repair_meshset(ms)
+        changes.append(rep.volume_change_pct["AB(R)"])
+    assert changes[0] == pytest.approx(changes[1], abs=0.01)
+    assert abs(changes[1]) < 1.0, "closing a 4-face hole is not a geometry change"
