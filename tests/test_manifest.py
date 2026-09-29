@@ -91,7 +91,7 @@ def test_verify_reports_ok_missing_and_corrupt(tmp_path):
 
 
 def test_a_changed_chunk_inside_a_store_is_detected(tmp_path):
-    """The whole point of hashing the zip rather than the directory entry."""
+    """A store is hashed by its content, not by its directory entry."""
     data = tmp_path / "data"
     arts = mf.build(tmp_path, _tree(data))
     (data / "stain.zarr" / "0" / "0.0.0").write_bytes(b"different chunk bytes")

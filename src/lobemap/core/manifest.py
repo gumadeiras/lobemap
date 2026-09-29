@@ -11,10 +11,21 @@ Two artifact kinds, because a Zarr store is a directory:
 - `file` -- an `.npz` mesh container, transferred as-is.
 - `dir` -- a `.zarr` store, transferred as a zip and unpacked on arrival.
 
-**The checksum is of the transferred bytes**, which for a directory means the
-zip. Hashing a directory's contents instead would invite a reader to hash it
-differently -- file order, compression level, timestamps -- and get a mismatch
-on data that is perfectly fine.
+**A download is checked against the transferred bytes**: `sha256` and `size`
+are of the file as published, which for a directory is its zip. That pins
+exactly what was uploaded, and it is the only check a download needs.
+
+**A store on disk is checked against its content**, `tree_sha256` (see
+`tree_digest`). Checking it by zipping it again made the answer depend on how
+the zip came out: the platform byte in every entry, and the zlib build, whose
+output at one level differs between builds. So a store that was perfectly
+fine read as corrupt wherever either differed, and every check wrote a
+temporary zip of up to 1.1 GB. `fetch` checks both: the zip before unpacking
+it, the content after.
+
+Format 1 manifests carry no `tree_sha256`. They still load, and still verify
+downloads, but a store on disk cannot be checked against one and reports
+`unverified` until the manifest is regenerated.
 
 `base_url` points at the GitHub release the artifacts are published as.
 `lobemap pack` produces the files to upload; the names it writes are the
@@ -30,6 +41,7 @@ import json
 import re
 import shutil
 import tomllib
+import unicodedata
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,7 +49,17 @@ from pathlib import Path
 from .atomic import replacing
 
 CHUNK = 1 << 20
-MANIFEST_VERSION = 1
+#: 2 adds `tree_sha256` and `files` to directory artifacts.
+MANIFEST_VERSION = 2
+#: zlib's default level, which is what the published zips were written at:
+#: `ZipFile(compresslevel=1)` never reached them, because an entry written
+#: from a `ZipInfo` carries its own level. Stated so the code says what it
+#: does; changing it would change every published hash.
+ZIP_LEVEL = 6
+
+
+class ChecksumMismatch(ValueError):
+    """Unpacked content that does not match the manifest."""
 
 
 @dataclass(frozen=True)
@@ -48,7 +70,9 @@ class Artifact:
     path: str                  # relative to the data root
     kind: str                  # "file" or "dir"
     sha256: str                # of the transferred bytes (the zip, for a dir)
-    size: int
+    size: int                  # of the transferred bytes
+    tree_sha256: str | None = None   # dir: of the unpacked content
+    files: int | None = None         # dir: how many files that covers
 
     @property
     def transfer_name(self) -> str:
@@ -62,6 +86,37 @@ def sha256_file(path: Path, chunk: int = CHUNK) -> tuple[str, int]:
             h.update(block)
             n += len(block)
     return h.hexdigest(), n
+
+
+def _store_files(src: Path) -> list[Path]:
+    """Every file in a store, in the order `zip_directory` writes them."""
+    return sorted(p for p in Path(src).rglob("*") if p.is_file())
+
+
+def _member_name(p: Path, src: Path) -> str:
+    return str(p.relative_to(src)).replace("\\", "/")
+
+
+def tree_digest(src: Path) -> tuple[str, int]:
+    """sha256 of a store's content, and how many files it covers.
+
+    One line per file -- its sha256, its size, and its name relative to the
+    store as a JSON string, with `/` separators and in Unicode NFC -- sorted
+    by name and hashed together. The files are the ones `zip_directory`
+    packs, so a store and its zip describe the same content. Nothing here
+    depends on the platform, a zip or the zlib build, and nothing is written.
+    """
+    src = Path(src)
+    entries = []
+    for p in _store_files(src):
+        digest, size = sha256_file(p)
+        name = unicodedata.normalize("NFC", _member_name(p, src))
+        entries.append((name, digest, size))
+    h = hashlib.sha256()
+    for name, digest, size in sorted(entries):
+        h.update(f"{digest} {size} {json.dumps(name, ensure_ascii=False)}\n"
+                 .encode())
+    return h.hexdigest(), len(entries)
 
 
 def zip_directory(src: Path, dst: Path) -> Path:
@@ -79,36 +134,50 @@ def zip_directory(src: Path, dst: Path) -> Path:
     """
     src, dst = Path(src), Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    files = sorted(p for p in src.rglob("*") if p.is_file())
-    with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
-        for p in files:
-            info = zipfile.ZipInfo(str(p.relative_to(src)).replace("\\", "/"),
+    with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in _store_files(src):
+            info = zipfile.ZipInfo(_member_name(p, src),
                                    date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 0
             info.external_attr = 0o644 << 16
-            zf.writestr(info, p.read_bytes())
+            zf.writestr(info, p.read_bytes(), compresslevel=ZIP_LEVEL)
     return dst
 
 
-def unzip_directory(archive: Path, dst: Path) -> Path:
+def unzip_directory(archive: Path, dst: Path, tree_sha256: str | None = None) -> Path:
     """Unpack beside `dst` and rename into place, replacing what is there.
 
     An interrupted unpack leaves nothing at `dst`. Unpacking in place left
     a store whose metadata had arrived and some of whose chunks had not,
-    which opened without error and read zeros.
+    which opened without error and read zeros. With `tree_sha256`, content
+    that does not match is not installed either: `ChecksumMismatch`.
     """
     dst = Path(dst)
-    with replacing(dst) as scratch, zipfile.ZipFile(archive) as zf:
-        zf.extractall(scratch)
+    with replacing(dst) as scratch:
+        with zipfile.ZipFile(archive) as zf:
+            zf.extractall(scratch)
+        if tree_sha256 is not None:
+            digest, _ = tree_digest(scratch)
+            if digest != tree_sha256:
+                raise ChecksumMismatch(f"unpacked content sha256 {digest[:12]} "
+                                       f"!= {tree_sha256[:12]}")
     return dst
 
 
 def build(data_root: Path, assets, workdir: Path | None = None,
-          progress=None) -> list[Artifact]:
-    """Describe every asset file present under `data_root`."""
+          progress=None, previous=()) -> list[Artifact]:
+    """Describe every asset file present under `data_root`.
+
+    A store's transfer hash is of its zip, which only `pack` and this can
+    produce, so a store is zipped here to hash it -- unless `previous`
+    already records it with the same content. Then its published zip still
+    holds exactly that content, and re-zipping would only swap in whatever
+    hash this machine's zlib gives, which the published file may not match.
+    """
     data_root = Path(data_root)
     workdir = Path(workdir) if workdir else data_root / ".manifest"
+    prior = {a.path: a for a in previous if a.kind == "dir"}
     out: list[Artifact] = []
     for i, asset in enumerate(assets, start=1):
         path = Path(asset.path)
@@ -116,15 +185,20 @@ def build(data_root: Path, assets, workdir: Path | None = None,
             continue
         rel = path.relative_to(data_root).as_posix()
         if path.is_dir():
-            workdir.mkdir(parents=True, exist_ok=True)
-            archive = zip_directory(path, workdir / f"{path.name}.zip")
-            digest, size = sha256_file(archive)
-            archive.unlink()
-            kind = "dir"
+            tree, n_files = tree_digest(path)
+            old = prior.get(rel)
+            if old is not None and old.tree_sha256 == tree:
+                digest, size = old.sha256, old.size
+            else:
+                workdir.mkdir(parents=True, exist_ok=True)
+                archive = zip_directory(path, workdir / f"{path.name}.zip")
+                digest, size = sha256_file(archive)
+                archive.unlink()
+            art = Artifact(asset.id, rel, "dir", digest, size, tree, n_files)
         else:
             digest, size = sha256_file(path)
-            kind = "file"
-        out.append(Artifact(asset.id, rel, kind, digest, size))
+            art = Artifact(asset.id, rel, "file", digest, size)
+        out.append(art)
         if progress is not None:
             progress(i, len(assets), asset.id, size)
     if workdir.exists() and not any(workdir.iterdir()):
@@ -147,7 +221,8 @@ def _toml_key(key: str) -> str:
 def dump(artifacts, base_url: str | None = None) -> str:
     lines = [
         "# Fetchable data artifacts. Generated by `lobemap manifest`.",
-        "# sha256 is of the transferred bytes: for a .zarr store, of its zip.",
+        "# sha256 and size are of the transferred bytes: for a .zarr store, of its zip.",
+        "# tree_sha256 is of a store's content on disk; `fetch --check` compares it.",
         "",
         f"version = {MANIFEST_VERSION}",
     ]
@@ -166,17 +241,28 @@ def dump(artifacts, base_url: str | None = None) -> str:
             f"kind = {_toml_str(a.kind)}",
             f"sha256 = {_toml_str(a.sha256)}",
             f"size = {int(a.size)}",
-            "",
         ]
+        if a.tree_sha256 is not None:
+            lines.append(f"tree_sha256 = {_toml_str(a.tree_sha256)}")
+        if a.files is not None:
+            lines.append(f"files = {int(a.files)}")
+        lines.append("")
     return "\n".join(lines)
 
 
 def load(path: Path) -> tuple[list[Artifact], str | None]:
+    """Read a manifest of any format up to `MANIFEST_VERSION`."""
     with Path(path).open("rb") as fh:
         body = tomllib.load(fh)
+    version = int(body.get("version", 1))
+    if version > MANIFEST_VERSION:
+        raise ValueError(f"{path} is manifest format {version}; this lobemap "
+                         f"reads up to {MANIFEST_VERSION}. Upgrade lobemap.")
     arts = [
         Artifact(asset=k, path=v["path"], kind=v.get("kind", "file"),
-                 sha256=v["sha256"], size=int(v["size"]))
+                 sha256=v["sha256"], size=int(v["size"]),
+                 tree_sha256=v.get("tree_sha256"),
+                 files=int(v["files"]) if "files" in v else None)
         for k, v in sorted(body.get("artifacts", {}).items())
     ]
     return arts, body.get("base_url")
@@ -185,44 +271,60 @@ def load(path: Path) -> tuple[list[Artifact], str | None]:
 @dataclass(frozen=True)
 class Status:
     artifact: Artifact
-    state: str        # "ok", "missing", "corrupt"
+    state: str        # "ok", "missing", "corrupt", "unverified"
     detail: str = ""
 
 
-def verify(artifacts, data_root: Path, workdir: Path | None = None,
-           progress=None) -> list[Status]:
-    """Check what is on disk against the manifest."""
+def verify(artifacts, data_root: Path, progress=None) -> list[Status]:
+    """Check what is on disk against the manifest.
+
+    Read-only: a file is hashed as it is, a store by its content, so the
+    answer is the same on every platform and zlib build and nothing is
+    written, not even a temporary zip.
+    """
     data_root = Path(data_root)
-    workdir = Path(workdir) if workdir else data_root / ".manifest"
     out = []
     for i, art in enumerate(artifacts, start=1):
         target = data_root / art.path
         if not target.exists():
-            out.append(Status(art, "missing"))
+            status = Status(art, "missing")
+        elif art.kind == "dir":
+            if not target.is_dir():
+                status = Status(art, "corrupt", "not a directory")
+            elif art.tree_sha256 is None:
+                status = Status(art, "unverified",
+                                "the manifest records only this store's zip "
+                                "(format 1); regenerate it with `lobemap "
+                                "manifest` to check the store on disk")
+            else:
+                digest, n_files = tree_digest(target)
+                status = (Status(art, "ok") if digest == art.tree_sha256 else
+                          Status(art, "corrupt",
+                                 f"content sha256 {digest[:12]} != "
+                                 f"{art.tree_sha256[:12]}, {n_files} files "
+                                 f"vs {art.files}"))
+        elif not target.is_file():
+            status = Status(art, "corrupt", "not a file")
         else:
-            if art.kind == "dir":
-                workdir.mkdir(parents=True, exist_ok=True)
-                archive = zip_directory(target, workdir / f"{target.name}.zip")
-                digest, size = sha256_file(archive)
-                archive.unlink()
-            else:
-                digest, size = sha256_file(target)
-            if digest == art.sha256:
-                out.append(Status(art, "ok"))
-            else:
-                out.append(Status(art, "corrupt",
-                                  f"sha256 {digest[:12]} != {art.sha256[:12]}, "
-                                  f"{size} bytes vs {art.size}"))
+            digest, size = sha256_file(target)
+            status = (Status(art, "ok") if digest == art.sha256 else
+                      Status(art, "corrupt",
+                             f"sha256 {digest[:12]} != {art.sha256[:12]}, "
+                             f"{size} bytes vs {art.size}"))
+        out.append(status)
         if progress is not None:
-            progress(i, len(artifacts), out[-1])
-    if workdir.exists() and not any(workdir.iterdir()):
-        workdir.rmdir()
+            progress(i, len(artifacts), status)
     return out
 
 
 def fetch(artifacts, data_root: Path, base_url: str, workdir: Path | None = None,
           progress=None) -> list[Status]:
-    """Download and verify. A failed checksum leaves nothing behind."""
+    """Download and verify. A failed checksum leaves nothing behind.
+
+    A store is checked twice: the zip against `sha256` before it is
+    unpacked, and what it unpacks to against `tree_sha256` before that is
+    moved into place.
+    """
     import urllib.request
 
     data_root = Path(data_root)
@@ -239,22 +341,21 @@ def fetch(artifacts, data_root: Path, base_url: str, workdir: Path | None = None
                 shutil.copyfileobj(resp, fh, CHUNK)
             digest, size = sha256_file(tmp)
             if digest != art.sha256:
-                tmp.unlink(missing_ok=True)
-                out.append(Status(art, "corrupt",
-                                  f"downloaded sha256 {digest[:12]} != "
-                                  f"{art.sha256[:12]}"))
+                raise ChecksumMismatch(f"downloaded sha256 {digest[:12]} != "
+                                       f"{art.sha256[:12]}")
+            target = data_root / art.path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if art.kind == "dir":
+                unzip_directory(tmp, target, tree_sha256=art.tree_sha256)
             else:
-                target = data_root / art.path
-                target.parent.mkdir(parents=True, exist_ok=True)
-                if art.kind == "dir":
-                    unzip_directory(tmp, target)
-                    tmp.unlink(missing_ok=True)
-                else:
-                    tmp.replace(target)
-                out.append(Status(art, "ok", f"{size} bytes"))
+                tmp.replace(target)
+            out.append(Status(art, "ok", f"{size} bytes"))
+        except ChecksumMismatch as exc:
+            out.append(Status(art, "corrupt", str(exc)))
         except Exception as exc:                    # noqa: BLE001 - reported
-            tmp.unlink(missing_ok=True)
             out.append(Status(art, "missing", f"{type(exc).__name__}: {exc}"))
+        finally:
+            tmp.unlink(missing_ok=True)
         if progress is not None:
             progress(i, len(artifacts), out[-1])
     if workdir.exists() and not any(workdir.iterdir()):
@@ -264,12 +365,14 @@ def fetch(artifacts, data_root: Path, base_url: str, workdir: Path | None = None
 
 __all__ = [
     "Artifact",
+    "ChecksumMismatch",
     "Status",
     "build",
     "dump",
     "fetch",
     "load",
     "sha256_file",
+    "tree_digest",
     "unzip_directory",
     "verify",
     "zip_directory",
