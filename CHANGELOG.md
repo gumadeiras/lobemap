@@ -73,7 +73,7 @@
 
 ### Changed
 
-- The data is published as release assets and no longer ships in the repository. All fourteen artifacts (2.51 GB) are on the [`data-v1` release](https://github.com/DMZ0/lobemap/releases/tag/data-v1), and `base_url` in the committed manifest points at them. The eleven small assets used to be tracked; splitting the rule by size left two answers to where the data lives, for the 76 MB it saved.
+- The data is published as release assets and no longer ships in the repository. All fourteen artifacts (2.51 GB) are on the [`data-v1` release](https://github.com/gumadeiras/lobemap/releases/tag/data-v1), and `base_url` in the committed manifest points at them. The eleven small assets used to be tracked; splitting the rule by size left two answers to where the data lives, for the 76 MB it saved.
 - `lobemap fetch` gets every artifact, including the three virtual stains. `--nostains` skips them, which is 76 MB instead of 2.5 GB; every space still opens, the three EM spaces just without their reference image. Holding them back by default made the obvious command the one that left three of the four spaces looking incomplete for no stated reason.
 - `lobemap view` fetches missing required artifacts before opening a scene. Nothing runs on `uv sync`, so this is the first opportunity a fresh clone has to get its data.
 - The "no data for this space" report leads with `lobemap fetch` rather than `lobemap build`.
