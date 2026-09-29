@@ -6,8 +6,9 @@
 # retype, so nine of the fifteen assets had no runnable path at all. Here they
 # are data, and `lobemap build` executes them.
 #
-# `source` paths are relative to the repository root. A `url` is downloaded
-# and cached under the data root's `.build/` instead.
+# `source` paths, and path-valued params such as `materials`, are relative to
+# the registry root -- this directory -- so `--registry` can point anywhere.
+# A `url` is downloaded and cached under the data root's `.build/` instead.
 #
 # The three virtual stains ARE covered, at the bottom. They are expensive --
 # ~19 GB of synapse downloads, ~40 GB of scratch and hours of compute -- so
@@ -163,7 +164,11 @@ space = "FAFB14"
 voxel = 0.25
 sigma = 0.45
 bounds = [192.2, 75.853, 2.007, 853.7, 398.853, 271.507]
-confidence = 0.5
+# No threshold: the Princeton table has no confidence or score column, and
+# `fafb_presynapses` reads only pre_x/pre_y/pre_z. This used to say 0.5,
+# which the build recorded in the published stain's metadata without
+# applying it.
+confidence = false
 
 [malecns_stain]
 pipeline = "virtual_stain"
@@ -175,5 +180,6 @@ space = "JRCFIB2022M"
 voxel = 0.25
 sigma = 0.45
 bounds = [37.6, 37.3, 79.8, 732.1, 421.8, 345.3]
-# The published file is already filtered to minconf 0.5.
+# The published file is already filtered to minconf 0.5 (its name says so);
+# lobemap applies no further threshold, so this records the input's filter.
 confidence = 0.5
