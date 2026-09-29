@@ -24,7 +24,9 @@ the build reports so it can be recorded.
 
 from __future__ import annotations
 
+import contextlib
 import shutil
+import tempfile
 import tomllib
 import urllib.request
 from dataclasses import dataclass, field
@@ -37,6 +39,11 @@ DEFAULT_RECIPES = "recipes.toml"
 #: Downloaded sources are cached here, under the data root, so a second
 #: build of the same asset does not re-fetch.
 CACHE_DIR = ".build"
+
+#: Pipeline scratch -- a stain's spilled points and float32 grid, 10-25 GB --
+#: goes in a per-build directory under this one and is removed when the
+#: build ends. A recipe's `workdir` param moves it, to a disk with room.
+WORK_DIR = ".stainwork"
 
 _PIPELINES: dict[str, object] = {}
 
@@ -242,7 +249,7 @@ def _flywire(src, params, progress=None, **_):
 def _virtual_stain(src, params, progress=None, workdir=None, **_):
     """Presynapse density, binned and blurred, straight to a Volume.
 
-    Written directly at the registry's `.zarr` path rather than through the
+    Written straight to the registry's `.zarr` store rather than through the
     documented npz-then-`tozarr` two-step: `save_zarr` fills level 0 in
     slabs and builds each pyramid level from the one below, so nothing
     larger than a slab is ever resident and the intermediate npz buys
@@ -279,7 +286,7 @@ def _virtual_stain(src, params, progress=None, workdir=None, **_):
         sigma_um=params.get("sigma", 0.45),
         confidence=None if confidence is False else confidence,
         dtype=np.dtype(params.get("dtype", "uint8")),
-        workdir=Path(params["workdir"]) if params.get("workdir") else workdir,
+        workdir=workdir,
         on_stage=on_stage,
     )
     if progress:
@@ -348,16 +355,29 @@ def build_asset(registry, asset_id: str, recipes=None, progress=None,
     src = resolve_source(recipe, registry_root, cache, progress=progress)
     if progress:
         progress(f"{asset_id}: {recipe.pipeline}")
-    obj = fn(src, params, progress=progress,
-             workdir=registry.data_root / ".stainwork")
 
-    # `Volume.save` dispatches on the suffix, so a registry path ending in
-    # .zarr writes an OME-Zarr pyramid and anything else writes npz. The
-    # recipe does not need to say which. Staged and renamed into place, so
-    # a build that stops part-way leaves the asset missing, not partial.
-    with replacing(target) as scratch:
-        obj.save(scratch)
-    return BuildResult(asset_id, target, obj.content_hash())
+    default_parent = registry.data_root / WORK_DIR
+    parent = Path(params["workdir"]) if params.get("workdir") else default_parent
+    parent.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix=f"{asset_id}-", dir=parent))
+    obj = None
+    try:
+        obj = fn(src, params, progress=progress, workdir=work)
+        # `Volume.save` dispatches on the suffix, so a registry path ending
+        # in .zarr writes an OME-Zarr pyramid and anything else writes npz.
+        # The recipe does not need to say which. Staged and renamed into
+        # place, so a build that stops part-way leaves the asset missing,
+        # not partial.
+        with replacing(target) as scratch:
+            obj.save(scratch)
+        digest = obj.content_hash()
+    finally:
+        obj = None               # a stain's voxels are a memmap inside `work`
+        shutil.rmtree(work, ignore_errors=True)
+        if parent == default_parent:
+            with contextlib.suppress(OSError):
+                parent.rmdir()   # only when no other build is using it
+    return BuildResult(asset_id, target, digest)
 
 
 def buildable(registry, recipes=None, include_expensive: bool = True) -> list[str]:
