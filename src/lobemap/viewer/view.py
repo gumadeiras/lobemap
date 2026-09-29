@@ -1,0 +1,296 @@
+"""How a scene is looked at: the camera, the fit, the home button, the mirror.
+
+None of this changes the data. The camera is turned onto each space's
+measured anatomy, the view is fitted to the canvas as the window settles,
+the home button restores the anatomical view rather than napari's array
+view, and the mirror reflects every layer by a world transform.
+"""
+
+from __future__ import annotations
+
+import contextlib
+
+import numpy as np
+
+#: A face-on view is exactly axis-aligned, which is a gimbal-lock singularity
+#: for the Euler angles napari stores its camera in. Its vispy round trip --
+#: angles to quaternion and back -- cannot recover the third angle there and
+#: zeroes it, which comes back as a NEGATED up vector: the brain renders
+#: upside down. Turning the camera a fraction of a degree off axis makes the
+#: decomposition unique and the roll survives. One degree across a 700 um
+#: brain is about 12 um of depth difference edge to edge, invisible, and it
+#: is a yaw about the dorsal axis so it reads as "very slightly turned"
+#: rather than tilted. `tests/test_default_view.py` pins the napari behavior
+#: so this can be dropped if it is ever fixed upstream.
+GIMBAL_NUDGE_DEG = 1.0
+
+#: The array axis a mirror reflects along.
+#:
+#: napari names the axes x/y/z in array order (`viewer.axes.VOXEL_LABELS`),
+#: so this is x -- and x is the left-right axis in all four spaces, 1.0 deg
+#: off in the hemibrain, 1.3 in the male CNS, 3.7 in FAFB14 and 5.5 in
+#: GRABE. So the mirror is a left-right flip and not an arbitrary one,
+#: though it is about the ARRAY axis rather than the measured lateral
+#: direction: exactly so a 2D slice keeps cutting the voxel grid squarely.
+MIRROR_AXIS = 0
+
+
+def orient_anterior(viewer, space, nudge_deg: float = GIMBAL_NUDGE_DEG) -> bool:
+    """Face the anterior surface of the brain, dorsal up. True if applied.
+
+    Uses the space's MEASURED anatomy, so the view really is down the
+    antero-posterior axis rather than down the nearest array axis to it
+    -- which differs by 15-18 degrees in the EM volumes and 31 in GRABE.
+
+    Needs the whole frame. A view direction alone leaves the roll free,
+    so a camera built from anterior without dorsal would face the right
+    way at an arbitrary tilt -- worse than an obvious default, because
+    it looks deliberate. A space with no rotation declared is left
+    alone.
+    """
+    import numpy as np
+
+    from ..core.model import anatomical_axes
+
+    frame = anatomical_axes(space)
+    if viewer.dims.ndisplay != 3 or frame is None:
+        return False
+    anterior, dorsal = frame["A"], frame["D"]
+
+    # Yaw the camera slightly about the dorsal axis, off the singularity.
+    view = -anterior
+    if nudge_deg:
+        # right-handed camera basis (right, up, -view): right = view x up.
+        right = np.cross(view, dorsal)
+        theta = np.radians(nudge_deg)
+        view = view * np.cos(theta) + right * np.sin(theta)
+        view /= np.linalg.norm(view)
+
+    # napari 0.9 moved the camera; keep working on either.
+    camera = getattr(viewer, "scene", viewer).camera
+    camera.set_view_direction(
+        view_direction=tuple(view), up_direction=tuple(dorsal)
+    )
+    # Up is what the round trip destroys, so that is what is checked.
+    return bool(np.dot(np.asarray(camera.up_direction), dorsal) > 0.99)
+
+
+def maximize(viewer) -> bool:
+    """Open filling the screen. True if the request was made.
+
+    napari exposes no public API for this, so it goes through the Qt window,
+    and it is allowed to fail: headless runs and the tests have no window
+    manager, and a viewer that cannot be maximized is still a usable viewer.
+
+    Two quirks, both of which produce a window that *reports* itself
+    maximized at 933x700:
+
+    - Called before the event loop turns, `showMaximized` sets the window
+      state without the window manager ever resizing anything. So it is also
+      deferred with a zero-delay timer.
+    - Once that state is set, a second `showMaximized` is a no-op, because Qt
+      believes the window is already maximized. `showNormal` first clears the
+      state so the next call actually takes effect.
+    """
+    window = getattr(getattr(viewer, "window", None), "_qt_window", None)
+    if window is None:
+        return False
+
+    def _apply():
+        window.showNormal()
+        window.showMaximized()
+
+    try:
+        _apply()
+        from qtpy.QtCore import QTimer
+
+        QTimer.singleShot(0, _apply)
+    except Exception:            # noqa: BLE001 - cosmetic, never fatal
+        return False
+    return True
+
+
+def fit_view(viewer, margin: float = 0.02) -> None:
+    """Fill the canvas with the data, without disturbing the orientation.
+
+    `reset_view` resets the camera angles by default, which would undo
+    `orient_anterior`.
+    """
+    try:
+        viewer.reset_view(margin=margin, reset_camera_angle=False)
+    except TypeError:                     # older napari: neither keyword
+        viewer.reset_view()
+
+
+def install_home_orientation(viewer, space) -> bool:
+    """Make the home button restore the anatomical view, not napari's.
+
+    `ViewerModel.reset_view` sets the camera angles to (0, 0, 0) before
+    fitting, which is a view down the ARRAY axes. Those are not the
+    anatomical ones -- antero-posterior is z in FAFB and y in the
+    hemibrain -- so "Reset view to original state" left the brain at an
+    arbitrary attitude, and the orientation `orient_anterior` sets at
+    load could not be got back without reopening the scene.
+
+    Wrapped on the viewer INSTANCE rather than on `ViewerModel`: the class
+    is shared by every viewer in the process, including the ones tests
+    make. The viewer is a pydantic model and refuses unknown attributes,
+    so the assignment goes through `object.__setattr__`; a bound method
+    found in the instance dict still wins over the class, which is what
+    makes the button -- verified -- go through this.
+
+    Re-orienting only when napari reset the angles, so `fit_view`, which
+    asks it not to, keeps preserving whatever the user is looking at.
+    """
+    existing = viewer.__dict__.get("reset_view")
+    if getattr(existing, "_lobemap_home", False):
+        # A scene switch: same wrapper, new space.
+        existing._lobemap_space = space
+        return True
+
+    original = type(viewer).reset_view.__get__(viewer)
+
+    def reset(*args, **kwargs):
+        original(*args, **kwargs)
+        if kwargs.get("reset_camera_angle", True):
+            orient_anterior(viewer, reset._lobemap_space)
+
+    reset._lobemap_home = True
+    reset._lobemap_space = space
+    try:
+        object.__setattr__(viewer, "reset_view", reset)
+    except Exception:                       # noqa: BLE001 - cosmetic
+        return False
+    return True
+
+
+def install_initial_fit(viewer, margin: float = 0.02) -> bool:
+    """Keep refitting until the window settles, then stop at the first touch.
+
+    Maximizing is asynchronous, and the canvas can still report a zero width
+    while the layout resolves, so *when* the usable size appears varies from
+    run to run. A single fit, or a one-shot on the first resize, therefore
+    lands on the right size only sometimes: measured across two spaces, Grabe
+    refitted correctly and FAFB never refitted at all, keeping the zoom it
+    had at 900x700.
+
+    Refitting on every resize until the user does something removes the
+    timing from the question. After the first click, scroll or keypress the
+    view is theirs and this stops touching it.
+    """
+    canvas = getattr(getattr(viewer.window, "_qt_viewer", None), "canvas", None)
+    events = getattr(canvas, "events", None)
+    if events is None:
+        fit_view(viewer, margin)
+        return False
+
+    state = {"touched": False, "size": None}
+
+    def _size():
+        # napari's OWN canvas size, not the Qt widget's. `fit_to_view` divides
+        # by `viewer.canvas.size`, and that model value is updated after the
+        # resize callbacks run -- so the widget can already read 987x944 while
+        # a fit still computes against 900x700. Watching the widget is how
+        # FAFB kept its startup zoom while Grabe happened to refit correctly.
+        got = getattr(getattr(viewer, "canvas", None), "size", None)
+        return tuple(got) if got is not None else None
+
+    def _refit(event=None):
+        # Driven by draws, not only by resize: the resize arrives while
+        # napari's own canvas size is still stale, so a fit done there is
+        # computed against the old size and no second resize comes to correct
+        # it -- which is how FAFB kept the zoom it had at 900x700. Refitting
+        # whenever the size CHANGES converges on the settled size and costs
+        # nothing once it stops moving.
+        if state["touched"]:
+            return
+        now = _size()
+        if now is None or min(now) <= 0 or now == state["size"]:
+            return
+        state["size"] = now
+        fit_view(viewer, margin)
+
+    def _release(event=None):
+        state["touched"] = True
+
+    fit_view(viewer, margin)
+    connected = False
+    for name in ("resize", "draw"):
+        with contextlib.suppress(Exception):
+            getattr(events, name).connect(_refit)
+            connected = True
+    for name in ("mouse_press", "mouse_wheel", "key_press"):
+        with contextlib.suppress(Exception):
+            getattr(events, name).connect(_release)
+    return connected
+
+
+def mirror_center(layers, axis: int = MIRROR_AXIS) -> float:
+    """Mid-point of `layers` along one axis, in world micrometers.
+
+    Reflecting about zero would be a reflection too: it would also throw
+    the scene to the far side of the origin, which for spaces published
+    at x 192-853 um means off screen. So the mid-plane of the data is
+    what it reflects about, and the scene stays where it was.
+
+    Read once while nothing is mirrored, because `extent.world` already
+    includes each layer's affine -- measuring it again with the mirror on
+    would give back the same number only by luck, and any error in it
+    doubles on the next toggle.
+    """
+    lo: list[float] = []
+    hi: list[float] = []
+    for layer in layers:
+        with contextlib.suppress(Exception):
+            extent = layer.extent.world
+            a, b = float(extent[0][axis]), float(extent[1][axis])
+            if np.isfinite(a) and np.isfinite(b):
+                lo.append(a)
+                hi.append(b)
+    if not lo:
+        return 0.0
+    return (min(lo) + max(hi)) / 2.0
+
+
+def mirror_matrix(ndim: int, center: float, axis: int = MIRROR_AXIS):
+    """The (ndim+1, ndim+1) world reflection x -> 2c - x."""
+    m = np.eye(ndim + 1)
+    m[axis, axis] = -1.0
+    m[axis, -1] = 2.0 * center
+    return m
+
+
+def apply_mirror(layers, on: bool, center: float,
+                 axis: int = MIRROR_AXIS) -> None:
+    """Reflect every layer, or put them all back.
+
+    Set on `layer.affine`, which napari applies in WORLD space after the
+    layer's own scale and translate. That is what lets one matrix serve
+    meshes in micrometers and images in voxels alike: the images keep the
+    scale and translate that place them, and the reflection composes on
+    top rather than replacing it.
+
+    Layers currently detached by the display mode are included. They are
+    the same objects when re-appended, so the affine travels with them
+    and a 2D/3D switch cannot lose the mirror.
+    """
+    for layer in layers:
+        ndim = int(getattr(layer, "ndim", 3) or 3)
+        with contextlib.suppress(Exception):
+            layer.affine = (
+                mirror_matrix(ndim, center, axis) if on else np.eye(ndim + 1)
+            )
+
+
+__all__ = [
+    "GIMBAL_NUDGE_DEG",
+    "MIRROR_AXIS",
+    "apply_mirror",
+    "fit_view",
+    "install_home_orientation",
+    "install_initial_fit",
+    "maximize",
+    "mirror_center",
+    "mirror_matrix",
+    "orient_anterior",
+]
