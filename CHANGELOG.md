@@ -34,6 +34,7 @@
 - `lobemap manifest --prune` keeps the recorded `base_url`; it used to write a manifest that `fetch` could not download from.
 - A download that stalls fails after 30 seconds without data instead of hanging, so `fetch` returns and bare `lobemap` still opens its window.
 - A mesh container whose names can only be read through pickle is refused instead of unpickled, so a crafted `.npz` in a data root, the bridge cache or a custom `--base-url` cannot run code. A pickled bridge-cache entry is rebuilt; a trusted legacy file loads with `MeshSet.load(path, allow_legacy_pickle=True)`.
+- Rewriting `registry/nomenclature.csv` keeps its LF line endings, so a one-row change is a one-line diff rather than a rewrite of all 477 lines.
 
 ### Changed
 
