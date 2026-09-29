@@ -28,7 +28,7 @@ import numpy as np
 from platformdirs import user_cache_dir
 
 from . import spaces as sp
-from .meshfmt import MeshSet
+from .meshfmt import LegacyContainerError, MeshSet
 
 CACHE_VERSION = 1
 
@@ -162,7 +162,10 @@ def resolve_meshset(
     )
     cached = cache_root() / f"{key.digest()}.npz"
     if use_cache and cached.exists():
-        return MeshSet.load(cached)
+        try:
+            return MeshSet.load(cached)
+        except LegacyContainerError:
+            pass                 # a pickled entry is never read; rebuild it
 
     out, record = resolve_points(
         meshset.vertices.astype(np.float64),
