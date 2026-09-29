@@ -295,15 +295,30 @@ def test_the_initial_fit_watches_napari_canvas_not_the_widget(viewer):
     """`fit_to_view` divides by `viewer.canvas.size`, which lags the widget.
 
     Watching the Qt widget instead is why FAFB kept its 900x700 zoom while
-    other spaces happened to refit correctly.
+    other spaces happened to refit correctly. So only napari's own canvas
+    size changes here, as it does after a resize settles: the widget keeps
+    its size, and the view must refit anyway on the next draw. Once the
+    user touches the view, it is theirs and stays put.
     """
-    import inspect
+    from lobemap.viewer.app import fit_view, install_initial_fit
 
-    from lobemap.viewer.app import install_initial_fit
+    viewer.add_image(np.zeros((40, 30, 20), np.uint8))
+    assert install_initial_fit(viewer) is True
+    canvas = viewer.window._qt_viewer.canvas
+    cam = getattr(viewer, "scene", viewer).camera
+    before = cam.zoom
 
-    source = inspect.getsource(install_initial_fit)
-    assert 'getattr(viewer, "canvas", None)' in source
-    assert "native" not in source
+    viewer.canvas.size = (400, 1600)
+    canvas.events.draw()
+    refit = cam.zoom
+    assert refit != pytest.approx(before), "no refit when napari's size moved"
+    fit_view(viewer)
+    assert cam.zoom == pytest.approx(refit), "refit was not a fit to the new size"
+
+    canvas.events.mouse_press(pos=(1, 1), button=1)
+    viewer.canvas.size = (1600, 400)
+    canvas.events.draw()
+    assert cam.zoom == pytest.approx(refit), "refit after the user took the view"
 
 
 def test_the_initial_fit_survives_a_viewer_without_a_canvas():
