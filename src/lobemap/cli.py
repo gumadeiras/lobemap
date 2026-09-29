@@ -120,7 +120,11 @@ def cmd_manifest(args) -> int:
     def progress(i, n, asset_id, size):
         print(f"  [{i}/{len(assets)}] {asset_id:26s} {size / 1e6:9.1f} MB", flush=True)
 
-    arts = mf.build(data_root, assets, progress=progress)
+    # The previous records go to `build` too: a store whose content is
+    # unchanged keeps its published transfer hash instead of this machine's.
+    out = Path(args.output) if args.output else root / "manifest.toml"
+    previous, prev_base = mf.load(out) if out.exists() else ([], None)
+    arts = mf.build(data_root, assets, progress=progress, previous=previous)
 
     # Artifacts that are not on disk KEEP their existing record unless the
     # caller asks otherwise. `build` only describes files it can see, so a
@@ -129,8 +133,6 @@ def cmd_manifest(args) -> int:
     # later download. With the three stains absent this would have discarded
     # exactly the records that cannot be recomputed without ~19 GB and hours
     # of work.
-    out = Path(args.output) if args.output else root / "manifest.toml"
-    previous, prev_base = mf.load(out) if out.exists() else ([], None)
     # Where the artifacts are published is not a record of what is on
     # disk, so `--prune` keeps it too. It used to be read only on the path
     # that kept records, and pruning wrote a manifest with no base_url.
@@ -209,7 +211,8 @@ def cmd_fetch(args) -> int:
     print(f"data root: {data_root}")
 
     def progress(i, n, status):
-        mark = {"ok": "OK  ", "missing": "MISS", "corrupt": "BAD "}[status.state]
+        mark = {"ok": "OK  ", "missing": "MISS", "corrupt": "BAD ",
+                "unverified": "UNVR"}[status.state]
         detail = f"  {status.detail}" if status.detail else ""
         print(f"  [{i}/{n}] {mark} {status.artifact.asset:28.28s} "
               f"{status.artifact.path:34.34s}{detail}", flush=True)
@@ -238,11 +241,10 @@ def cmd_fetch(args) -> int:
 def cmd_pack(args) -> int:
     """Write the transfer files to a directory, ready to upload.
 
-    `manifest` and `fetch --check` both zip a Zarr store in order to hash
-    it and then delete the archive. That is right for checking and useless
-    for publishing: the exact bytes a downloader will receive get produced
-    and thrown away, leaving nothing to upload. This writes the same
-    archives and keeps them, under the exact names `fetch` will ask for --
+    A Zarr store is checked by its content digest, and `manifest` zips one
+    only to hash it, so nothing else produces the exact bytes a downloader
+    will receive. This writes those archives and keeps them, under the
+    exact names `fetch` will ask for --
     `<asset>.zarr.zip` for a store, the file itself otherwise -- so the
     output directory maps one-to-one onto a set of release assets.
 
