@@ -30,6 +30,7 @@
 
 ### Changed
 
+- `RELEASE.md` is back, updated for the `src/` layout, with a check of the built wheel outside the checkout and the steps for publishing a `data-v<N>` release.
 - The README flags the uneven quality of the neuPrint meshes: several glomeruli in the hemibrain and male CNS atlases have holes or are in multiple pieces, as published.
 
 - Spelling throughout the repository is American English. This renames one function, `normalise` to `normalize`, in `core.names` and `core.reference`; the published data files under `registry/sources/` keep their own wording.
