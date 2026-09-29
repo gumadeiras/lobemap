@@ -51,23 +51,31 @@ def test_sensillum_cells(raw, want):
     assert reference.normalize(raw, split_commas=False) == want
 
 
-def test_the_shipped_table_loads_and_covers_the_atlases(registry_root, registry):
+def test_the_shipped_table_loads(registry_root):
     assert reference.default_path(registry_root).exists(), "reference table missing"
     table = reference.load(registry_root)
     assert len(table) >= 62, len(table)
 
+
+@pytest.mark.requires_data
+def test_every_compartment_of_every_atlas_joins_the_table(registry_root, registry):
+    """All of them, which is what the shipped table achieves.
+
+    The bar used to be half, on the theory that every atlas carries
+    compartments the table does not list. None does: all 476 compartments
+    of the six atlases join, so a half-empty annotation column would have
+    passed.
+    """
+    table = reference.load(registry_root)
+    assert registry.atlases
     for atlas in registry.atlases.values():
-        if not atlas.compartments:
-            continue
+        assert atlas.compartments, f"{atlas.id} has no compartments"
         missed = [
             c.published_name for c in atlas.compartments
             if not any(table.get(k) or table.get(k.lower())
                        for k in (list(c.canonical) + [c.published_name]))
         ]
-        # Every atlas carries non-olfactory or split compartments the
-        # reference table does not list; most should still join.
-        matched = len(atlas.compartments) - len(missed)
-        assert matched >= 0.5 * len(atlas.compartments), (
-            f"{atlas.id}: only {matched}/{len(atlas.compartments)} joined; "
-            f"missed e.g. {missed[:6]}"
+        assert not missed, (
+            f"{atlas.id}: {len(missed)}/{len(atlas.compartments)} "
+            f"compartments have no reference row: {missed[:6]}"
         )
