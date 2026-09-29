@@ -10,15 +10,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from lobemap.core.registry import Registry
 from lobemap.ingest.label_volume import label_names
 
 
-@pytest.fixture(scope="module")
-def registry():
-    return Registry.load("registry")
-
-
+@pytest.mark.requires_data
 def test_the_volume_carries_its_own_value_to_name_map(registry):
     """The mapping must ship with the data, not be re-derived from source."""
     volume = registry.volume("grabe2015_labels")
@@ -34,6 +29,7 @@ def test_label_names_drops_non_glomerulus_materials():
     assert got == {2: "DA1(L)", 3: "VA1d(R)", 4: "D"}
 
 
+@pytest.mark.requires_data
 def test_mask_colors_equal_mesh_colors(registry):
     napari = pytest.importorskip("napari")
     from lobemap.viewer.app import build_scene

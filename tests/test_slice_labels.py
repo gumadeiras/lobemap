@@ -113,18 +113,15 @@ def test_labels_survive_moving_the_slider(overlay):
 # -- the visibility bug -------------------------------------------------
 
 
-def test_entering_2d_makes_the_contours_visible():
+@pytest.mark.requires_data
+def test_entering_2d_makes_the_contours_visible(registry):
     """They are added to the viewer before the mode switch runs.
 
     `_add_contours` puts them in `viewer.layers`, so a guard that only set
     visibility when appending left every contour hidden and nothing drew.
     """
-    from pathlib import Path
-
-    from lobemap.core.registry import Registry
     from lobemap.viewer.app import build_scene, install_display_mode
 
-    registry = Registry.load(Path(__file__).resolve().parents[1] / "registry")
     viewer = napari.Viewer(ndisplay=2, show=False)
     try:
         surfaces, contours = build_scene(viewer, registry, "JRCFIB2018F")
@@ -139,13 +136,10 @@ def test_entering_2d_makes_the_contours_visible():
         viewer.close()
 
 
-def test_a_contour_mirrors_its_surface_across_a_mode_switch():
-    from pathlib import Path
-
-    from lobemap.core.registry import Registry
+@pytest.mark.requires_data
+def test_a_contour_mirrors_its_surface_across_a_mode_switch(registry):
     from lobemap.viewer.app import build_scene, install_display_mode
 
-    registry = Registry.load(Path(__file__).resolve().parents[1] / "registry")
     viewer = napari.Viewer(ndisplay=3, show=False)
     try:
         surfaces, contours = build_scene(viewer, registry, "JRCFIB2018F")

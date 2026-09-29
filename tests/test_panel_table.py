@@ -9,25 +9,13 @@ sort rather than before.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-REGISTRY = Path(__file__).resolve().parents[1] / "registry"
 pytest.importorskip("napari")
 
 
-@pytest.fixture(scope="module")
-def registry():
-    from lobemap.core.registry import Registry
-
-    if not (REGISTRY / "data").is_dir():
-        pytest.skip("no ingested data")
-    return Registry.load(REGISTRY)
-
-
 @pytest.fixture
-def tab(registry):
+def tab(core_data, registry):
     import napari
 
     from lobemap.viewer.app import build_scene
@@ -61,7 +49,7 @@ def test_it_opens_sorted_by_glomerulus(tab):
     assert tab.table.isSortingEnabled()
 
 
-def test_numbers_sort_naturally(tab):
+def test_numbers_sort_naturally():
     """DA10 after DA9, which plain string order gets wrong."""
     from lobemap.viewer.panel import _natural_key
 
@@ -169,7 +157,7 @@ def test_annotation_columns_are_populated(tab):
 
 
 @pytest.fixture
-def fafb_tabs(registry):
+def fafb_tabs(core_data, registry):
     """FAFB has both kinds of layer: one atlas and one neuropil set."""
     import napari
 
@@ -382,6 +370,7 @@ def test_a_bare_name_matching_its_canonical_is_not_red(tab):
     assert da1.foreground().color().name() != DISAGREE_COLOR
 
 
+@pytest.mark.requires_data
 def test_the_canonical_column_only_appears_where_it_says_something(registry):
     """Per atlas: S12 shares a space with two that disagree but has none
     of its own, so it does not carry the column."""
@@ -434,7 +423,7 @@ def test_the_filter_reaches_every_text_column(tab):
 
 
 @pytest.fixture
-def session(registry):
+def session(core_data, registry):
     """A full FAFB session, so the display-mode hook is installed."""
     import napari
 
@@ -508,6 +497,7 @@ def test_3d_still_shows_the_mesh(session):
 # sits underneath them, which also made a neuropil shell tab 0. The panel
 # then opened on the one tab with no glomeruli behind it.
 
+@pytest.mark.requires_data
 @pytest.mark.parametrize("space,expect", [
     ("JRCFIB2018F", "neuprint_hemibrain"),   # three atlases; spaces.toml picks
     ("FAFB14", "benton2025"),                # one atlas, behind fafb_neuropil
@@ -532,6 +522,7 @@ def test_it_opens_on_the_spaces_primary_atlas(registry, space, expect):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_the_open_tab_is_the_atlas_that_is_drawn(registry):
     """The panel and the canvas must agree on which atlas is showing."""
     import napari
@@ -555,6 +546,7 @@ def test_the_open_tab_is_the_atlas_that_is_drawn(registry):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_reference_tabs_come_after_every_atlas(registry):
     """Neuropil and brain shells read last, whatever order the scene built.
 

@@ -18,11 +18,6 @@ from lobemap.core.registry import Registry
 from lobemap.viewer.axes import axis_labels_for, label_viewer_axes
 
 
-@pytest.fixture(scope="module")
-def registry():
-    return Registry.load("registry")
-
-
 def _strip(name: str) -> str:
     return re.sub(r"^AL-", "", re.sub(r"\(.\)$", "", name))
 
@@ -36,6 +31,7 @@ def _group_centroid(meshset, keep):
     return np.mean(picked, axis=0) if picked else None
 
 
+@pytest.mark.requires_data
 @pytest.mark.parametrize(
     "space,atlas",
     [
@@ -75,6 +71,7 @@ def test_frame_agrees_with_positional_nomenclature(registry, space, atlas):
         )
 
 
+@pytest.mark.requires_data
 def test_lateral_points_at_the_biological_right_in_fafb(registry):
     """A mirrored space MUST flip the lateral axis.
 
@@ -121,6 +118,7 @@ def test_lateral_points_at_the_biological_right_in_fafb(registry):
     assert float(np.dot(biological_right, frame["R"])) > 0.9
 
 
+@pytest.mark.requires_data
 @pytest.mark.parametrize(
     "space,atlas",
     [
@@ -277,6 +275,7 @@ def test_the_anatomical_labels_differ_between_spaces(registry):
         assert {axes[p] for p in trio} == {"AP", "DV", "LR"}, (space_id, trio)
 
 
+@pytest.mark.requires_data
 def test_no_axes_layer_is_created(registry):
     """The anatomy is named on napari's own overlay, not drawn as a layer.
 
@@ -302,6 +301,7 @@ def test_no_axes_layer_is_created(registry):
         viewer.close()
 
 
+@pytest.mark.requires_data
 @pytest.mark.parametrize("space_id",
                          ["FAFB14", "JRCFIB2018F", "JRCFIB2022M", "GRABE"])
 def test_napari_own_triad_always_names_the_array_axes(registry, space_id):
@@ -330,6 +330,7 @@ def test_napari_own_triad_always_names_the_array_axes(registry, space_id):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_the_indicator_is_anchored_to_the_canvas_not_the_data(registry):
     """Otherwise it is off-screen in the spaces that do not start at zero.
 
@@ -441,14 +442,14 @@ def test_a_pole_name_is_not_an_axis(registry):
         rotation_axis_vector(space)
 
 
-def test_an_axis_without_an_angle_is_rejected(registry):
+def test_an_axis_without_an_angle_is_rejected(registry_root):
     """Half a declaration names no rotation, and ignoring it would leave
     the arrows on the array axes while the registry claimed otherwise."""
     import dataclasses
 
     from lobemap.core.registry import RegistryError
 
-    reg = Registry.load("registry")
+    reg = Registry.load(registry_root)
     reg.spaces["GRABE"] = dataclasses.replace(
         reg.spaces["GRABE"], anatomical_rotation_deg=None
     )
@@ -456,6 +457,7 @@ def test_an_axis_without_an_angle_is_rejected(registry):
         reg.validate()
 
 
+@pytest.mark.requires_data
 def test_the_anatomy_gets_a_second_triad_shown_only_in_3d(registry):
     """Two triads sharing one origin in 3D; napari's alone in 2D.
 

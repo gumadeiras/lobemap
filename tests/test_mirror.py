@@ -20,15 +20,9 @@ import numpy as np
 import pytest
 
 from lobemap.core.model import anatomical_axes, anatomical_triad
-from lobemap.core.registry import Registry
 from lobemap.viewer.app import MIRROR_AXIS, load_space
 
 SPACES = ("FAFB14", "JRCFIB2018F", "JRCFIB2022M", "GRABE")
-
-
-@pytest.fixture(scope="module")
-def registry():
-    return Registry.load("registry")
 
 
 def _reflection():
@@ -109,6 +103,7 @@ def _oriented_volume(surface):
     return _signed_volume(v, f)
 
 
+@pytest.mark.requires_data
 def test_mirroring_reverses_the_surface_winding(registry):
     """Otherwise every triangle faces inward under the reflection."""
     napari = pytest.importorskip("napari")
@@ -135,6 +130,7 @@ def test_mirroring_reverses_the_surface_winding(registry):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_the_winding_survives_a_selection_change(registry):
     """compact() re-uploads from the MeshSet, so it must re-wind too."""
     napari = pytest.importorskip("napari")
@@ -152,6 +148,7 @@ def test_the_winding_survives_a_selection_change(registry):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_mirror_moves_every_layer_and_keeps_the_data(registry):
     napari = pytest.importorskip("napari")
     viewer = napari.Viewer(show=False)
@@ -188,6 +185,7 @@ def test_mirror_moves_every_layer_and_keeps_the_data(registry):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_toggling_twice_does_not_drift(registry):
     """The reflection plane is measured once, so it cannot creep."""
     napari = pytest.importorskip("napari")

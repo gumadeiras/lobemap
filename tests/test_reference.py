@@ -7,13 +7,9 @@ are taken from the real table, not invented.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from lobemap.core import reference
-
-REGISTRY = Path(__file__).resolve().parents[1] / "registry"
 
 
 @pytest.mark.parametrize(("raw", "want"), [
@@ -55,15 +51,12 @@ def test_sensillum_cells(raw, want):
     assert reference.normalize(raw, split_commas=False) == want
 
 
-def test_the_shipped_table_loads_and_covers_the_atlases():
-    from lobemap.core.registry import Registry
-
-    assert reference.default_path(REGISTRY).exists(), "reference table missing"
-    table = reference.load(REGISTRY)
+def test_the_shipped_table_loads_and_covers_the_atlases(registry_root, registry):
+    assert reference.default_path(registry_root).exists(), "reference table missing"
+    table = reference.load(registry_root)
     assert len(table) >= 62, len(table)
 
-    reg = Registry.load(REGISTRY, validate=False)
-    for atlas in reg.atlases.values():
+    for atlas in registry.atlases.values():
         if not atlas.compartments:
             continue
         missed = [

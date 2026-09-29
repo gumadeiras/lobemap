@@ -10,12 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from lobemap.core.registry import Registry
-
-
-@pytest.fixture(scope="module")
-def registry():
-    return Registry.load("registry")
+pytestmark = pytest.mark.requires_data
 
 
 def _panel(registry, space="GRABE"):

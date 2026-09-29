@@ -118,15 +118,12 @@ def test_level_below_half_expands_against_background_only():
     assert low > high, "a lower level must enclose more voxels"
 
 
-def test_the_shipped_grabe_meshes_are_disjoint():
+@pytest.mark.requires_data
+def test_the_shipped_grabe_meshes_are_disjoint(registry):
     """The real thing, not a fixture."""
     trimesh = pytest.importorskip("trimesh")
-    from pathlib import Path
 
-    from lobemap.core.registry import Registry
-
-    reg = Registry.load(Path(__file__).resolve().parents[1] / "registry")
-    ms = reg.mesh("grabe2015_glomeruli")
+    ms = registry.mesh("grabe2015_glomeruli")
     meta = ms.meta
     assert meta.get("disjoint_verified") is True
     assert meta.get("mask_sigma_um", 0) > 0

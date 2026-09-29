@@ -148,13 +148,11 @@ def test_transfer_name_appends_zip_only_for_directories():
     assert d.transfer_name == "s.zarr.zip"
 
 
-def test_shipped_manifest_matches_what_is_on_disk():
+def test_shipped_manifest_matches_what_is_on_disk(registry_root):
     """The committed manifest must describe the real registry."""
-    from pathlib import Path
-
     from lobemap.core.registry import Registry, default_data_root
 
-    root = Path(__file__).resolve().parents[1] / "registry"
+    root = registry_root
     path = root / "manifest.toml"
     if not path.exists():
         pytest.skip("no manifest committed")
