@@ -412,14 +412,25 @@ class ContourOverlay:
         return int(order[0]) if order else 0
 
     def slice_position(self) -> float:
-        """World coordinate of the current slice along the sliced axis."""
+        """Coordinate of the current slice along the sliced axis, in mesh units.
+
+        The slider is in WORLD coordinates and the meshes are cut in their
+        own. The two differ under the mirror, a reflection on `layer.affine`
+        about x: slicing along x, world x is the reflection of mesh x, and a
+        contour computed at the world value lay on a plane napari does not
+        show. Through the layer's own transform, the plane is the one on
+        screen whatever the affine.
+        """
         dims = self.viewer.dims
+        axis = self.axis
         point = getattr(dims, "point", None)
-        if point is not None and len(point) > self.axis:
-            return float(point[self.axis])
+        if point is not None and len(point) > axis:
+            if len(point) == self.layer.ndim:
+                return float(self.layer.world_to_data(point)[axis])
+            return float(point[axis])
         # Older napari: derive from the step index and the axis range.
-        step = dims.current_step[self.axis]
-        lo, _hi, span = dims.range[self.axis]
+        step = dims.current_step[axis]
+        lo, _hi, span = dims.range[axis]
         return float(lo + step * span)
 
     def contours_at(self, position: float) -> tuple[list[np.ndarray], list[int]]:

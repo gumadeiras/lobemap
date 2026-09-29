@@ -27,8 +27,8 @@ out as trimesh drew it, less any zero-length edges.
 
 The rest is invalidation. Sections are cached per plane, and a refresh that
 would draw the same shapes again does nothing, so the contours must still
-follow a change of selection and of space, and a 2D/3D switch must draw at
-most once.
+follow a change of selection, of the mirror and of space, and a 2D/3D switch
+must draw at most once.
 """
 
 from __future__ import annotations
@@ -450,6 +450,49 @@ def _switcher(viewer, registry, session):
         viewer, registry, session,
         lambda space: load_space(viewer, registry, space, fit=False),
     )
+
+
+def test_contours_follow_the_mirror(registry):
+    """Slicing along the mirrored axis, the plane on screen is the reflected one."""
+    viewer, session, primary = _open(registry, "FAFB14")
+    switcher = _switcher(viewer, registry, session)
+    try:
+        overlay = session.contours[primary]
+        surface = session.surfaces[primary]
+        z = _step_into(viewer, surface, 0.5)
+
+        # Across z the mirror changes nothing that is cut.
+        switcher.mirror.setChecked(True)
+        _settle()
+        assert_draws(overlay, z, "mirrored, cut in z:")
+        switcher.mirror.setChecked(False)
+        _settle()
+
+        viewer.dims.order = (0, 1, 2)      # the slider on x, the mirror's axis
+        _settle()
+        # A plane cutting the atlas both as it is and as reflected.
+        center = session.mirror_center
+        lo, hi = _extent(viewer, surface)
+        lo, hi = max(lo, 2 * center - hi), min(hi, 2 * center - lo)
+        assert lo < hi, "the atlas does not straddle the mirror plane"
+        x = _step_to(viewer, lo + 0.3 * (hi - lo))
+        assert_draws(overlay, x, "cut in x:")
+
+        switcher.mirror.setChecked(True)
+        _settle()
+        mirrored = 2 * center - x
+        assert _expected(overlay, mirrored), "the reflected plane cuts nothing"
+        assert_draws(overlay, mirrored, "mirrored, cut in x:")
+        # And it is drawn on the plane the slider shows.
+        for pts in overlay.layer.data:
+            world = overlay.layer.data_to_world(pts[0])
+            assert world[0] == pytest.approx(x, abs=1e-3)
+
+        switcher.mirror.setChecked(False)
+        _settle()
+        assert_draws(overlay, x, "unmirrored:")
+    finally:
+        viewer.close()
 
 
 def test_a_new_space_draws_its_own_contours(registry):
