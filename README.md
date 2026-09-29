@@ -85,6 +85,12 @@ elsewhere) lets you drop the prefix. The commands work from any directory: a che
 | JRCFIB2022M (male CNS) | neuPrint [male CNS](https://doi.org/10.1016/j.cell.2026.08.015) | 58 + 58 |
 | GRABE | [Grabe 2015](https://doi.org/10.1002/cne.23697) | 54 + 54 |
 
+Three gaps in the published data are worth knowing before comparing atlases:
+
+- The neuPrint hemibrain `VM2(R)` is counted above but is effectively missing: it is a 14 µm³ fragment, where VM2 is 1,342–3,259 µm³ in every other atlas. Schlegel S12 has a complete VM2 in the same volume. `lobemap check` lists it as a known defect ([`registry/checks.toml`](registry/checks.toml)).
+- Grabe 2015 has no `VM6`. Its Amira material table names VM6 on both sides, but the published label volume ("sure ones" only) has no voxels for either, so 54 glomeruli per side are meshed rather than 55.
+- In the male CNS neuropil set, `AME(L)` is about a quarter of the volume of `AME(R)` (4,172 against 16,608 µm³) after the watertight repair. Treat it as incomplete; the source mesh is not kept, so it is not known whether the ROI or the repair lost the rest.
+
 Which one to reach for depends on what you are comparing against:
 
 - **GRABE** is the only atlas built from an intact, living brain, imaged
