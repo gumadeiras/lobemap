@@ -105,13 +105,13 @@ class SpaceSwitcher(QWidget):
         # given, which is the opposite of what is wanted here.
 
     def settle(self) -> None:
-        """Sit below the compartment panel, however it was just re-added.
+        """Sit above the compartment panel, however it was just re-added.
 
-        Loading a scene creates a NEW compartment panel and docks it, and Qt
-        puts a newly added dock above an existing one in the same area -- so
-        after one switch this control had jumped from the bottom of the right
-        column to the top of it, and stayed there. Re-splitting pins the
-        order rather than relying on insertion order.
+        Which space is open is read before anything about it, so the picker
+        heads the right column. Loading a scene creates a NEW compartment
+        panel and docks it, and Qt places a newly added dock wherever its
+        insertion lands, so the order is pinned by re-splitting rather than
+        left to insertion order.
         """
         panel = getattr(self.session, "dock", None)
         if self.dock is None or panel is None:
@@ -122,7 +122,7 @@ class SpaceSwitcher(QWidget):
         with contextlib.suppress(Exception):
             from qtpy.QtCore import Qt
 
-            window.splitDockWidget(panel, self.dock, Qt.Vertical)
+            window.splitDockWidget(self.dock, panel, Qt.Vertical)
             # And give it as little of the column as it will take. This is a
             # one-line control; the compartment table beside it is the thing
             # worth the height. Qt distributes by RATIO, not pixels, so the
@@ -143,7 +143,7 @@ class SpaceSwitcher(QWidget):
                                     QSizePolicy.Policy.Minimum)
             wanted = max(self.dock.sizeHint().height(),
                          self.dock.minimumSizeHint().height())
-            window.resizeDocks([panel, self.dock], [10_000, wanted],
+            window.resizeDocks([self.dock, panel], [wanted, 10_000],
                                Qt.Vertical)
 
     def _fill_slices(self, keep: str | None = None) -> None:

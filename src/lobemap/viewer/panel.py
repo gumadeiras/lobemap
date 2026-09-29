@@ -112,6 +112,24 @@ class _Cell(QTableWidgetItem):
         return super().__lt__(other)
 
 
+#: Bulk buttons that act on the 2D slice only, and are disabled in 3D.
+TWO_D_ONLY = ("Label all", "Label none", "Fill all", "Fill none")
+
+
+def _button_tips(title: str) -> dict[str, str]:
+    """What each bulk button does, and to which rows: this tab's only."""
+    return {
+        "Filtered": f"Show exactly the rows of {title} that the filter leaves",
+        "Invert": f"Show the unchecked rows of {title} instead of the checked ones",
+        "Show all": f"Show every row of {title}",
+        "Show none": f"Hide every row of {title}",
+        "Label all": f"Write the name of every shown row of {title} on the slice (2D only)",
+        "Label none": f"Remove every slice label of {title} (2D only)",
+        "Fill all": f"Fill the slice contour of every shown row of {title} (2D only)",
+        "Fill none": f"Draw every slice contour of {title} as an outline (2D only)",
+    }
+
+
 class AtlasTab(QWidget):
     def __init__(self, surface, compartments=None, contour=None,
                  annotation=None, is_atlas: bool = True) -> None:
@@ -128,6 +146,7 @@ class AtlasTab(QWidget):
         #: the reference table is absent, which only empties those columns.
         self.reference = annotation or {}
         self._updating = False
+        self._three_d: bool | None = None
 
         layout = QVBoxLayout()
         layout.setContentsMargins(4, 4, 4, 4)
@@ -144,9 +163,11 @@ class AtlasTab(QWidget):
         # its own column: the button below a given one is always its
         # opposite. `Show` names what the checkbox in column 0 does, which
         # `All`/`None` left to be guessed now that `Label` and `Fill` have
-        # their own pairs.
+        # their own pairs. The tooltips say which rows each one acts on.
         buttons = QGridLayout()
         buttons.setSpacing(4)
+        tips = _button_tips(surface.name)
+        self._two_d_buttons: list[QPushButton] = []
         for col, (top, bottom) in enumerate((
             (("Filtered", self._filtered_only), ("Invert", self._invert)),
             (("Show all", self._all), ("Show none", self._none)),
@@ -156,8 +177,11 @@ class AtlasTab(QWidget):
         )):
             for row, (label, slot) in enumerate((top, bottom)):
                 button = QPushButton(label)
+                button.setToolTip(tips[label])
                 button.clicked.connect(slot)
                 buttons.addWidget(button, row, col)
+                if label in TWO_D_ONLY:
+                    self._two_d_buttons.append(button)
             buttons.setColumnStretch(col, 1)
         layout.addLayout(buttons)
 
@@ -323,6 +347,25 @@ class AtlasTab(QWidget):
         else:
             self.count.setText(f"{shown} / {n} shown")
 
+    def set_mode(self, three_d: bool) -> None:
+        """Disable the 2D-only controls in 3D, where they draw nothing."""
+        if three_d == self._three_d:
+            return
+        self._three_d = three_d
+        for button in self._two_d_buttons:
+            button.setEnabled(not three_d)
+        self._updating = True
+        try:
+            for row in range(self.table.rowCount()):
+                for col in (LABEL_COL, FILL_COL):
+                    item = self.table.item(row, col)
+                    flags = item.flags()
+                    item.setFlags(flags & ~Qt.ItemIsEnabled if three_d
+                                  else flags | Qt.ItemIsEnabled)
+        finally:
+            self._updating = False
+        self._update_count()
+
     # -- handlers --------------------------------------------------------
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
@@ -478,6 +521,12 @@ class CompartmentPanel(QTabWidget):
             self.tabs[name] = tab
             self.addTab(tab, name[:20])
         self._open_default_tab(registry, space)
+        if viewer is not None:
+            self.set_mode(viewer.dims.ndisplay == 3)
+
+    def set_mode(self, three_d: bool) -> None:
+        for tab in self.tabs.values():
+            tab.set_mode(three_d)
 
     def _open_default_tab(self, registry, space: str | None) -> None:
         """Open on an atlas, never on the reference geometry.

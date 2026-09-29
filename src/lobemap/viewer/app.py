@@ -303,6 +303,8 @@ def install_display_mode(viewer, surfaces, contours, images=(),
             surface.sync()
         if session is None:
             return
+        if session.panel is not None:
+            session.panel.set_mode(three_d)
         if three_d and not session.oriented and space is not None:
             session.oriented = orient_anterior(
                 viewer, space, reflect_axis=session.reflect_axis()
