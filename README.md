@@ -190,17 +190,15 @@ CC BY and CC BY-NC require attribution, so cite the paper behind each atlas you 
   by intersection rather than rasterized, so they stay sharp at any zoom.
 - Each glomerulus keeps one color across the atlases of its space, in 3D,
   in 2D and on its slice label.
-- The right-hand panel has a tab per atlas: a checkbox to show each
-  glomerulus, and a second to write its name on the slice.
-- The control at the bottom right switches between spaces without
-  restarting.
-- A space with several atlases opens on one of them — `primary_atlas` in
-  `registry/spaces.toml` — with the rest loaded and switched off. The
-  panel's tabs turn the others on.
-- A space's reference image — the virtual stain, or the Grabe confocal
-  channel — is shown in grayscale whenever it has been fetched. `--show`
-  turns on a layer that is off, by asset id or by role, for example
-  `--show neuropil`.
+- The right-hand panel has a tab per atlas. A checked row is a drawn glomerulus, in 3D and in 2D. A space opens with its primary atlas checked and every other atlas and reference shell unchecked, and hiding a layer with napari's eye unchecks its rows.
+- Two more checkboxes per row write the glomerulus's name on the slice and fill its contour. They and their buttons work in 2D only, so they are disabled in 3D. Each bulk button's tooltip says which rows it acts on.
+- The **Driver line** menu of an atlas tab checks the glomeruli that a GAL4 or QF2 line labels, from the `sensory_neuron_lines` and `projection_neuron_lines` columns of `registry/reference/glomerulus_ground_truth.csv`. `Orco-GAL4 & GH146-GAL4` checks the glomeruli that both lines label.
+- The **VFB** button opens the Virtual Fly Brain term page of the selected glomerulus. Selecting its row, or hovering it in the canvas, selects it.
+- Hovering names the glomerulus under the cursor in the status bar: on its mesh in 3D, and inside its outline in 2D.
+- The controls at the top right switch between spaces without restarting, mirror the space for display, and choose the axis a 2D slice steps along. Each slice choice is named by the anatomical axis nearest to it, with the angle between them, for example `Anterior-Posterior (z, 17.5° off)` in FAFB14: a slice is cut along the voxel grid, not along the anatomy.
+- 2D opens on a plane that cuts the shown atlas. A plane you chose is kept when you go to 3D and back.
+- A space with several atlases opens on one of them — `primary_atlas` in `registry/spaces.toml` — with the rest loaded and unchecked. The panel's tabs turn the others on.
+- A space's reference image — the virtual stain, or the Grabe confocal channel — is shown in grayscale whenever it has been fetched. `--show` turns on something that starts off, in the first scene only: an asset id (`--show fafb_neuropil`), an atlas id (`--show schlegel2021_s12`) or a role (`--show neuropil`). A name the space does not have, or an unknown space, is refused with one line before any window opens.
 - In 3D the corner carries two axis indicators: one for the array axes,
   labeled `x`, `y`, `z`, and one for the anatomical axes. Each
   anatomical arrow is labeled with the pole it points at, one from each
@@ -209,6 +207,7 @@ CC BY and CC BY-NC require attribution, so cite the paper behind each atlas you 
   an `x`/`y`/`z` one.
 - In 2D only the array indicator is shown, since a slice is cut along
   array axes rather than anatomical ones.
+- Under the mirror both indicators follow the reflection, in 2D and 3D, and the home button faces the reflected anatomy.
 
 Both the mesh and contour layers stay in the layer list in either mode; the
 one the current mode cannot draw is simply switched off.
