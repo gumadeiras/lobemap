@@ -131,9 +131,14 @@ def cmd_manifest(args) -> int:
     # exactly the records that cannot be recomputed without ~19 GB and hours
     # of work.
     out = Path(args.output) if args.output else root / "manifest.toml"
+    previous, prev_base = mf.load(out) if out.exists() else ([], None)
+    # Where the artifacts are published is not a record of what is on
+    # disk, so `--prune` keeps it too. It used to be read only on the path
+    # that kept records, and pruning wrote a manifest with no base_url.
+    if args.base_url is None:
+        args.base_url = prev_base
     dropped = []
-    if out.exists() and not args.prune:
-        previous, prev_base = mf.load(out)
+    if previous and not args.prune:
         fresh = {a.path for a in arts}
         # Only for paths the registry STILL declares. Keeping every
         # unregenerated record instead would preserve orphans: renaming
@@ -156,8 +161,6 @@ def cmd_manifest(args) -> int:
                 print(f"    {a.path}")
         arts = arts + kept
         arts.sort(key=lambda a: a.path)
-        if args.base_url is None:
-            args.base_url = prev_base
     elif args.prune:
         dropped = ["(pruned records for absent artifacts)"]
     out.write_text(mf.dump(arts, args.base_url), encoding="utf-8")

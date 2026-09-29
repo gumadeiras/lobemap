@@ -31,6 +31,7 @@
 - An installed lobemap carries its registry metadata, so `lobemap spaces`, `validate` and `fetch` work after `pip install lobemap` instead of reporting 0 spaces or no manifest; the data still does not ship in the package.
 - Wrong input fails with one line and exit 2 instead of succeeding or printing a traceback: a registry directory that does not exist, and an unknown asset or space given to `fetch`, `pack`, `build`, `repair`, `bridge` or `stain`.
 - `--data-root` applies to `manifest`, `spaces`, `nomenclature`, `repair`, `stain` and `ingest neuprint`: `manifest` no longer crashes on it, and `stain` and `ingest neuprint` write their output there instead of always into `registry/data`.
+- `lobemap manifest --prune` keeps the recorded `base_url`; it used to write a manifest that `fetch` could not download from.
 
 ### Changed
 
