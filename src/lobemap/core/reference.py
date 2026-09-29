@@ -159,29 +159,101 @@ def default_path(registry_root) -> Path:
     return Path(registry_root) / "reference" / "glomerulus_ground_truth.csv"
 
 
+#: Key in `load`'s output holding the row's Virtual Fly Brain term page.
+VFB = "vfb"
+
+#: The term page URL, in the form the old viewer and its term table used.
+VFB_TERM_URL = "https://www.virtualflybrain.org/term/{slug}-{term}/"
+
+
+def vfb_url(vfb_name: str | None, fbbt_id: str | None) -> str:
+    """Term page for one FBbt term, or "" when the row names none.
+
+    `antennal lobe glomerulus DA1` and `FBbt_00003932` give
+    `.../term/antennal-lobe-glomerulus-da1-fbbt_00003932/`.
+    """
+    name, term = (vfb_name or "").strip(), (fbbt_id or "").strip()
+    if not name or not term:
+        return ""
+    return VFB_TERM_URL.format(
+        slug=name.replace(" ", "-").lower(), term=term.lower()
+    )
+
+
+def _rows(registry_root):
+    path = default_path(registry_root)
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8-sig", newline="") as fh:
+        return [row for row in csv.DictReader(fh)
+                if (row.get(KEY) or "").strip()]
+
+
 def load(registry_root) -> dict[str, dict[str, str]]:
     """Glomerulus name -> {panel column: normalized value}.
 
     Keyed on the name as the table spells it AND on a lowercase form, so an
     atlas naming a glomerulus `DL3` or `dl3` finds the same row. Missing
     file is not an error: the columns simply come back empty.
+
+    Each value also carries two keys that are not columns: `KEY`, the name
+    as the table spells it, which is what `lines` is keyed on, and `VFB`,
+    the row's term page or "".
     """
-    path = default_path(registry_root)
-    if not path.exists():
-        return {}
     out: dict[str, dict[str, str]] = {}
-    with path.open(encoding="utf-8-sig", newline="") as fh:
-        for row in csv.DictReader(fh):
-            name = (row.get(KEY) or "").strip()
-            if not name:
-                continue
-            props = {
-                label: normalize(row.get(src, ""), split_commas=commas)
-                for label, (src, commas) in FIELDS.items()
-            }
-            out[name] = props
-            out.setdefault(name.lower(), props)
+    for row in _rows(registry_root):
+        name = row[KEY].strip()
+        props = {
+            label: normalize(row.get(src, ""), split_commas=commas)
+            for label, (src, commas) in FIELDS.items()
+        }
+        props[KEY] = name
+        props[VFB] = vfb_url(row.get("vfb_name"), row.get("fbbt_id"))
+        out[name] = props
+        out.setdefault(name.lower(), props)
     return out
 
 
-__all__ = ["FIELDS", "KEY", "default_path", "load", "normalize", "terms"]
+#: Columns listing the driver lines that label a glomerulus: the sensory
+#: neuron lines, then the projection neuron lines.
+LINE_COLUMNS = ("sensory_neuron_lines", "projection_neuron_lines")
+
+#: Presets that are the glomeruli two lines have in common.
+INTERSECTIONS = (("Orco-GAL4 & GH146-GAL4", ("Orco-GAL4", "GH146-GAL4")),)
+
+
+def lines(registry_root) -> dict[str, frozenset[str]]:
+    """Driver line -> the glomeruli it labels, by the table's own names.
+
+    The same presets the old viewer offered: one per line named in
+    `LINE_COLUMNS`, split on `;` only -- `Gr21a/Gr63a` is one line -- in the
+    order the table first names them, then each of `INTERSECTIONS` whose
+    lines are both present.
+    """
+    rows = _rows(registry_root)
+    out: dict[str, set[str]] = {}
+    for column in LINE_COLUMNS:
+        for row in rows:
+            for line in (row.get(column) or "").split(";"):
+                if line.strip():
+                    out.setdefault(line.strip(), set()).add(row[KEY].strip())
+    for label, names in INTERSECTIONS:
+        sets = [out.get(name, set()) for name in names]
+        if all(sets):
+            out[label] = set.intersection(*sets)
+    return {line: frozenset(names) for line, names in out.items()}
+
+
+__all__ = [
+    "FIELDS",
+    "INTERSECTIONS",
+    "KEY",
+    "LINE_COLUMNS",
+    "VFB",
+    "default_path",
+    "lines",
+    "load",
+    "normalize",
+    "terms",
+    "vfb_url",
+]

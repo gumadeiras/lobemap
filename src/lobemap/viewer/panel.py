@@ -18,12 +18,15 @@ selection, and the selection is what `AtlasSurface.sync` draws.
 from __future__ import annotations
 
 import re
+import webbrowser
 
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QGridLayout,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -112,6 +115,9 @@ class _Cell(QTableWidgetItem):
         return super().__lt__(other)
 
 
+#: Placeholder of the driver-line menu, which applies nothing.
+LINE_PROMPT = "Driver line..."
+
 #: Bulk buttons that act on the 2D slice only, and are disabled in 3D.
 TWO_D_ONLY = ("Label all", "Label none", "Fill all", "Fill none")
 
@@ -132,7 +138,7 @@ def _button_tips(title: str) -> dict[str, str]:
 
 class AtlasTab(QWidget):
     def __init__(self, surface, compartments=None, contour=None,
-                 annotation=None, is_atlas: bool = True) -> None:
+                 annotation=None, is_atlas: bool = True, lines=None) -> None:
         super().__init__()
         self.surface = surface
         self.contour = contour
@@ -145,6 +151,9 @@ class AtlasTab(QWidget):
         #: Glomerulus name -> annotation, from `core.reference`. Empty when
         #: the reference table is absent, which only empties those columns.
         self.reference = annotation or {}
+        #: Compartment index -> the reference row it joins, for the driver
+        #: lines and the VFB link.
+        self._rows: dict[int, dict] = {}
         self._updating = False
         self._three_d: bool | None = None
 
@@ -158,6 +167,17 @@ class AtlasTab(QWidget):
         )
         self.filter.textChanged.connect(self._apply_filter)
         layout.addWidget(self.filter)
+
+        #: Driver-line presets: the glomeruli each line labels, by the
+        #: reference table. Filled once the rows are joined, below.
+        self.lines = QComboBox()
+        self.lines.setToolTip(
+            "Show the glomeruli of this atlas that a driver line labels, "
+            "from the reference table's sensory and projection neuron lines"
+        )
+        self.lines.addItem(LINE_PROMPT, ())
+        self.lines.currentIndexChanged.connect(self._apply_line)
+        layout.addWidget(self.lines)
 
         # A grid rather than two rows of boxes, so each pair lines up in
         # its own column: the button below a given one is always its
@@ -255,6 +275,8 @@ class AtlasTab(QWidget):
             # published one: that is the name the reference table uses, and
             # it is what makes the same row match across atlases.
             props = self._reference_for(comp, name) if is_atlas else {}
+            if props:
+                self._rows[row] = props
             for i, key in enumerate(REF_COLUMNS):
                 self.table.setItem(row, REF_COL0 + i, _Cell(props.get(key, "")))
 
@@ -264,11 +286,23 @@ class AtlasTab(QWidget):
         self.table.setSortingEnabled(True)
         self.table.sortItems(NAME_COL, Qt.AscendingOrder)
         self.table.itemChanged.connect(self._on_item_changed)
+        self.table.itemSelectionChanged.connect(self._on_row_selected)
         layout.addWidget(self.table, stretch=1)
 
+        footer = QHBoxLayout()
         self.count = QLabel()
-        layout.addWidget(self.count)
+        footer.addWidget(self.count, 1)
+        #: Opens the Virtual Fly Brain term page of the selected glomerulus.
+        self.vfb = QPushButton("VFB")
+        self.vfb.clicked.connect(self._open_vfb)
+        footer.addWidget(self.vfb)
+        layout.addLayout(footer)
         self.setLayout(layout)
+
+        self._fill_lines(lines or {})
+        self.lines.setVisible(is_atlas and self.lines.count() > 1)
+        self.vfb.setVisible(is_atlas)
+        self._on_row_selected()
 
         # The table follows the eye in napari's layer list, and the count
         # follows whichever layer the mode draws.
@@ -326,12 +360,21 @@ class AtlasTab(QWidget):
         checkbox reach the same code and cannot disagree about the mode.
         """
         self.surface.set_selection(selection)
+        self._selection_changed()
+
+    def _selection_changed(self) -> None:
         self._update_count()
+        # A driver line stays named only while it is what is shown.
+        wanted = self.lines.currentData()
+        if self.lines.currentIndex() > 0 and set(wanted or ()) != self.surface.selection:
+            self.lines.blockSignals(True)
+            self.lines.setCurrentIndex(0)
+            self.lines.blockSignals(False)
 
     def _sync_rows(self) -> None:
         """Check exactly the selected rows, after the eye changed them."""
         self._set_checks(VISIBLE_COL, self.surface.selection)
-        self._update_count()
+        self._selection_changed()
 
     def _update_count(self, event=None) -> None:
         """How many rows are drawn, which is the checked ones or none.
@@ -366,6 +409,44 @@ class AtlasTab(QWidget):
             self._updating = False
         self._update_count()
 
+    # -- driver lines and VFB --------------------------------------------
+
+    def _fill_lines(self, lines) -> None:
+        """One entry per driver line labelling any glomerulus of this atlas."""
+        for line, names in lines.items():
+            members = tuple(sorted(
+                i for i, props in self._rows.items()
+                if props.get(reference.KEY) in names
+            ))
+            if members:
+                self.lines.addItem(f"{line} ({len(members)})", members)
+
+    def _apply_line(self, index: int) -> None:
+        if index <= 0:
+            return
+        self._set_indices(self.lines.itemData(index) or ())
+
+    def _selected_row(self) -> dict:
+        rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
+        index = self._index_of(rows[0].row()) if rows else None
+        return self._rows.get(index, {}) if index is not None else {}
+
+    def _on_row_selected(self) -> None:
+        props = self._selected_row()
+        url = props.get(reference.VFB, "")
+        name = props.get(reference.KEY, "")
+        self.vfb.setEnabled(bool(url))
+        self.vfb.setText(f"VFB: {name}" if url else "VFB")
+        self.vfb.setToolTip(
+            url or "Select a glomerulus with a Virtual Fly Brain term to open it"
+        )
+
+    def _open_vfb(self) -> None:
+        """Open the selected glomerulus's term page on Virtual Fly Brain."""
+        url = self._selected_row().get(reference.VFB, "")
+        if url:
+            webbrowser.open(url)
+
     # -- handlers --------------------------------------------------------
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
@@ -385,7 +466,7 @@ class AtlasTab(QWidget):
         index = int(item.data(INDEX_ROLE))
         visible = item.checkState() == Qt.Checked
         self.surface.set_visible(index, visible)
-        self._update_count()
+        self._selection_changed()
 
     def _set_checks(self, column: int, indices) -> set[int]:
         """Tick exactly these compartments in `column`, whatever the order."""
@@ -500,6 +581,7 @@ class CompartmentPanel(QTabWidget):
         # Read once for the whole panel: every tab joins against the same
         # table, and it is a 62-row csv.
         annotation = reference.load(registry.root) if registry else {}
+        lines = reference.lines(registry.root) if registry else {}
         # Atlases first, reference geometry last. `build_scene` adds the
         # neuropil and brain shells before the atlases so they sit UNDER
         # the glomeruli, but that is a stacking order and this is a reading
@@ -517,6 +599,7 @@ class CompartmentPanel(QTabWidget):
                 contour=contours.get(name),
                 annotation=annotation,
                 is_atlas=atlas is not None,
+                lines=lines,
             )
             self.tabs[name] = tab
             self.addTab(tab, name[:20])
