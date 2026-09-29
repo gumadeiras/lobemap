@@ -121,7 +121,10 @@ def test_table_filter_hides_rows(registry, scene):
     visible = [r for r in range(tab.table.rowCount()) if not tab.table.isRowHidden(r)]
     assert visible and len(visible) < tab.table.rowCount()
     for r in visible:
-        assert "da1" in tab._row_text(r)
+        # Read off the cells, not through the filter's own `_row_text`,
+        # which would agree with the filter whatever either got wrong.
+        cells = [tab.table.item(r, c) for c in range(tab.table.columnCount())]
+        assert any("da1" in c.text().lower() for c in cells if c), r
     tab.filter.setText("")
 
 
