@@ -29,6 +29,22 @@ from .model import (
 from .names import Nomenclature, parse_roi
 
 
+def default_registry_root() -> Path:
+    """Where the registry metadata lives when nothing names one.
+
+    A wheel carries it as package data, `lobemap/registry`; `pyproject.toml`
+    maps the checkout's `registry/` there without its `data/` or `sources/`.
+    A source checkout, editable install included, has no such directory
+    inside the package, and its registry is the one at the checkout root.
+    """
+    from importlib.resources import files
+
+    packaged = Path(str(files("lobemap") / "registry"))
+    if packaged.is_dir():
+        return packaged
+    return Path(__file__).resolve().parents[3] / "registry"
+
+
 def default_data_root(root: Path) -> Path:
     """Where asset files live.
 

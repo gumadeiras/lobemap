@@ -10,8 +10,6 @@ from pathlib import Path
 
 from . import __version__
 
-DEFAULT_REGISTRY = Path(__file__).resolve().parents[2] / "registry"
-
 #: The space `lobemap` and `lobemap view` open when none is named. FAFB is
 #: the whole adult brain at synaptic resolution and the space the
 #: nomenclature is anchored in, so it is the least surprising thing to see
@@ -20,7 +18,10 @@ DEFAULT_SPACE = "FAFB14"
 
 
 def _registry_root(args) -> Path:
-    return Path(args.registry or os.environ.get("LOBEMAP_REGISTRY") or DEFAULT_REGISTRY)
+    from .core.registry import default_registry_root
+
+    named = args.registry or os.environ.get("LOBEMAP_REGISTRY")
+    return Path(named) if named else default_registry_root()
 
 
 def _data_root(args, root: Path) -> Path:
@@ -1129,10 +1130,14 @@ def cmd_view(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="lobemap")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    p.add_argument("--registry", help="registry directory (default: ./registry)")
+    p.add_argument("--registry",
+                   help="registry metadata directory (default: $LOBEMAP_REGISTRY, "
+                        "else the copy installed with lobemap, or registry/ in a "
+                        "source checkout)")
     p.add_argument("--data-root", default=None,
-                   help="where asset files live (default: <registry>/data in a "
-                        "checkout, else the user cache directory)")
+                   help="where asset files live (default: $LOBEMAP_DATA, else "
+                        "<registry>/data if it exists, else the user cache "
+                        "directory)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     mn = sub.add_parser("manifest", help="record checksums for fetchable data")

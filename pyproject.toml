@@ -77,10 +77,33 @@ ingest = [
 dev = [
   "pytest>=8.2",
   "ruff>=0.6",
+  "setuptools>=77",      # tests/test_wheel.py builds the wheel in-process
 ]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# The registry metadata ships inside the package as `lobemap/registry`, so an
+# installed lobemap finds its spaces, assets, atlases and nomenclature
+# without a checkout. It stays at `registry/` in the source tree, beside
+# `registry/data` and `registry/sources`, which are gigabytes and never
+# ship: the globs below name the metadata files and nothing under those
+# two directories. Mapping a directory outside `src/` needs an explicit
+# package list; a subpackage missing from it would not ship, and
+# `tests/test_wheel.py` fails if one is.
+[tool.setuptools]
+packages = [
+  "lobemap",
+  "lobemap.core",
+  "lobemap.ingest",
+  "lobemap.registry",
+  "lobemap.validate",
+  "lobemap.viewer",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+"lobemap.registry" = "registry"
+
+[tool.setuptools.package-data]
+"lobemap.registry" = ["*.toml", "*.csv", "atlases/*.toml", "reference/*.csv"]
 
 [project.scripts]
 lobemap = "lobemap.cli:main"

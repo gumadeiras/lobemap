@@ -1632,6 +1632,7 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "ruff" },
+    { name = "setuptools" },
 ]
 ingest = [
     { name = "fafbseg" },
@@ -1667,6 +1668,7 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=8.2" },
     { name = "ruff", specifier = ">=0.6" },
+    { name = "setuptools", specifier = ">=77" },
 ]
 ingest = [
     { name = "fafbseg", specifier = ">=3.2" },

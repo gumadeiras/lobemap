@@ -16,20 +16,25 @@ other.
 
 ## Installing
 
-Python 3.11 or 3.12, and [uv](https://docs.astral.sh/uv/). Clone this
-repository, then from its root:
+Python 3.11 or 3.12. From PyPI:
+
+```bash
+pip install lobemap
+lobemap fetch
+```
+
+`fetch` downloads the data, which is published separately rather than shipped in the package. An installed lobemap keeps it in the user cache directory (`~/Library/Caches/lobemap/data` on macOS, `~/.cache/lobemap/data` on Linux); `fetch` prints the location. Set `LOBEMAP_DATA`, or pass `--data-root`, to keep it somewhere else.
+
+From a source checkout, with [uv](https://docs.astral.sh/uv/), from the repository root:
 
 ```bash
 uv sync
-```
-
-Then fetch the data, which is published separately rather than committed:
-
-```bash
 uv run lobemap fetch
 ```
 
-That is 2.5 GB and gets everything: the atlases, the neuropil sets, the
+A checkout keeps its data in `registry/data`.
+
+A full `fetch` is 2.5 GB and gets everything: the atlases, the neuropil sets, the
 Grabe confocal stack, and the three virtual stains described under
 [Data](#data) below. The stains are 2.4 GB of that, so if you would
 rather not wait for them:
@@ -65,8 +70,7 @@ moving geometry between spaces (`bridge`).
 `lobemap` is installed into the project's virtual environment, so `uv run`
 is the simplest way to reach it. Activating the environment
 (`.venv/Scripts/Activate.ps1` on Windows, `source .venv/bin/activate`
-elsewhere) lets you drop the prefix. The registry is found relative to the
-installed package, so the commands work from any directory.
+elsewhere) lets you drop the prefix. The commands work from any directory: a checkout reads its own `registry/`, and a package installed from PyPI carries a copy of the registry metadata. `--registry` or `LOBEMAP_REGISTRY` points at a different one.
 
 ## What is included
 
