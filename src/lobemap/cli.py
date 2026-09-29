@@ -663,6 +663,7 @@ def cmd_check(args) -> int:
     from .core.resolve import resolve
     from .validate import geometry as g
     from .validate import images as gi
+    from .validate.harness import compare_atlases
 
     root = _registry_root(args)
     reg = Registry.load(root, data_root=_data_root(args, root))
@@ -744,27 +745,12 @@ def cmd_check(args) -> int:
 
     if args.compare:
         a_id, b_id, space = args.compare
-        a = reg.mesh(reg.atlases[a_id].asset)
-        b_atlas = reg.atlases[b_id]
-        b = (
-            reg.mesh(b_atlas.asset)
-            if b_atlas.native_space == space
-            else resolve(reg, b_atlas.asset, space)
-        )
-        a_side = reg.assets[reg.atlases[a_id].asset].side
-        b_side = reg.assets[b_atlas.asset].side
-        pairs, chk = g.correspondence_report(
-            a,
-            b,
-            a_id,
-            b_id,
-            a_side=a_side if a_side in ("L", "R") else None,
-            b_side=b_side if b_side in ("L", "R") else None,
-        )
+        pairs, chk = compare_atlases(reg, a_id, b_id, space)
         checks.append(chk)
         worst = sorted(pairs, key=lambda p: -p.distance_um)[:10]
         print()
-        print(f"worst-separated shared compartments ({b_id} -> {space}):")
+        print(f"worst-separated corresponding compartments in {space}, "
+              f"paired by canonical name:")
         for pr in worst:
             print(f"    {pr.canonical:<8} {pr.a_name:<14} vs {pr.b_name:<14} "
                   f"{pr.distance_um:6.1f} um")
@@ -917,19 +903,16 @@ def cmd_nomenclature(args) -> int:
 def cmd_reconcile(args) -> int:
     """Pair two atlases by geometry and report name disagreements."""
     from .core.registry import Registry
-    from .core.resolve import resolve
+    from .validate.harness import atlas_in_space
     from .validate.reconcile import format_report, reconcile
 
     root = _registry_root(args)
     reg = Registry.load(root, data_root=_data_root(args, root))
-    a_atlas, b_atlas = reg.atlases[args.a], reg.atlases[args.b]
-    space = args.space or a_atlas.native_space
-    a = (reg.mesh(a_atlas.asset) if a_atlas.native_space == space
-         else resolve(reg, a_atlas.asset, space))
-    b = (reg.mesh(b_atlas.asset) if b_atlas.native_space == space
-         else resolve(reg, b_atlas.asset, space))
+    space = args.space or reg.atlases[args.a].native_space
     matches, ua, ub = reconcile(
-        a, b, max_distance_um=args.max_distance,
+        atlas_in_space(reg, args.a, space),
+        atlas_in_space(reg, args.b, space),
+        max_distance_um=args.max_distance,
         ambiguity_ratio=args.ambiguity_ratio,
     )
     print(format_report(matches, ua, ub, args.a, args.b))
@@ -1234,7 +1217,9 @@ def main(argv: list[str] | None = None) -> int:
     chk.add_argument("--roundtrip", nargs=2, metavar=("SRC", "VIA"),
                      help="e.g. --roundtrip JRCFIB2018F FAFB14")
     chk.add_argument("--compare", nargs=3, metavar=("A", "B", "SPACE"),
-                     help="bridge atlas B into SPACE and compare against atlas A")
+                     help="compare atlases A and B in SPACE by canonical name and "
+                          "side, bridging either one that is not native to it with "
+                          "biological sides aligned")
     chk.set_defaults(func=cmd_check)
 
     nm = sub.add_parser("nomenclature",

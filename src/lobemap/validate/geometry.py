@@ -11,12 +11,13 @@ disagreement, and that distinction is a research finding, not a test failure.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from ..core.meshfmt import MeshSet
-from ..core.names import parse_roi
+from ..core.names import normalize, parse_roi
 
 
 @dataclass
@@ -217,6 +218,11 @@ class Pairing:
     distance_um: float
 
 
+def _group_centroid(ms: MeshSet, indices: list[int]) -> np.ndarray:
+    """Vertex mean over several compartments, as `MeshSet.centroid` is for one."""
+    return np.concatenate([ms.compartment(i)[0] for i in indices]).mean(axis=0)
+
+
 def correspondence_report(
     a: MeshSet,
     b: MeshSet,
@@ -224,38 +230,93 @@ def correspondence_report(
     b_label: str = "B",
     a_side: str | None = None,
     b_side: str | None = None,
+    a_canonical: Mapping[str, Sequence[str]] | None = None,
+    b_canonical: Mapping[str, Sequence[str]] | None = None,
 ) -> tuple[list[Pairing], Check]:
-    """Centroid separation for same-named compartments in a shared space.
+    """Centroid separation for corresponding compartments in a shared space.
+
+    Compartments correspond by CANONICAL name and side, not by published
+    name. `a_canonical` / `b_canonical` map a published name to its canonical
+    names (`Compartment.canonical`); a name with no entry falls back to its
+    bare published glomerulus. A join on published names is wrong exactly
+    where atlases disagree: hemibrain's `VC5(R)` is canonical VM6, so it was
+    paired with Schlegel S12's `VC5` -- a different glomerulus 11 um away --
+    and VC3l and VC3m were never paired at all.
+
+    Correspondence is many-to-many, so pairing is over connected groups: the
+    three S11 compartments VM6l, VM6m and VM6v all carry VM6 and are compared
+    as one body against a single VM6. A group's position is the vertex mean
+    over all its compartments.
 
     `a_side` / `b_side` supply laterality for atlases whose published names
-    omit it. Bates 2020 is a left-AL atlas but names its glomeruli bare
-    ("VP1d"), so side is a property of the asset, not of the name -- without
-    this, nothing pairs against hemibrain's "AL-VP1d(L)".
+    omit it: Schlegel S11/S12 name their glomeruli bare ("DA1"), so side is a
+    property of the asset there. Sides are biological, so both meshsets must
+    already share a biological frame -- see `resolve(..., align_biology=True)`.
 
     REPORTS rather than asserts. A large separation may be a bridging error or
     a genuine disagreement between segmentations; deciding which is the
     scientific question this application exists to support.
     """
 
-    def index(ms: MeshSet, default_side: str | None) -> dict[tuple[str, str | None], int]:
-        out = {}
-        for i, name in enumerate(ms.names):
+    def keyed(ms: MeshSet, default_side, canonical) -> list[list[tuple[str, str | None]]]:
+        out = []
+        for name in ms.names:
             glom, side = parse_roi(name)
-            out[(glom.upper(), side or default_side)] = i
+            names = tuple((canonical or {}).get(name) or ()) or (glom,)
+            out.append([(n, side or default_side) for n in names])
         return out
 
-    ia, ib = index(a, a_side), index(b, b_side)
-    pairs: list[Pairing] = []
-    for key, i in sorted(ia.items()):
-        j = ib.get(key)
-        if j is None:
-            continue
-        d = float(np.linalg.norm(a.centroid(i) - b.centroid(j)))
-        pairs.append(Pairing(key[0], a.names[i], b.names[j], d))
+    ka, kb = keyed(a, a_side, a_canonical), keyed(b, b_side, b_canonical)
 
+    # Union-find over the compartments of both atlases, joined through the
+    # (canonical name, side) keys they carry.
+    parent: dict = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for tag, keys in (("a", ka), ("b", kb)):
+        for i, carried in enumerate(keys):
+            for n, side in carried:
+                parent[find((tag, i))] = find(("key", normalize(n), side))
+
+    groups: dict = {}
+    for node in list(parent):
+        if node[0] != "key":
+            groups.setdefault(find(node), []).append(node)
+
+    pairs: list[Pairing] = []
+    only_a = only_b = 0
+    for members in groups.values():
+        ia = sorted(i for tag, i in members if tag == "a")
+        ib = sorted(i for tag, i in members if tag == "b")
+        if not ib:
+            only_a += len(ia)
+            continue
+        if not ia:
+            only_b += len(ib)
+            continue
+        spelled: dict[str, str] = {}
+        for n, _side in [k for i in ia for k in ka[i]] + [k for j in ib for k in kb[j]]:
+            spelled.setdefault(normalize(n), n)
+        pairs.append(
+            Pairing(
+                ";".join(spelled[k] for k in sorted(spelled)),
+                "+".join(a.names[i] for i in ia),
+                "+".join(b.names[j] for j in ib),
+                float(np.linalg.norm(_group_centroid(a, ia) - _group_centroid(b, ib))),
+            )
+        )
+    pairs.sort(key=lambda p: (normalize(p.canonical), p.a_name))
+
+    unpaired = f"; {only_a} only in {a_label}, {only_b} only in {b_label}"
     if not pairs:
         return pairs, Check(
-            f"correspondence {a_label} vs {b_label}", False, "no shared names"
+            f"correspondence {a_label} vs {b_label}", False, "no shared names" + unpaired
         )
     ds = np.array([p.distance_um for p in pairs])
     return pairs, Check(
@@ -263,5 +324,6 @@ def correspondence_report(
         True,
         f"{len(pairs)} shared, centroid separation median "
         f"{np.median(ds):.1f} um, p90 {np.percentile(ds, 90):.1f} um, "
-        f"max {ds.max():.1f} um ({max(pairs, key=lambda p: p.distance_um).canonical})",
+        f"max {ds.max():.1f} um ({max(pairs, key=lambda p: p.distance_um).canonical})"
+        + unpaired,
     )
