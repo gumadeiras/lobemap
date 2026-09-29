@@ -63,12 +63,11 @@ from pathlib import Path
 
 import pytest
 
-from lobemap.cli import DEFAULT_REGISTRY
-from lobemap.core.registry import Registry
+from lobemap.core.registry import Registry, default_registry_root
 
 #: The registry the CLI opens by default. Absolute, so no result depends on
 #: the working directory.
-REGISTRY = DEFAULT_REGISTRY
+REGISTRY = default_registry_root()
 
 
 def pytest_configure(config):
