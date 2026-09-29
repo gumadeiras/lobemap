@@ -228,3 +228,39 @@ def test_containment_single_unsided_shell_contains_everything():
     inside = MeshSet.from_parts([("DA1", *cube((90, 90, 90), size=10.0))])
     check = G.check_containment(inside, brain)
     assert "1/1" in check.detail
+
+
+# -- points a transform does not cover ------------------------------------
+
+
+@pytest.fixture
+def uncovered_point(monkeypatch):
+    """A fake nm -> um bridge that leaves point 1 outside its field (NaN)."""
+    import navis
+
+    from lobemap.core import spaces as sp
+
+    def xform(p, source, target, **kw):
+        out = np.asarray(p, float) * 1e-3 + 1.0
+        out[1] = np.nan
+        return out
+
+    monkeypatch.setattr(navis, "xform_brain", xform)
+    monkeypatch.setattr(sp, "choose_path", lambda s, t, allow_binary=None: {
+        "path": [s, t], "classes": ["h5reg"], "n_warps": 1, "needs_binary": False})
+    monkeypatch.setattr(R, "template_scale_to_um",
+                        lambda t: {"NM": 1e-3, "UM": 1.0}[t])
+    return np.array([[100.0, 200.0, 50.0], [110.0, 210.0, 55.0], [120.0, 220.0, 60.0]])
+
+
+def test_an_uncovered_point_is_counted(uncovered_point):
+    _out, rec = R.resolve_points(uncovered_point, "NM", "UM")
+    assert rec["n_nonfinite"] == 1
+    assert rec["frac_nonfinite"] == pytest.approx(1 / 3)
+
+
+def test_an_uncovered_point_keeps_its_position_in_micrometers(uncovered_point):
+    """Not in the source template's nm, which lands it 1000x too far out."""
+    out, _rec = R.resolve_points(uncovered_point, "NM", "UM")
+    np.testing.assert_allclose(out[1], uncovered_point[1])
+    np.testing.assert_allclose(out[0], uncovered_point[0] + 1.0)

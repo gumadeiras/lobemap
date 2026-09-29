@@ -132,6 +132,13 @@ def bridge(
 
     Points go in and come out in the *native units of each template*, so the
     caller is responsible for unit handling; see resolve.py.
+
+    A point the transform does not cover comes back non-finite. Dense offset
+    fields cover only the imaged volume and return NaN outside it -- the
+    FlyWire<->FAFB field does this for a handful of vertices on a neuropil
+    shell. Filling those here would mix units, since the input is in the
+    source template's and the output in the target's, so the caller does it
+    once both are micrometers.
     """
     import navis
 
@@ -145,18 +152,6 @@ def bridge(
         navis.xform_brain(pts, source=source, target=target, **kwargs),
         dtype=np.float64,
     )
-
-    # Dense offset fields cover only the imaged volume and return NaN outside
-    # it -- the FlyWire<->FAFB field does this for a handful of vertices on a
-    # neuropil shell. A NaN vertex destroys a mesh, so those points keep their
-    # input coordinates. That is defensible only because the transform being
-    # skipped is sub-micron here; the count and fraction are recorded so a
-    # large one is visible rather than absorbed.
-    bad = ~np.isfinite(out).all(axis=1)
-    info["n_nonfinite_filled"] = int(bad.sum())
-    info["frac_nonfinite_filled"] = float(bad.mean()) if len(bad) else 0.0
-    if bad.any():
-        out[bad] = pts[bad]
 
     # navis may route differently from describe_path -- importing fafbseg
     # registers extra edges -- so record what was actually available.

@@ -30,7 +30,9 @@ from platformdirs import user_cache_dir
 from . import spaces as sp
 from .meshfmt import LegacyContainerError, MeshSet
 
-CACHE_VERSION = 1
+#: 2: points a bridge does not cover are kept in micrometers. Version 1
+#: kept them in the source template's units, 1000x off from nm to um.
+CACHE_VERSION = 2
 
 
 def cache_root() -> Path:
@@ -104,6 +106,7 @@ def resolve_points(
         # In the SOURCE space, before bridging. See module docstring.
         record["mirror_registered"] = sp.has_mirror_registration(source_template)
         pts = sp.mirror(pts, source_template)
+    before_um = pts * src_scale
 
     if source_template == target_template:
         record["path"] = [source_template]
@@ -121,8 +124,16 @@ def resolve_points(
     record["target_scale_to_um"] = out_scale
     out = np.asarray(pts, dtype=np.float64) * out_scale  # native -> um
 
-    n_bad = int(np.count_nonzero(~np.isfinite(out).all(axis=1)))
-    record["n_nonfinite"] = n_bad
+    # A point the transform does not cover comes back NaN, and a NaN vertex
+    # destroys a mesh, so it keeps its position from before the bridge --
+    # converted to um like everything else. That is defensible only because
+    # the transform skipped is sub-micron where this happens; the count is
+    # recorded so a large one is visible rather than absorbed.
+    bad = ~np.isfinite(out).all(axis=1)
+    record["n_nonfinite"] = int(bad.sum())
+    record["frac_nonfinite"] = float(bad.mean()) if len(bad) else 0.0
+    if bad.any():
+        out[bad] = before_um[bad]
     return out, record
 
 
