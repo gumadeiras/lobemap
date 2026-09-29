@@ -112,6 +112,8 @@ def test_an_interrupted_unpack_during_fetch_leaves_no_store(tmp_path, monkeypatc
 
 
 def test_an_interrupted_build_leaves_the_asset_missing(tmp_path, monkeypatch):
+    (tmp_path / "spaces.toml").write_text('[X]\ntitle = "x"\nunits = "um"\n',
+                                          encoding="utf-8")
     (tmp_path / "assets.toml").write_text(
         '[toy]\nrole = "glomeruli"\nspace = "X"\npath = "data/toy.npz"\n',
         encoding="utf-8")

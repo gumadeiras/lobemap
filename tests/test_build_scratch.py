@@ -28,6 +28,8 @@ def stain_registry(tmp_path, monkeypatch):
     root = tmp_path / "registry"
     (root / "sources").mkdir(parents=True)
     (root / "sources" / "points.bin").write_bytes(b"stand-in for a bulk release")
+    (root / "spaces.toml").write_text('[TOY]\ntitle = "toy"\nunits = "um"\n',
+                                      encoding="utf-8")
     (root / "assets.toml").write_text(
         '[toy_stain]\nrole = "virtual_stain"\nspace = "TOY"\nkind = "image"\n'
         'path = "data/toy_stain.zarr"\n', encoding="utf-8")
