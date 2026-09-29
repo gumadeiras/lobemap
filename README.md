@@ -159,6 +159,25 @@ A rebuilt asset is not byte-identical to the original — every pipeline
 stamps the date it ran — but its *content* hash is, and the build prints it.
 `lobemap pack` writes the upload-ready copies if you are republishing.
 
+## Data licenses
+
+The MIT License in [LICENSE](LICENSE) covers the lobemap code. It does not cover the data. Each data asset keeps the license of its source, recorded per asset in [`registry/assets.toml`](registry/assets.toml) as `source.license`, with the page that states it as `source.license_url`:
+
+| assets | license | stated at |
+|---|---|---|
+| `neuprint_hemibrain_glomeruli`, `neuprint_hemibrain_neuropil`, `hemibrain_stain` | CC BY 4.0 | [Janelia FlyEM hemibrain](https://www.janelia.org/project-team/flyem/hemibrain) |
+| `neuprint_cns_glomeruli`, `neuprint_cns_neuropil`, `malecns_stain` | CC BY 4.0 | [male CNS downloads](https://male-cns.janelia.org/download/) |
+| `schlegel2021_s11_glomeruli`, `schlegel2021_s12_glomeruli` | CC BY 4.0 | [Schlegel et al. 2021, eLife](https://elifesciences.org/articles/66018) |
+| `benton2025_glomeruli` | CC0 1.0 (the article itself is CC BY 4.0) | [Benton et al. 2025, EMBO Reports](https://europepmc.org/article/PMC/PMC12187929) |
+| `fafb_neuropil`, `fafb_stain` | CC BY-NC 4.0: attribution, no commercial use | [FlyWire guidelines](https://flywire.ai/guidelines) |
+| `grabe2015_glomeruli`, `grabe2015_labels`, `grabe2015_stack` | none published | [Grabe et al. 2015](https://doi.org/10.1002/cne.23697), [atlas page](https://www.ice.mpg.de/232714/vivo-3d-atlas) |
+
+The Grabe 2015 assets are built from files reproduced from the paper and its in vivo atlas: the confocal stack, and the Amira label volume with its material table. Neither the journal nor the atlas page publishes terms for them, and lobemap grants none: the rights stay with the authors and the publisher.
+
+The tracked source files under `registry/sources/` keep the terms of the same sources: Benton's Dataset EV1 and EV2 are CC0 1.0 and its figure panels CC BY 4.0; the Grabe files are reproduced from the paper as above; the Bates 2020 atlas figure is CC BY 4.0; and the JRC2018 Unisex template and ROI volumes from Virtual Fly Brain are [CC BY-NC-SA 4.0](https://www.virtualflybrain.org/reports/JRC2018). [`registry/reference/glomerulus_ground_truth.csv`](registry/reference/README.md) compiles values from published tables, and each value keeps the terms of its source.
+
+CC BY and CC BY-NC require attribution, so cite the paper behind each atlas you use; [docs/data-sources.md](docs/data-sources.md) has the citations. CC BY-NC data, which includes everything in FAFB14 except the Benton atlas, may not be used commercially.
+
 ## In the viewer
 
 - **3D** draws the meshes. **2D** draws exact mesh–plane contours, computed
