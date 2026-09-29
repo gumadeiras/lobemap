@@ -50,6 +50,9 @@ def published(tmp_path, silent_server, monkeypatch):
     """A one-artifact manifest whose base_url is the silent server."""
     # raising=False so the test also runs, and hangs, where there is no limit.
     monkeypatch.setattr(cli, "NETWORK_TIMEOUT_S", LIMIT_S, raising=False)
+    # urllib sends even 127.0.0.1 through an `http_proxy` from the
+    # environment, and a dead one refuses at once instead of stalling.
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
     (tmp_path / "mesh.npz").write_bytes(b"mesh" * 10)
 
     class Asset:
