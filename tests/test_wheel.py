@@ -12,7 +12,9 @@ than through an isolated frontend, so it needs no network.
 
 from __future__ import annotations
 
+import email
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -87,6 +89,29 @@ def test_wheel_ships_the_registry_metadata_and_no_data(wheel):
     assert shipped == expected
     assert not [n for n in names if n.split("/")[:3] in (
         ["lobemap", "registry", "data"], ["lobemap", "registry", "sources"])]
+
+
+def _requirement_names(requires) -> set[str]:
+    return {re.split(r"[\s<>=!~;\[]", r, maxsplit=1)[0].lower() for r in requires}
+
+
+def test_wheel_keeps_the_ingest_stack_an_extra(wheel):
+    """`pip install lobemap` is the viewer; `lobemap[ingest]` adds the rest.
+
+    The ingest stack used to be a uv dependency group, which is never
+    published, so a pip user had no way to ask for it at all.
+    """
+    whl = zipfile.ZipFile(wheel)
+    (path,) = [n for n in whl.namelist() if n.endswith(".dist-info/METADATA")]
+    meta = email.message_from_bytes(whl.read(path))
+    requires = meta.get_all("Requires-Dist")
+    base = _requirement_names(r for r in requires if "extra ==" not in r)
+    ingest = _requirement_names(r for r in requires if 'extra == "ingest"' in r)
+    assert "ingest" in meta.get_all("Provides-Extra")
+    assert {"navis", "flybrains", "fafbseg", "neuprint-python", "pyvista",
+            "scikit-image", "pyarrow", "cloud-volume"} <= ingest
+    assert not base & ingest
+    assert "fromweb1@gumadeiras.com" in meta["Author-email"]
 
 
 def _run_installed(wheel, tmp_path, *args):

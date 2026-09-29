@@ -1628,6 +1628,21 @@ dependencies = [
     { name = "zarr", version = "3.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 
+[package.optional-dependencies]
+ingest = [
+    { name = "cloud-volume" },
+    { name = "fafbseg" },
+    { name = "flybrains" },
+    { name = "h5py" },
+    { name = "navis" },
+    { name = "neuprint-python" },
+    { name = "pyarrow" },
+    { name = "pytz" },
+    { name = "pyvista" },
+    { name = "requests" },
+    { name = "scikit-image" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -1635,34 +1650,39 @@ dev = [
     { name = "setuptools" },
 ]
 ingest = [
-    { name = "fafbseg" },
-    { name = "flybrains" },
-    { name = "h5py" },
-    { name = "navis" },
-    { name = "neuprint-python" },
-    { name = "pytz" },
-    { name = "pyvista" },
-    { name = "requests" },
+    { name = "lobemap", extra = ["ingest"] },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "cloud-volume", marker = "extra == 'ingest'", specifier = ">=12" },
     { name = "dask", specifier = ">=2024.1" },
+    { name = "fafbseg", marker = "extra == 'ingest'", specifier = ">=3.2" },
+    { name = "flybrains", marker = "extra == 'ingest'", specifier = ">=0.6" },
+    { name = "h5py", marker = "extra == 'ingest'", specifier = ">=3.11" },
     { name = "napari", extras = ["pyqt6"], specifier = ">=0.6" },
+    { name = "navis", marker = "extra == 'ingest'", specifier = ">=1.12" },
+    { name = "neuprint-python", marker = "extra == 'ingest'", specifier = ">=0.6.3" },
     { name = "numcodecs", specifier = ">=0.12" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "platformdirs", specifier = ">=4.2" },
     { name = "py7zr", specifier = ">=0.21" },
+    { name = "pyarrow", marker = "extra == 'ingest'", specifier = ">=16" },
     { name = "pymeshfix", specifier = ">=0.17" },
     { name = "pynrrd", specifier = ">=1.0" },
+    { name = "pytz", marker = "extra == 'ingest'", specifier = ">=2024.1" },
+    { name = "pyvista", marker = "extra == 'ingest'", specifier = ">=0.49" },
     { name = "qtpy", specifier = ">=2.4" },
+    { name = "requests", marker = "extra == 'ingest'", specifier = ">=2.32" },
     { name = "rtree", specifier = ">=1.3" },
+    { name = "scikit-image", marker = "extra == 'ingest'", specifier = ">=0.24" },
     { name = "scipy", specifier = ">=1.13" },
     { name = "tifffile", specifier = ">=2024.8" },
     { name = "trimesh", specifier = ">=4.4" },
     { name = "zarr", specifier = ">=2.18" },
 ]
+provides-extras = ["ingest"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1670,16 +1690,7 @@ dev = [
     { name = "ruff", specifier = ">=0.6" },
     { name = "setuptools", specifier = ">=77" },
 ]
-ingest = [
-    { name = "fafbseg", specifier = ">=3.2" },
-    { name = "flybrains", specifier = ">=0.6" },
-    { name = "h5py", specifier = ">=3.11" },
-    { name = "navis", specifier = ">=1.12" },
-    { name = "neuprint-python", specifier = ">=0.6.3" },
-    { name = "pytz", specifier = ">=2024.1" },
-    { name = "pyvista", specifier = ">=0.49" },
-    { name = "requests", specifier = ">=2.32" },
-]
+ingest = [{ name = "lobemap", extras = ["ingest"] }]
 
 [[package]]
 name = "locket"

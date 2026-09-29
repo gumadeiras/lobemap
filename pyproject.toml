@@ -15,7 +15,7 @@ requires-python = ">=3.11,<3.13"
 # are his work, so he stays on the package metadata -- see README Lineage.
 authors = [
   { name = "David Zimmerman" },
-  { name = "Gustavo Madeira Santana" },
+  { name = "Gustavo Madeira Santana", email = "fromweb1@gumadeiras.com" },
 ]
 keywords = ["drosophila", "napari", "neuroanatomy", "visualization"]
 # The original's list, plus the two the rewrite earns: it reads and
@@ -62,8 +62,10 @@ Homepage = "https://github.com/gumadeiras/lobemap"
 Source = "https://github.com/gumadeiras/lobemap"
 Changelog = "https://github.com/gumadeiras/lobemap/blob/main/CHANGELOG.md"
 
-[dependency-groups]
-# Ingest and cache-rebuild time only.
+[project.optional-dependencies]
+# Ingest, bridging and rebuild time only; the viewer never needs them.
+# Published as an extra so an installed lobemap can get them too:
+# `pip install "lobemap[ingest]"`.
 ingest = [
   "navis>=1.12",          # transform engine: xform_brain, mirror_brain
   "flybrains>=0.6",      # navis-flybrains: templates and bridging registrations
@@ -73,7 +75,16 @@ ingest = [
   "h5py>=3.11",          # H5 deformation fields
   "requests>=2.32",
   "pytz>=2024.1",        # undeclared fafbseg import; pandas 3.0 no longer supplies it
+  "scikit-image>=0.24",  # marching cubes for the Grabe label volume
+  "pyarrow>=16",         # the FAFB and male CNS bulk synapse tables
+  "cloud-volume>=12",    # the hemibrain synapse shards
 ]
+
+[dependency-groups]
+# A checkout's `uv sync` installs both groups (`default-groups` below), so
+# the tests and every `build` recipe work there. `uv sync --no-group
+# ingest` leaves the ingest extra out.
+ingest = ["lobemap[ingest]"]
 dev = [
   "pytest>=8.2",
   "ruff>=0.6",

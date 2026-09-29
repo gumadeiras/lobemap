@@ -34,6 +34,8 @@ uv run lobemap fetch
 
 A checkout keeps its data in `registry/data`.
 
+Viewing needs nothing more. Rebuilding data from source (`build`, `stain`, `ingest`) and moving geometry between spaces (`bridge`) need about 100 more packages, which `pip install "lobemap[ingest]"` adds. A checkout's `uv sync` installs them too; `uv sync --no-group ingest` leaves them out.
+
 A full `fetch` is 2.5 GB and gets everything: the atlases, the neuropil sets, the
 Grabe confocal stack, and the three virtual stains described under
 [Data](#data) below. The stains are 2.4 GB of that, so if you would
