@@ -62,8 +62,8 @@
 - The console script is `lobemap`; the package is `src/lobemap`. The rewrite
   was called `glomviewer` while it lived in its own repository.
 - Removed the previous `lobemap.py` entry point, the `lobemap` shell wrapper
-  and `scripts/`, which the rewrite supersedes. They remain on the `legacy`
-  branch, as do `docs/usage.md` and the demo media that documented them.
+  and `scripts/`, which the rewrite supersedes. They remain at tag `v0.1.4`,
+  as do `docs/usage.md` and the demo media that documented them.
 - The published source data the ingested assets are built from is unchanged.
   It moved from `datasets/` to `registry/sources/` later in this same
   unreleased window; see below.
@@ -103,8 +103,8 @@
 - `lobemap` with no arguments opens the viewer on FAFB, rather than exiting with a usage message. `lobemap view` also takes the default.
 - Removed the JRC2018U space. It held no atlas, so there was nothing to open in it, and it appeared in `lobemap spaces` as though there were.
 - Removed ten unused folders from `datasets/`: banc, comparative-atlases, door, edmond-fibsem, flywire, flywire-codex, laissue-1999, potter-task-2022, reference-tables and vfb. No recipe or module read any of them. `docs/data-sources.md` is rewritten around the six atlases the viewer actually opens, and covers only those; source folders kept without being used are described in `registry/sources/`, beside the files.
-- `datasets/` is gone. The five remaining folders are `registry/sources/<dataset>/`, with the redundant `data/source/` level flattened away, and the registry is now self-contained: a recipe's `source` and its path-valued params resolve against the registry root rather than the repository root, so `--registry` can point anywhere. The per-dataset napari modules and the 256-cube label caches were not carried over — they belong to the viewer this one replaced and are on the `legacy` branch, which still holds the whole original tree.
-- Removed the `hemibrain/` source folder. Its `hemibrainr` surface export covers the same 58 glomeruli as the live neuPrint query, which resolves two of them further (`VC3l`/`VC3m` where the export had `VC3`). Three annotation tables went with it — receptor, ligand and valence per glomerulus, and Virtual Fly Brain FBbt terms — which were not redundant, only unused. All of it is on the `legacy` branch.
+- `datasets/` is gone. The five remaining folders are `registry/sources/<dataset>/`, with the redundant `data/source/` level flattened away, and the registry is now self-contained: a recipe's `source` and its path-valued params resolve against the registry root rather than the repository root, so `--registry` can point anywhere. The per-dataset napari modules and the 256-cube label caches were not carried over — they belong to the viewer this one replaced and are at tag `v0.1.4`, which holds the whole original tree.
+- Removed the `hemibrain/` source folder. Its `hemibrainr` surface export is Schlegel 2021 supplementary file 12 again: the same 58 names and vertex counts, with centroids matching to 0.0013 µm. neuPrint's `VC3l`/`VC3m`/`VC5` are the older names for S12's `VC3`/`VC5`/`VM6`, not a finer subdivision. Three annotation tables went with it — receptor, ligand and valence per glomerulus, and Virtual Fly Brain FBbt terms — which were not redundant, only unused. All of it is at tag `v0.1.4`.
 - `--data-root` is honoured by `validate`, `check`, `reconcile`, `bridge` and `build`, which all built a registry without it. It mattered most in `build`, which resolved its target against the default root, so building into a scratch data root overwrote the real asset.
 
 ### Fixes
@@ -115,6 +115,18 @@
 - The anatomical axis indicator is drawn as a canvas overlay rather than a scene one, so it is visible in the default view of every space. A scene overlay sits at the world origin, which is not inside the data: FAFB spans x 192-853 um, so its indicator was ~190 um off-screen, and the male CNS showed part of one.
 - Removed three `*_stain.progress.log` files committed by accident.
 - A data release no longer starts a PyPI workflow run. It fired on every published release and failed at the tag check, mailing a failure for a release that was never meant to build a package.
+- `lobemap check --compare` pairs atlases by canonical name, so hemibrain `VC5(R)` is compared with Schlegel S12 `VM6`, not with S12 `VC5`, and `VC3l`/`VC3m` pair with `VC3`/`VC5`.
+- `check --compare` and `reconcile` mirror an atlas bridged between a mirrored and a biological space, so its sides agree biologically, and refuse a source space without a mirror registration.
+- `lobemap check` fails when a space is reflected left-right, when a stain is flipped on its own, and when one compartment collapses: new laterality, chirality, image orientation, label containment and compartment size checks.
+- Mesh repair measures volume change about each mesh's center, so the logged change no longer depends on where the mesh sits.
+
+### Changes
+
+- Every data asset records its license and the page that states it, and the README separates the MIT code license from the data licenses.
+- The FAFB stain cites Yu et al. 2025 for the Princeton synapse table, and its recipe records no confidence threshold, which is what the build applies.
+- The README and `docs/data-sources.md` disclose three defects in the published data: hemibrain `VM2(R)`, Grabe's missing `VM6` and male CNS `AME(L)`.
+- `registry/checks.toml` lists known defects that `lobemap check` reports without failing.
+- `registry/reference/README.md` records how the reference table was built at `v0.1.4` and how to rebuild it.
 
 ### Notes
 
