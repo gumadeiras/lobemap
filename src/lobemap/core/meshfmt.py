@@ -17,6 +17,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .atomic import replacing
+
 FORMAT_VERSION = 1
 
 
@@ -168,23 +170,26 @@ class MeshSet:
         return h.hexdigest()[:16]
 
     def save(self, path: str | Path) -> Path:
+        """Write the container; an interrupted save leaves `path` untouched."""
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
         meta = dict(self.meta)
         meta.setdefault("format_version", FORMAT_VERSION)
         meta["content_hash"] = self.content_hash()
-        np.savez_compressed(
-            path,
-            vertices=self.vertices,
-            faces=self.faces,
-            vertex_offsets=self.vertex_offsets,
-            face_offsets=self.face_offsets,
-            # JSON, not an object array: an object array can only be read
-            # back through pickle, and these containers are meant to be
-            # fetched rather than shipped. See `load`.
-            names_json=np.asarray(json.dumps(list(self.names))),
-            meta=np.asarray(json.dumps(meta)),
-        )
+        # Through a file handle, so numpy writes exactly this path rather
+        # than appending `.npz` to one without it.
+        with replacing(path) as scratch, scratch.open("wb") as fh:
+            np.savez_compressed(
+                fh,
+                vertices=self.vertices,
+                faces=self.faces,
+                vertex_offsets=self.vertex_offsets,
+                face_offsets=self.face_offsets,
+                # JSON, not an object array: an object array can only be
+                # read back through pickle, and these containers are meant
+                # to be fetched rather than shipped. See `load`.
+                names_json=np.asarray(json.dumps(list(self.names))),
+                meta=np.asarray(json.dumps(meta)),
+            )
         return path
 
     @classmethod

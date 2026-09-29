@@ -38,6 +38,7 @@
 - A Zarr pyramid level over an axis of size 3 averages the two voxels its metadata describes, not all three. No published store has such an axis.
 - `lobemap bridge` counts the points a transform does not cover, and those points keep their position in micrometers. They were reported as 0 and placed in the source template's units, 1000x off between nm and um spaces; bridged meshes cached before this are rebuilt.
 - `lobemap manifest` quotes asset ids, paths and the base URL where TOML needs it, so an id with a dot or a path with a quote no longer writes a manifest that cannot be read back.
+- An interrupted `fetch`, `build`, `stain` or bridge-cache write leaves nothing at the artifact's path, and a rewrite keeps the old file until the new one is complete. A Zarr store cut off part-way used to open without error and read zeros, and `fetch` then skipped it as present.
 
 ### Changed
 

@@ -34,6 +34,8 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .atomic import replacing
+
 CHUNK = 1 << 20
 MANIFEST_VERSION = 1
 
@@ -90,12 +92,15 @@ def zip_directory(src: Path, dst: Path) -> Path:
 
 
 def unzip_directory(archive: Path, dst: Path) -> Path:
+    """Unpack beside `dst` and rename into place, replacing what is there.
+
+    An interrupted unpack leaves nothing at `dst`. Unpacking in place left
+    a store whose metadata had arrived and some of whose chunks had not,
+    which opened without error and read zeros.
+    """
     dst = Path(dst)
-    if dst.exists():
-        shutil.rmtree(dst)
-    dst.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(archive) as zf:
-        zf.extractall(dst)
+    with replacing(dst) as scratch, zipfile.ZipFile(archive) as zf:
+        zf.extractall(scratch)
     return dst
 
 

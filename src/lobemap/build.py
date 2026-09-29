@@ -30,6 +30,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .core.atomic import replacing
+
 DEFAULT_RECIPES = "recipes.toml"
 
 #: Downloaded sources are cached here, under the data root, so a second
@@ -349,11 +351,12 @@ def build_asset(registry, asset_id: str, recipes=None, progress=None,
     obj = fn(src, params, progress=progress,
              workdir=registry.data_root / ".stainwork")
 
-    target.parent.mkdir(parents=True, exist_ok=True)
     # `Volume.save` dispatches on the suffix, so a registry path ending in
     # .zarr writes an OME-Zarr pyramid and anything else writes npz. The
-    # recipe does not need to say which.
-    obj.save(target)
+    # recipe does not need to say which. Staged and renamed into place, so
+    # a build that stops part-way leaves the asset missing, not partial.
+    with replacing(target) as scratch:
+        obj.save(scratch)
     return BuildResult(asset_id, target, obj.content_hash())
 
 
