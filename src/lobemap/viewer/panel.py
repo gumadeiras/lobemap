@@ -10,6 +10,9 @@ atlas.
 
 The table is for bulk selection. It complements click-to-identify rather than
 replacing it: picking in the canvas selects the row here, and vice versa.
+
+A checked row is a drawn glomerulus, in either mode: the rows are the
+selection, and the selection is what `AtlasSurface.sync` draws.
 """
 
 from __future__ import annotations
@@ -242,6 +245,13 @@ class AtlasTab(QWidget):
         self.count = QLabel()
         layout.addWidget(self.count)
         self.setLayout(layout)
+
+        # The table follows the eye in napari's layer list, and the count
+        # follows whichever layer the mode draws.
+        surface.listeners.append(self._sync_rows)
+        surface.layer.events.visible.connect(self._update_count)
+        if contour is not None:
+            contour.layer.events.visible.connect(self._update_count)
         self._update_count()
 
     # -- helpers ---------------------------------------------------------
@@ -285,46 +295,33 @@ class AtlasTab(QWidget):
         ).lower()
 
     def _push(self, selection: set[int]) -> None:
-        """Show these compartments in whichever layer the mode can draw.
+        """Show exactly these compartments, in whichever layer the mode draws.
 
-        `AtlasSurface.refresh` turns its layer on whenever something is
-        selected, which is right in 3D and wrong in 2D: the display-mode
-        hook only fires on an `ndisplay` change, so nothing was putting
-        the mesh back. Ticking `Show all` in 2D switched the mesh on
-        underneath the slice, and left the contours -- the thing 2D can
-        actually draw -- off.
-
-        Only when a contour overlay exists. Without one the mesh is what
-        2D shows as well, which is the `USE_SLICE_CONTOURS = False` case
-        `install_display_mode` also defers to.
+        The surface draws its own selection in the mesh or, paired, in its
+        contours (`AtlasSurface.sync`), so a bulk button and a single row's
+        checkbox reach the same code and cannot disagree about the mode.
         """
         self.surface.set_selection(selection)
-        self._apply_mode_visibility()
-        if self.contour is not None:
-            self.contour.set_selection(selection)
         self._update_count()
 
-    def _apply_mode_visibility(self) -> None:
-        """Put the selection in whichever layer the current mode can draw.
+    def _sync_rows(self) -> None:
+        """Check exactly the selected rows, after the eye changed them."""
+        self._set_checks(VISIBLE_COL, self.surface.selection)
+        self._update_count()
 
-        Called from both routes into the layer -- the bulk buttons and a
-        single row's checkbox -- because `set_visible` bypassed `_push`
-        and so kept the bug after the buttons were fixed.
+    def _update_count(self, event=None) -> None:
+        """How many rows are drawn, which is the checked ones or none.
 
-        Visibility is set BEFORE the overlay refreshes: its refresh
-        returns early while the layer is hidden and would redraw nothing.
+        None only while napari's eye has the drawing layer off in a way the
+        surface did not take as a selection change -- the wrong mode's layer
+        switched on, say -- so the count never claims what is not drawn.
         """
-        if self.contour is None:
-            return
-        three_d = self.surface.viewer.dims.ndisplay == 3
-        on = bool(self.surface.selection)
-        self.surface.layer.visible = three_d and on
-        self.contour.layer.visible = (not three_d) and on
-
-    def _update_count(self) -> None:
-        self.count.setText(
-            f"{len(self.surface.selection)} / {self.table.rowCount()} shown"
-        )
+        n = self.table.rowCount()
+        shown = len(self.surface.selection)
+        if shown and not self.surface.mode_layer().visible:
+            self.count.setText(f"0 / {n} shown ({shown} checked, layer hidden)")
+        else:
+            self.count.setText(f"{shown} / {n} shown")
 
     # -- handlers --------------------------------------------------------
 
@@ -345,9 +342,6 @@ class AtlasTab(QWidget):
         index = int(item.data(INDEX_ROLE))
         visible = item.checkState() == Qt.Checked
         self.surface.set_visible(index, visible)
-        self._apply_mode_visibility()
-        if self.contour is not None:
-            self.contour.set_selection(self.surface.selection)
         self._update_count()
 
     def _set_checks(self, column: int, indices) -> set[int]:
@@ -407,6 +401,10 @@ class AtlasTab(QWidget):
                 selection.add(index)
         self._updating = False
         self._push(selection)
+
+    def select(self, indices) -> None:
+        """Check exactly these compartments, and draw them."""
+        self._set_indices(indices)
 
     def _all_indices(self) -> set[int]:
         return {i for i in (self._index_of(r)

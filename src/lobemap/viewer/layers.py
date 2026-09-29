@@ -190,6 +190,15 @@ class AtlasSurface:
         #: Whether the VIEW is reflected. Only the winding depends on it;
         #: the reflection itself is a world transform on the layer.
         self.mirrored = False
+        #: The layer that draws this selection in 2D -- the slice contours --
+        #: once the display mode pairs them. See `sync`.
+        self.twin = None
+        #: Called after napari's own visibility toggle changed the selection,
+        #: so the compartment table can follow it.
+        self.listeners: list = []
+        #: The selection an eye toggle hid, given back when it is shown again.
+        self._stashed: set[int] | None = None
+        self._syncing = False
         self._resident: list[int] = sorted(self.selection)
         v, f, vals = meshset.select(sorted(self.selection))
         self.layer = viewer.add_surface(
@@ -202,6 +211,7 @@ class AtlasSurface:
             blending=blending,
         )
         self.layer.metadata["lobemap"] = {"meshset": meshset, "kind": "atlas"}
+        self.layer.events.visible.connect(self._on_eye)
 
     # -- orientation -----------------------------------------------------
 
@@ -251,16 +261,23 @@ class AtlasSurface:
     # still matters: while hidden geometry is resident it is invisible but
     # still absorbs the 3D pick ray, so `name_at_value` filters to the
     # current selection to cover the transient.
+    #
+    # The selection is also the ONLY record of what is shown. A layer is
+    # visible exactly when something is selected and the current mode draws
+    # it, so a checked row is a drawn glomerulus in either mode, and there
+    # is no remembered visibility to go stale across 2D/3D switches.
 
     def set_visible(self, index: int, visible: bool) -> None:
         if visible:
             self.selection.add(index)
         else:
             self.selection.discard(index)
+        self._stashed = None
         self.refresh()
 
     def set_selection(self, indices) -> None:
         self.selection = set(indices)
+        self._stashed = None
         self.refresh()
 
     def show_all(self) -> None:
@@ -271,17 +288,77 @@ class AtlasSurface:
 
     def refresh(self) -> None:
         """Repaint now (cheap); compact the geometry shortly (expensive)."""
-        self._set_visible_if_changed(bool(self.selection))
+        self.sync(redraw=True)
         if self.selection:
             self._apply_alpha()
         self._schedule_compact()
 
-    def _set_visible_if_changed(self, value: bool) -> None:
-        # napari does NOT short-circuit a no-op write to `visible`: assigning
-        # True to an already-visible layer costs ~70 ms here, which dwarfs
-        # everything else in a toggle. Guard it.
-        if self.layer.visible != value:
-            self.layer.visible = value
+    def pair(self, twin) -> None:
+        """Let `twin` -- a contour overlay -- draw this selection in 2D.
+
+        Visibility is left to the next `sync`, which the display mode runs
+        once it has put the slider on the right axis and plane.
+        """
+        if self.twin is twin:
+            return
+        self.twin = twin
+        twin.layer.events.visible.connect(self._on_eye)
+
+    def draws_now(self) -> bool:
+        """Whether this layer, rather than its twin, draws in this mode."""
+        return self.twin is None or self.viewer.dims.ndisplay == 3
+
+    def mode_layer(self):
+        """The layer the current mode draws this selection with."""
+        return self.layer if self.draws_now() else self.twin.layer
+
+    def sync(self, redraw: bool = False) -> None:
+        """Show the selection in whichever layer the current mode draws.
+
+        Each visibility is written only when it changes: napari does NOT
+        short-circuit a no-op write to `visible`, and assigning True to an
+        already-visible layer cost 40-200 ms here, which was nearly all of
+        a row toggle. `redraw` recomputes the twin's contours for a changed
+        selection; a twin switched on redraws itself.
+        """
+        shown = bool(self.selection)
+        mesh = shown and self.draws_now()
+        self._syncing = True
+        try:
+            if self.layer.visible != mesh:
+                self.layer.visible = mesh
+            twin = self.twin
+            if twin is not None:
+                twin.selection = set(self.selection)
+                want = shown and not mesh
+                if twin.layer.visible != want:
+                    twin.layer.visible = want
+                elif want and redraw:
+                    twin.refresh()
+        finally:
+            self._syncing = False
+
+    def _on_eye(self, event=None) -> None:
+        """napari's visibility toggle, read as a change to the selection.
+
+        Hiding the layer the mode draws unchecks everything, and remembers
+        it; showing it again gives that back, or everything if there was
+        nothing to give. Without this the eye and the table disagreed.
+        """
+        if self._syncing:
+            return
+        layer = self.mode_layer()
+        source = getattr(event, "source", layer)
+        if source is not layer or layer.visible == bool(self.selection):
+            return
+        if layer.visible:
+            restored = self._stashed or set(range(self.meshset.n_compartments))
+            self.selection, self._stashed = set(restored), None
+        else:
+            self._stashed, self.selection = set(self.selection), set()
+        self.refresh()
+        for listener in list(self.listeners):
+            listener()
 
     def _apply_alpha(self) -> None:
         colors = self.colors.copy()
@@ -304,18 +381,24 @@ class AtlasSurface:
             self._timer.timeout.connect(self.compact)
         self._timer.start(self.compact_delay_ms)
 
+    def stop(self) -> None:
+        """Cancel a pending compaction, for a scene being torn down."""
+        if self._timer is not None:
+            self._timer.stop()
+
     def compact(self) -> None:
-        """Upload only the selected compartments. Restores exact picking."""
+        """Upload only the selected compartments. Restores exact picking.
+
+        Geometry only. It used to switch the layer back on as well, so in
+        2D the mesh reappeared under the slice a quarter second after any
+        row change; visibility belongs to `sync` alone.
+        """
         want = sorted(self.selection)
-        if want == self._resident:
-            return
-        if not want:
-            self._set_visible_if_changed(False)
+        if not want or want == self._resident:
             return
         v, f, vals = self.meshset.select(want)
         self.layer.data = (v, self._oriented(f), vals)
         self._resident = want
-        self._set_visible_if_changed(True)
         self._apply_alpha()
 
     # -- identification --------------------------------------------------

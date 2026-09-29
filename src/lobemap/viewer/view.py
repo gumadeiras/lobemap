@@ -269,10 +269,6 @@ def apply_mirror(layers, on: bool, center: float,
     meshes in micrometers and images in voxels alike: the images keep the
     scale and translate that place them, and the reflection composes on
     top rather than replacing it.
-
-    Layers currently detached by the display mode are included. They are
-    the same objects when re-appended, so the affine travels with them
-    and a 2D/3D switch cannot lose the mirror.
     """
     for layer in layers:
         ndim = int(getattr(layer, "ndim", 3) or 3)

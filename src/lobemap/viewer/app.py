@@ -150,7 +150,6 @@ def build_scene(
         surface = AtlasSurface(
             viewer, meshset, name=asset.id, opacity=0.35, blending="additive"
         )
-        surface.layer.visible = False
         surface.layer.shading = "none"
         surfaces[asset.id] = surface
 
@@ -210,58 +209,25 @@ DIMS_ORDER_XYZ = (2, 1, 0)
 
 def show_primary_atlas(registry: Registry, space: str, surfaces,
                        contours=None) -> None:
-    """Draw the space's primary atlas and switch its siblings off.
+    """Select the space's primary atlas and nothing of anything else.
 
     Every atlas native to the space is loaded -- that is what makes them
     superposable -- but two glomerular parcellations drawn on top of each
-    other are unreadable, so one opens.
+    other are unreadable, so one opens. Reference geometry opens off too.
 
-    This has to be callable a second time, AFTER `install_display_mode`.
-    That hook applies itself once on installation, and in 2D its first act
-    is to hide every surface; it then remembers each surface's visibility
-    to decide which contours to show. Set once at creation, the primary
-    atlas was already hidden by the time the hook looked, so it recorded
-    False and 2D opened with no contours at all -- an empty canvas but for
-    the stain. The old scene preset re-asserted visibility here for the
-    same reason.
+    Off means NOTHING SELECTED, not a hidden layer with every row still
+    checked: the table's checkboxes are what is drawn, so a secondary atlas
+    and a neuropil shell open with their rows unchecked and "0 / N shown",
+    and `Show all` or a row tick is what turns them on.
     """
     primary = registry.primary_atlas(space)
     for name, surface in surfaces.items():
-        if name not in registry.atlases:
-            continue            # a reference meshset: left as built
-        on = primary is not None and name == primary.id
-        surface.layer.visible = on
+        if primary is not None and name == primary.id:
+            continue
+        surface.set_selection(set())
         if contours and name in contours:
-            contours[name].layer.visible = on
+            contours[name].selection = set()
 
-
-#: Whether the display mode DETACHES layers it cannot draw, or merely hides
-#: them. Detaching is what keeps the layer list showing only what is usable
-#: in the current mode, which is the point of the feature.
-#:
-#: It also causes a hard crash. Removing a Surface layer from `viewer.layers`
-#: while the Layer object stays alive leaves a stale GL resource behind, and
-#: a later `layers.clear()` -- which is what a scene switch does -- paints
-#: against it:
-#:
-#:   OSError: exception: access violation reading 0x34
-#:     vispy/gloo/gl/_gl2.py in glDrawArrays
-#:
-#: Only 2D is affected, because that is the mode in which SURFACES are the
-#: detached ones; detaching Shapes in 3D is harmless. It scales with how many
-#: surfaces were detached: GRABE has one and survives, JRCFIB2018F has four
-#: and faults on the second switch.
-#:
-#: So it is OFF. A layer list that hides what the current mode cannot draw
-#: is worth less than a viewer that does not take the process down: with
-#: detaching on, switching scenes in 2D faults every run; with it off, every
-#: combination tested survives. Unusable layers are still hidden, so the
-#: canvas shows the same thing either way -- what changes is that they stay
-#: listed, grayed out, instead of disappearing.
-#:
-#: Set True to get the original behavior back, and do not switch scenes
-#: while in 2D.
-DETACH_UNUSABLE_LAYERS = False
 
 #: Whether 2D gets its own exact mesh-plane contour layers, or just shows
 #: the Surface layers sliced by napari.
@@ -287,19 +253,22 @@ USE_SLICE_CONTOURS = True
 
 
 def install_display_mode(viewer, surfaces, contours, images=(),
-                         detach: bool | None = None, space=None,
-                         mirror_axis=None) -> list[tuple]:
+                         space=None, mirror_axis=None) -> list[tuple]:
     """Show only what the current `ndisplay` can actually use.
 
     Returns (event, handler) pairs, so a scene switch can disconnect them;
     see `contours.install`.
 
-    Three things switch together on 2D/3D:
+    Pairs each surface with its contour overlay, and from then on switches
+    them together on 2D/3D:
 
-    - **Meshes in 3D, contours in 2D.** Both are removed from the layer list
-      rather than merely hidden, so the list holds only what is usable. The
-      layer objects are kept, so contrast, color and selection survive the
-      round trip.
+    - **Meshes in 3D, contours in 2D.** Each atlas draws its selection in
+      the layer the mode can read, and hides the other; see
+      `AtlasSurface.sync`. Nothing is remembered across a switch, so what
+      is checked is what is drawn after any sequence of switches.
+      Layers are hidden, never removed from the list: removing a Surface
+      layer while the Layer object lives on leaves a stale GL resource, and
+      the next scene switch in 2D faulted in `glDrawArrays` on it.
     - **Images pin a pyramid level in 3D.** napari's automatic choice there is
       the coarsest level; `level_for_3d` picks the finest one that fits in a
       texture. In 2D the lock is released so zoom-driven selection works.
@@ -307,22 +276,19 @@ def install_display_mode(viewer, surfaces, contours, images=(),
       it must stay the identity, because napari permutes an Image by it and a
       Surface not at all (see `DIMS_ORDER_XYZ`).
     """
-    detaching = DETACH_UNUSABLE_LAYERS if detach is None else detach
-    surf_layers = [s.layer for s in surfaces.values()]
-    cont_layers = [c.layer for c in contours.values()]
-
-    # Each contour mirrors its own surface, so 2D shows what 3D was showing
-    # instead of a fixed set. Keyed by name, which both dicts share.
-    paired = {
-        contours[name].layer: surfaces[name].layer
-        for name in contours
-        if name in surfaces
-    }
-    was_visible: dict[int, bool] = {}
+    for name, surface in surfaces.items():
+        if name in contours:
+            surface.pair(contours[name])
 
     def _apply(event=None) -> None:
         three_d = viewer.dims.ndisplay == 3
         ndim = viewer.dims.ndim
+        # Identity in 3D, or the stain transposes away from the meshes.
+        want_order = (
+            tuple(range(ndim)) if three_d or ndim != 3 else DIMS_ORDER_XYZ
+        )
+        if tuple(viewer.dims.order) != want_order:
+            viewer.dims.order = want_order
         # The triad shows the anatomy in 3D and the voxel grid in 2D,
         # and this is already the hook that fires on a mode change and
         # is torn down with the scene.
@@ -331,52 +297,13 @@ def install_display_mode(viewer, surfaces, contours, images=(),
             # this hook is installed, and the triads have to follow it.
             axis = mirror_axis() if callable(mirror_axis) else mirror_axis
             apply_axis_mode(viewer, space, mirror_axis=axis)
-        # Identity in 3D, or the stain transposes away from the meshes.
-        want_order = (
-            tuple(range(ndim)) if three_d or ndim != 3 else DIMS_ORDER_XYZ
-        )
-        if tuple(viewer.dims.order) != want_order:
-            viewer.dims.order = want_order
         for layer in images:
             info = layer.metadata.get("lobemap", {})
             if "level_3d" not in info:
                 continue            # labels carry no pyramid to pin
             layer.locked_data_level = info["level_3d"] if three_d else None
-        if not cont_layers:
-            # Nothing to swap to: the meshes are what 2D shows as well, so
-            # the layer list stays put and only `dims.order` changes.
-            return
-        show = surf_layers if three_d else cont_layers
-        hide = cont_layers if three_d else surf_layers
-        # The wrong-mode layers go off, unconditionally and every time.
-        # Whatever the user did to them since the last switch, a mesh cannot
-        # be read in 2D and a contour cannot be read in 3D.
-        for layer in hide:
-            if layer in viewer.layers:
-                was_visible[id(layer)] = layer.visible
-                if detaching:
-                    viewer.layers.remove(layer)
-                else:
-                    layer.visible = False
-        for layer in show:
-            if layer not in viewer.layers:
-                viewer.layers.append(layer)
-            # Outside the append guard on purpose. `_add_contours` has already
-            # put the contour layers in the viewer, so on the first call they
-            # need no adding -- and skipping the assignment left every one of
-            # them hidden, which made slice contours silently never draw.
-            twin = paired.get(layer)
-            if twin is not None:
-                # Inherit from the surface this contour stands in for, falling
-                # back to what the contour itself last had.
-                layer.visible = was_visible.get(
-                    id(twin), was_visible.get(id(layer), twin.visible)
-                )
-            else:
-                layer.visible = was_visible.get(id(layer), layer.visible)
-        if not three_d:
-            for overlay in contours.values():
-                overlay.refresh()
+        for surface in surfaces.values():
+            surface.sync()
 
     viewer.dims.events.ndisplay.connect(_apply)
     _apply()
@@ -491,7 +418,7 @@ class SceneSession:
         self.mirror_center = 0.0
 
     def all_layers(self) -> list:
-        """Every layer this session owns, detached ones included."""
+        """Every layer this session owns."""
         out = [s.layer for s in self.surfaces.values()]
         out += [c.layer for c in self.contours.values()]
         out += [layer for layer in self.images if layer not in out]
@@ -574,9 +501,8 @@ def load_space(
 ) -> SceneSession:
     """Build a scene into a viewer that may already hold one.
 
-    Ordering is load-bearing: `--show` runs AFTER the display-mode hook,
-    which adds and removes layers and restores remembered visibility, so
-    running it first would let the hook overwrite what was just asked for.
+    `--show` runs after the display-mode hook. It turns a layer on the way
+    napari's eye does, which a surface reads as showing all of it.
     """
     session = SceneSession(viewer, registry, space)
     surfaces, contours = build_scene(viewer, registry, space)
@@ -605,19 +531,8 @@ def load_space(
         space=registry.spaces[space],
         mirror_axis=lambda: MIRROR_AXIS if session.mirrored else None,
     ) or []
-    enforce_display_mode = session.handlers[0][1] if session.handlers else None
-
-    # Again, now that the display-mode hook has run and consumed the
-    # visibility it found. See `show_primary_atlas`.
-    show_primary_atlas(registry, space, surfaces, contours)
     if show:
         _show_layers(viewer, show)
-
-    # AFTER --show, which sets visibility without knowing the display mode:
-    # naming an atlas would otherwise turn its mesh on while the viewer is
-    # in 2D, where it cannot be read.
-    if enforce_display_mode is not None:
-        enforce_display_mode()
 
     orient_anterior(viewer, registry.spaces[space])
     install_home_orientation(viewer, registry.spaces[space])
