@@ -66,6 +66,12 @@ def zip_directory(src: Path, dst: Path) -> Path:
     Entries are sorted and timestamps normalized, so zipping the same store
     twice produces identical bytes. Without that, a rebuild would appear to
     change data that had not changed.
+
+    The creating system is pinned too. `ZipInfo` records 0 (MS-DOS) on
+    Windows and 3 (Unix) elsewhere, one byte per entry, so the same store
+    hashed differently on each: the published stains, zipped on Windows,
+    failed `fetch --check` on macOS and were downloaded again by every
+    `fetch`. 0 is the value the published hashes were recorded with.
     """
     src, dst = Path(src), Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -75,6 +81,7 @@ def zip_directory(src: Path, dst: Path) -> Path:
             info = zipfile.ZipInfo(str(p.relative_to(src)).replace("\\", "/"),
                                    date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 0
             info.external_attr = 0o644 << 16
             zf.writestr(info, p.read_bytes())
     return dst

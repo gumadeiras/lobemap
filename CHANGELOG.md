@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- `lobemap fetch --check` verifies the published stains on macOS and Linux. Hashing a Zarr store re-zips it, and each zip entry recorded the platform that wrote it, so stores published from Windows reported as corrupt elsewhere and every `lobemap fetch` downloaded the 2.44 GB of stains again. The zip now records the same platform everywhere.
 - The virtual stains and the GRABE confocal stack render in grayscale rather than magenta. They are reference imagery under colored glomerulus meshes, and a magenta wash tinted everything drawn over it. The GRABE stack carried its own per-asset `display` override, so it needed changing in `assets.toml` too.
 - The viewer draws **two axis triads** in 3D, sharing one origin. napari's own names the ARRAY axes — `x`, `y`, `z` — and a second one names the anatomy, `A`, `D` and `R` or `L`, turned onto the measured frame. Two rather than one because they are two different facts: an earlier version turned napari's own onto the anatomy, which left nothing showing where the voxel grid ran.
 - In 2D only napari's remains. A slice is cut along array axes, which are 15–31° off the anatomy in every space, so an anatomical arrow over a slice claimed an alignment the slice does not have.

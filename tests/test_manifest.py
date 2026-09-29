@@ -50,6 +50,17 @@ def test_zipping_a_store_twice_gives_identical_bytes(tmp_path):
     assert mf.sha256_file(a)[0] == mf.sha256_file(b)[0]
 
 
+@pytest.mark.parametrize("platform", ["win32", "darwin", "linux"])
+def test_zipping_a_store_gives_the_same_bytes_on_every_platform(tmp_path, monkeypatch,
+                                                                platform):
+    """A store published from Windows must verify on macOS and Linux."""
+    _tree(tmp_path / "data")
+    src = tmp_path / "data" / "stain.zarr"
+    ref = mf.zip_directory(src, tmp_path / "ref.zip").read_bytes()
+    monkeypatch.setattr("sys.platform", platform)
+    assert mf.zip_directory(src, tmp_path / f"{platform}.zip").read_bytes() == ref
+
+
 def test_manifest_round_trips_through_toml(tmp_path):
     arts = mf.build(tmp_path, _tree(tmp_path / "data"))
     path = tmp_path / "manifest.toml"
