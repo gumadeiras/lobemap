@@ -200,7 +200,7 @@ def save_zarr(volume, path: str | Path, chunks=DEFAULT_CHUNK,
 
     group = _open_group(path, "w")
     arrays = []
-    for level, (shape, _factors) in enumerate(levels):
+    for level, (shape, factors) in enumerate(levels):
         arr = _create(group, str(level), shape, volume.data.dtype, chunks,
                       compressor)
         if level == 0:
@@ -209,8 +209,11 @@ def save_zarr(volume, path: str | Path, chunks=DEFAULT_CHUNK,
                 b = min(int(shape[0]), a + step)
                 arr[a:b] = np.asarray(volume.data[a:b])
         else:
-            prev_shape = levels[level - 1][0]
-            stride = tuple(p // n for p, n in zip(prev_shape, shape))
+            # The step the metadata records, not the shape ratio: a size-3
+            # axis halves to 1, and 3 // 1 would average three voxels under
+            # a transform that says two.
+            prev_factors = levels[level - 1][1]
+            stride = tuple(f // p for f, p in zip(factors, prev_factors))
             downsample(arrays[-1], arr, stride, block_planes)
         arrays.append(arr)
 
