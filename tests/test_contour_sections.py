@@ -12,8 +12,8 @@ the reference, and `assert_same_sections` states what "the same" means:
 - wherever trimesh also drew each segment at most once, the polylines pair
   up one to one, each within TOL_UM of its partner.
 
-Edge lengths are judged in float32, as napari stores points, so a segment
-shorter than float32 can resolve collapses and is not drawn, and a loop that
+Edges shorter than `contours.MIN_EDGE_UM`, 1e-4 um, are merged away, and so
+is any edge float32 cannot resolve, as napari stores points; a loop that
 collapses whole is too small to see and is left out on both sides. TOL_UM
 covers that and trimesh's own vertex merging, which rounds to a 1e-5 um grid.
 Otherwise the polylines differ only in where each starts and which way it
@@ -44,9 +44,10 @@ from lobemap.viewer.contours import ContourOverlay, MeshSections
 
 REGISTRY = Path(__file__).resolve().parents[1] / "registry"
 
-#: One cell diagonal of trimesh's 1e-5 um path-merge grid in a plane (1.4e-5),
-#: plus one of float32's below 1024 um (8.6e-5). A contour line is 0.35 um wide.
-TOL_UM = 1e-4
+#: MIN_EDGE_UM, plus one cell diagonal of trimesh's 1e-5 um merge grid in a
+#: plane and one of float32's below 1024 um (8.6e-5). A contour line is
+#: 0.35 um wide.
+TOL_UM = 2e-4
 
 SPACES = ("FAFB14", "JRCFIB2018F", "JRCFIB2022M", "GRABE")
 MESH_ASSETS = (

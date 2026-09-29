@@ -31,6 +31,10 @@ TEXT_SIZE = 10.5
 #: its own were classified.
 ON_PLANE_TOL = 1e-8
 
+#: Contour edges shorter than this are merged away; see `_drawable`. A
+#: contour line is drawn 0.35 um wide, 3500 times this.
+MIN_EDGE_UM = 1e-4
+
 #: Planes whose sections an overlay keeps, so revisiting one costs no
 #: geometry. One plane of every compartment is 26-300 KB across the shipped
 #: meshes, so this holds at most about 40 MB per overlay, and only an
@@ -66,9 +70,10 @@ class MeshSections:
     shipped atlases and three neuropil sets that is one compartment in
     about 19,000 cut on 120 planes each.
 
-    Elsewhere the loops are trimesh's to within 1e-4 um -- its own 1e-5 um
-    vertex merge, and the float32 repeats `_drawable` drops -- apart from
-    where each starts and which way it runs (`tests/test_contour_sections.py`).
+    Elsewhere the loops are trimesh's to within 2e-4 um -- its own 1e-5 um
+    vertex merge, and the points closer than MIN_EDGE_UM that `_drawable`
+    drops -- apart from where each starts and which way it runs
+    (`tests/test_contour_sections.py`).
     One case differs on purpose: at a mesh seam, where distinct vertices
     share a position, trimesh's merging joined two loops into a figure eight
     and drew part of it twice.
@@ -251,24 +256,45 @@ def _node_points(vertices, keys, axis: int, p: float, n: int) -> np.ndarray:
 
 
 def _drawable(loop: np.ndarray) -> np.ndarray | None:
-    """A loop without the points napari cannot tell apart, or None.
+    """A loop without the points no one can tell apart, or None.
 
-    napari stores shapes as float32, which at a few hundred micrometers is a
-    3e-5 um grid, so two crossings closer than that become one point. In a
-    row they make a zero-length edge, which napari's pure-Python
-    triangulation cannot fill: where the repeat closes the loop it raises
-    `KeyError: (0, 0)`. trimesh's 1e-5 um merge left fewer of them, but some.
-    Each repeat is dropped, and a loop left with fewer than three distinct
-    points, too small to see, is dropped with them.
+    Two kinds go:
+
+    - Points within MIN_EDGE_UM of the point kept before them. GRABE's
+      slider steps fall on its vertex grid, so a vertex a hair off the plane
+      sends every edge around it through the plane at nearly one point: 13%
+      of its contour edges were shorter than 1e-3 um. Invisible, but each
+      is a vertex napari triangulates on every step: dropping them cuts the
+      triangulation of a filled GRABE slice by a sixth.
+    - Points float32 cannot tell from the one before, which napari stores
+      and MIN_EDGE_UM may not cover above 1024 um. The zero-length edge
+      they make stops napari's pure-Python fill: where it closes the loop,
+      `KeyError: (0, 0)`.
+
+    Every point dropped is within MIN_EDGE_UM of one kept. A loop left with
+    fewer than three points, too small to see, is dropped with them.
     """
     closed = len(loop) > 1 and np.array_equal(loop[0], loop[-1])
     ring = loop[:-1] if closed else loop
-    f32 = ring.astype(np.float32)
+    if len(ring) < 3:
+        return None
     keep = np.ones(len(ring), dtype=bool)
-    keep[1:] = np.any(f32[1:] != f32[:-1], axis=1)
+    keep[1:] = np.linalg.norm(np.diff(ring, axis=0), axis=1) >= MIN_EDGE_UM
+    if not keep.all():
+        # A run of short edges can wander; keep whatever strays from the
+        # point that heads the run.
+        head = np.maximum.accumulate(np.where(keep, np.arange(len(ring)), 0))
+        keep |= np.linalg.norm(ring - ring[head], axis=1) >= MIN_EDGE_UM
     kept = np.flatnonzero(keep)
-    while closed and len(kept) > 1 and np.array_equal(f32[kept[-1]], f32[0]):
-        kept = kept[:-1]
+    f32 = ring[kept].astype(np.float32)
+    distinct = np.ones(len(kept), dtype=bool)
+    distinct[1:] = np.any(f32[1:] != f32[:-1], axis=1)
+    kept, f32 = kept[distinct], f32[distinct]
+    while closed and len(kept) > 1 and (
+        np.array_equal(f32[-1], f32[0])
+        or np.linalg.norm(ring[kept[-1]] - ring[0]) < MIN_EDGE_UM
+    ):
+        kept, f32 = kept[:-1], f32[:-1]
     if len(kept) < 3:
         return None
     if len(kept) == len(ring):
