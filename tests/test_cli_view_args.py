@@ -15,13 +15,19 @@ from lobemap import cli
 
 @pytest.fixture
 def captured(monkeypatch):
-    """Intercept `run` so the CLI can be exercised without a GUI."""
+    """Intercept `run` so the CLI can be exercised without a GUI.
+
+    And the autofetch `view` does first. Left in, it downloaded the release
+    into the checkout on a fresh clone, and these tests passed whether the
+    download worked or not.
+    """
     calls: list[dict] = []
 
     def fake_run(registry_root, space=None, **kwargs):
         calls.append({"registry_root": registry_root, "space": space, **kwargs})
 
     monkeypatch.setattr("lobemap.viewer.app.run", fake_run)
+    monkeypatch.setattr("lobemap.cli._autofetch", lambda *args, **kwargs: None)
     return calls
 
 
