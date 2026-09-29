@@ -48,8 +48,7 @@ def silent_server():
 @pytest.fixture
 def published(tmp_path, silent_server, monkeypatch):
     """A one-artifact manifest whose base_url is the silent server."""
-    # raising=False so the test also runs, and hangs, where there is no limit.
-    monkeypatch.setattr(cli, "NETWORK_TIMEOUT_S", LIMIT_S, raising=False)
+    monkeypatch.setattr(mf, "TIMEOUT_S", LIMIT_S)
     # urllib sends even 127.0.0.1 through an `http_proxy` from the
     # environment, and a dead one refuses at once instead of stalling.
     monkeypatch.setenv("no_proxy", "127.0.0.1")
@@ -90,8 +89,24 @@ def test_the_viewer_still_opens_after_a_silent_server(published, monkeypatch):
     assert calls[0] - start < 10 * LIMIT_S
 
 
-def test_main_leaves_the_process_default_as_it_found_it(published):
-    registry, data = published
-    before = socket.getdefaulttimeout()
-    cli.main(["--registry", str(registry), "--data-root", str(data), "fetch"])
-    assert socket.getdefaulttimeout() == before
+def test_an_unreachable_host_costs_one_timeout_not_one_per_artifact(
+        tmp_path, silent_server, monkeypatch):
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    arts = [mf.Artifact(f"a{i}", f"a{i}.npz", "file", "0" * 64, 10) for i in range(3)]
+    start = time.monotonic()
+    results = mf.fetch(arts, tmp_path / "data", silent_server, timeout=LIMIT_S)
+    elapsed = time.monotonic() - start
+    assert [s.state for s in results] == ["missing"] * 3
+    assert "timed out" in results[0].detail
+    assert all(s.detail.startswith("not tried:") for s in results[1:])
+    assert elapsed < 2 * LIMIT_S + 1
+
+
+def test_a_missing_file_does_not_stop_the_others(tmp_path):
+    pub = tmp_path / "pub"
+    pub.mkdir()
+    (pub / "b.npz").write_bytes(b"payload")
+    good = mf.build(pub, [type("A", (), {"id": "b", "path": pub / "b.npz"})])[0]
+    absent = mf.Artifact("a", "a.npz", "file", "0" * 64, 10)
+    results = mf.fetch([absent, good], tmp_path / "data", pub.as_uri())
+    assert [s.state for s in results] == ["missing", "ok"]

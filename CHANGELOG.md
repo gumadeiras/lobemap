@@ -32,7 +32,7 @@
 - Wrong input fails with one line and exit 2 instead of succeeding or printing a traceback: a registry directory that does not exist, and an unknown asset or space given to `fetch`, `pack`, `build`, `repair`, `bridge` or `stain`.
 - `--data-root` applies to `manifest`, `spaces`, `nomenclature`, `repair`, `stain` and `ingest neuprint`: `manifest` no longer crashes on it, and `stain` and `ingest neuprint` write their output there instead of always into `registry/data`.
 - `lobemap manifest --prune` keeps the recorded `base_url`; it used to write a manifest that `fetch` could not download from.
-- A download that stalls fails after 30 seconds without data instead of hanging, so `fetch` returns and bare `lobemap` still opens its window.
+- A download that stalls fails after 30 seconds without data instead of hanging, and once the server has not answered the remaining downloads are skipped, so `fetch` returns and bare `lobemap` still opens its window.
 - A mesh container whose names can only be read through pickle is refused instead of unpickled, so a crafted `.npz` in a data root, the bridge cache or a custom `--base-url` cannot run code. A pickled bridge-cache entry is rebuilt; a trusted legacy file loads with `MeshSet.load(path, allow_legacy_pickle=True)`.
 - Rewriting `registry/nomenclature.csv` keeps its LF line endings, so a one-row change is a one-line diff rather than a rewrite of all 477 lines.
 - A Zarr pyramid level over an axis of size 3 averages the two voxels its metadata describes, not all three. No published store has such an axis.

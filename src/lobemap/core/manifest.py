@@ -58,8 +58,10 @@ MANIFEST_VERSION = 2
 ZIP_LEVEL = 6
 #: Seconds a download may wait on a connect or a read before it fails.
 #: Without one, a stalled connection hung `fetch` -- and bare `lobemap`,
-#: which fetches before it opens a window -- with nothing on screen.
-TIMEOUT_S = 60.0
+#: which fetches before it opens a window -- with nothing on screen. It
+#: limits each socket operation, so a slow download that keeps receiving
+#: is never cut off.
+TIMEOUT_S = 30.0
 
 
 class ChecksumMismatch(ValueError):
@@ -321,15 +323,38 @@ def verify(artifacts, data_root: Path, progress=None) -> list[Status]:
     return out
 
 
+def _unreachable(exc: Exception) -> bool:
+    """Whether `exc` says the host did not answer, not that one file failed.
+
+    A 404 or a missing `file://` path is about one artifact; a timeout, a
+    refused connection or a failed name lookup is about the server, and
+    every later artifact would wait out the same timeout.
+    """
+    import socket
+    import urllib.error
+
+    if isinstance(exc, urllib.error.HTTPError):
+        return False
+    if isinstance(exc, urllib.error.URLError):
+        exc = exc.reason if isinstance(exc.reason, Exception) else exc
+    return isinstance(exc, (TimeoutError, ConnectionError, socket.gaierror))
+
+
 def fetch(artifacts, data_root: Path, base_url: str, workdir: Path | None = None,
-          progress=None, timeout: float = TIMEOUT_S) -> list[Status]:
+          progress=None, timeout: float | None = None) -> list[Status]:
     """Download and verify. A failed checksum leaves nothing behind.
 
     A store is checked twice: the zip against `sha256` before it is
     unpacked, and what it unpacks to against `tree_sha256` before that is
     moved into place.
+
+    After the host fails to answer once, the remaining artifacts are
+    reported missing without being tried, so an unreachable server costs
+    one timeout rather than one per artifact.
     """
     import urllib.request
+
+    timeout = TIMEOUT_S if timeout is None else timeout
 
     data_root = Path(data_root)
     data_root.mkdir(parents=True, exist_ok=True)
@@ -337,9 +362,15 @@ def fetch(artifacts, data_root: Path, base_url: str, workdir: Path | None = None
     workdir.mkdir(parents=True, exist_ok=True)
     base = base_url.rstrip("/")
     out = []
+    down = None
     for i, art in enumerate(artifacts, start=1):
         url = f"{base}/{art.transfer_name}"
         tmp = workdir / f"{Path(art.transfer_name).name}.part"
+        if down is not None:
+            out.append(Status(art, "missing", f"not tried: {down}"))
+            if progress is not None:
+                progress(i, len(artifacts), out[-1])
+            continue
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp, \
                     tmp.open("wb") as fh:
@@ -359,6 +390,8 @@ def fetch(artifacts, data_root: Path, base_url: str, workdir: Path | None = None
             out.append(Status(art, "corrupt", str(exc)))
         except Exception as exc:                    # noqa: BLE001 - reported
             out.append(Status(art, "missing", f"{type(exc).__name__}: {exc}"))
+            if _unreachable(exc):
+                down = f"{base} did not answer ({type(exc).__name__})"
         finally:
             tmp.unlink(missing_ok=True)
         if progress is not None:
