@@ -357,6 +357,16 @@ class ContourOverlay:
         )
         self.sections = MeshSections(meshset)
         self._shape_index: list[int] = []
+        #: What the layer currently shows, as `_state` describes it. A
+        #: refresh that would draw the same thing again returns at once:
+        #: one 2D/3D switch reaches `refresh` from three separate hooks,
+        #: and each of them used to rebuild every shape.
+        self._drawn = None
+        #: Whether the text is the blank constant rather than one string per
+        #: shape, which saves re-sending it on every step while nothing is
+        #: labeled. The layer is created with it.
+        self._text_blank = True
+        self._fill_rgba = None
 
         self.layer = viewer.add_shapes(
             data=[],
@@ -367,6 +377,8 @@ class ContourOverlay:
             face_color="transparent",
             ndim=3,
             visible=False,
+            text={"string": {"constant": ""}, "size": TEXT_SIZE,
+                  "color": color, "anchor": "center"},
         )
         self.layer.metadata["lobemap"] = {"kind": "contours", "atlas": name}
 
@@ -444,15 +456,18 @@ class ContourOverlay:
 
     def _face_colors(self, owners):
         """Per-shape face color: the mesh color, faded, or transparent."""
-        out = []
-        for i in owners:
-            if i not in self.filled:
-                out.append((0.0, 0.0, 0.0, 0.0))
-                continue
-            spec = (self.colors[i] if self.colors is not None
-                    and 0 <= i < len(self.colors) else self.color)
-            r, g, b, _ = self._as_rgba(spec)
-            out.append((r, g, b, self.FILL_ALPHA))
+        if self._fill_rgba is None:
+            # Parsed once per compartment rather than once per shape per step.
+            specs = (list(self.colors) if self.colors is not None
+                     else [self.color] * self.meshset.n_compartments)
+            table = np.array([self._as_rgba(spec) for spec in specs]).reshape(-1, 4)
+            table[:, 3] = self.FILL_ALPHA
+            self._fill_rgba = table
+        owners = np.asarray(owners, dtype=int)
+        filled = np.fromiter((i in self.filled for i in owners.tolist()), bool,
+                             count=len(owners))
+        out = np.zeros((len(owners), 4))
+        out[filled] = self._fill_rgba[owners[filled]]
         return out
 
     def _shape_types(self, owners):
@@ -462,44 +477,86 @@ class ContourOverlay:
         """One RGBA per shape, from the compartment that shape came from."""
         if self.colors is None:
             return self.color
-        return [
-            self.colors[i] if 0 <= i < len(self.colors) else self.color
-            for i in owners
-        ]
+        return self.colors[np.asarray(owners, dtype=int)]
 
     # -- updates ---------------------------------------------------------
 
+    def _state(self, axis: int, position: float) -> tuple:
+        """Everything the drawn shapes depend on."""
+        shown = frozenset(self.selection)
+        return (
+            axis, position, shown,
+            frozenset(self.filled & shown), frozenset(self.labels & shown),
+            self.width, repr(self.color), id(self.colors),
+        )
+
     def refresh(self) -> None:
-        if not self.layer.visible:
+        # Nothing to cut in 3D, where no axis is sliced: the display-mode hook
+        # hides contours there, but a scene opening in 3D switches the primary
+        # atlas's contour on before that hook runs, and drawing it then cost a
+        # 3D Shapes build at every load.
+        if not self.layer.visible or self.viewer.dims.ndisplay != 2:
             return
-        paths, owners = self.contours_at(self.slice_position())
-        self._shape_index = owners
-        # Clear, then add with the shape type given explicitly. Assigning
-        # `data` and then `shape_type` looks equivalent and is not: the
-        # setter re-adds every shape onto a shape list that already holds the
-        # previous ones, and once the layer has been displayed in 2D those
-        # carry 2D mesh vertices. Stacking them against 3D ones raised
-        # "array at index 0 has size 2 and the array at index 1 has size 3"
-        # on the second switch back into 2D.
-        self.layer.data = []
+        axis = self.axis
+        position = self.slice_position()
+        state = self._state(axis, position)
+        if state == self._drawn and self.layer.nshapes == len(self._shape_index):
+            return
+        paths, owners = self.contours_at(position)
+        self._draw(paths, owners)
+        self._drawn = state
+
+    def _draw(self, paths, owners) -> None:
+        """Replace every shape in ONE data write.
+
+        The shape type travels with each shape. Assigning `data` and then
+        `shape_type` looks equivalent and is not: the setter re-adds every
+        shape onto a shape list that already holds the previous ones, and
+        once the layer has been displayed in 2D those carry 2D mesh
+        vertices. Stacking them against 3D ones raised "array at index 0 has
+        size 2 and the array at index 1 has size 3" on the second switch
+        back into 2D.
+
+        One write rather than clearing and then adding, because napari
+        recomputes the extent of every layer, and the dims from it, on each
+        data event, and a write emits two of them.
+        """
+        self._shape_index = list(owners)
+        layer = self.layer
+        # napari redraws the layer-list thumbnail after each of these writes,
+        # rasterizing every shape each time; once, at the end, is enough.
+        with layer.block_thumbnail_update():
+            layer.data = list(zip(paths, self._shape_types(owners), strict=True))
+            if paths:
+                # The write keeps each position's old attributes and gives
+                # new positions napari's defaults, so they are set afterwards.
+                layer.edge_width = [self.width] * len(paths)
+                layer.edge_color = self._colors_for(owners)
         if paths:
-            self.layer.add(
-                paths,
-                shape_type=self._shape_types(owners),
-                edge_color=self._colors_for(owners),
-                face_color=self._face_colors(owners),
-                edge_width=self.width,
-            )
+            layer.face_color = self._face_colors(owners)
         # Text after data: napari requires one string per shape, so setting it
         # first would leave the counts disagreeing.
         self._apply_text(owners, paths)
 
     def _apply_text(self, owners: list[int], paths) -> None:
-        strings = self._label_strings(owners, paths) if paths else []
+        """Write the labels, changing only the text's string and color.
+
+        Size and anchor are set once, when the layer is made. Assigning a
+        whole `layer.text` rebuilt napari's text manager on every slice
+        step, five times the cost of updating these two fields in place.
+        """
+        blank = not (self.labels and self.labels.intersection(owners))
+        if blank and self._text_blank:
+            return      # already the blank constant, whatever the shape count
+        text = self.layer.text
         try:
-            self.layer.text = {
-                "string": strings,
-                "size": TEXT_SIZE,
+            if blank:
+                # A constant rather than a string per shape: napari
+                # broadcasts it to any number of shapes, so it stays right
+                # through later writes without being sent again.
+                text.string = {"constant": ""}
+            else:
+                text.string = self._label_strings(owners, paths)
                 # One color per shape, matching that glomerulus's mesh. A
                 # single color for the layer would put every label in the
                 # atlas color while the outline under it was its own.
@@ -508,10 +565,10 @@ class ContourOverlay:
                 # napari cannot tell a list of N colors from one color
                 # given component-wise, and silently collapsed the list to a
                 # single constant -- `text.color` came back 0-dimensional.
-                "color": self._text_color(owners),
-                "anchor": "center",
-            }
+                text.color = self._text_color(owners)
+            self._text_blank = blank
         except Exception as exc:      # noqa: BLE001 - never worth a crash
+            self._text_blank = False
             # Reported once rather than swallowed: if napari changes its text
             # API this is the only thing that tells us.
             if not getattr(self, "_text_warned", False):
@@ -579,6 +636,10 @@ def install(viewer, overlays: dict[str, ContourOverlay]) -> list[tuple]:
     contour against its own surface -- two handlers on the same event, each
     with its own idea of what should be visible, is how a layer ends up
     visible in a mode that cannot draw it.
+
+    The display-mode hook also refreshes the contours it reveals, so on a
+    switch into 2D these handlers usually find nothing left to draw; a
+    refresh that would redraw what is already there returns at once.
     """
 
     def _on_display_change(event=None) -> None:

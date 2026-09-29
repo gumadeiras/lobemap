@@ -25,8 +25,10 @@ eight that it then walks as two overlapping cycles; the male CNS neuropil
 `VES(R)` has one. A compartment `MeshSections` hands back to trimesh comes
 out as trimesh drew it, less any zero-length edges.
 
-The rest is invalidation. Sections are cached per plane, so the contours must
-still follow a change of selection and of space.
+The rest is invalidation. Sections are cached per plane, and a refresh that
+would draw the same shapes again does nothing, so the contours must still
+follow a change of selection and of space, and a 2D/3D switch must draw at
+most once.
 """
 
 from __future__ import annotations
@@ -466,5 +468,47 @@ def test_a_new_space_draws_its_own_contours(registry):
         position = _step_into(viewer, session.surfaces[primary], 0.5)
         assert_draws(overlay, position, "GRABE after FAFB14:")
         assert not any(layer in viewer.layers for layer in old)
+    finally:
+        viewer.close()
+
+
+def test_a_mode_switch_draws_the_contours_at_most_once(registry):
+    """Three hooks reach `refresh` on a switch into 2D; it used to rebuild three times."""
+    viewer, session, primary = _open(registry, "FAFB14", ndisplay=3)
+    try:
+        writes = {name: 0 for name in session.contours}
+
+        def counter(name):
+            def count(event):
+                if str(event.action) in ("added", "changed", "removed"):
+                    writes[name] += 1
+            return count
+
+        for name, overlay in session.contours.items():
+            overlay.layer.events.data.connect(counter(name))
+        overlay = session.contours[primary]
+
+        def switch(ndisplay):
+            for name in writes:
+                writes[name] = 0
+            viewer.dims.ndisplay = ndisplay
+            _settle()
+            return dict(writes)
+
+        first = switch(2)
+        assert first[primary] == 1, first
+        assert all(n <= 1 for n in first.values()), first
+        position = float(viewer.dims.point[overlay.axis])
+        assert_draws(overlay, position, "first entry into 2D:")
+        for _ in range(2):
+            assert all(n == 0 for n in switch(3).values())
+            again = switch(2)
+            assert all(n <= 1 for n in again.values()), again
+            assert overlay.layer.visible
+            assert_draws(overlay, position, "back in 2D:")
+
+        writes[primary] = 0
+        _step_into(viewer, session.surfaces[primary], 0.3)
+        assert writes[primary] == 1
     finally:
         viewer.close()
