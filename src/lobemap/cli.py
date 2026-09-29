@@ -660,7 +660,8 @@ def cmd_spaces(args) -> int:
     if absent_total:
         print()
         print(f"{absent_total} declared asset(s) are not on disk. "
-              f"`lobemap build --list` shows which can be rebuilt.")
+              f"`lobemap fetch` downloads them; `lobemap build --list` shows "
+              f"which can be rebuilt from source.")
     return 0
 
 
@@ -1344,6 +1345,18 @@ def main(argv: list[str] | None = None) -> int:
     # means it, whereas None means "read sys.argv".
     if argv is None and len(sys.argv) == 1:
         argv = ["view"]
+    # 0.1.x opened one atlas with `lobemap --atlas <name>`. argparse reads
+    # the name as a subcommand and answers "invalid choice", which says
+    # nothing about what replaced it. Only before the subcommand, where the
+    # old flag went: `ingest neuprint` has an `--atlas-id` of its own.
+    for token in sys.argv[1:] if argv is None else argv:
+        if token in sub.choices:
+            break
+        if token == "--atlas" or token.startswith("--atlas="):
+            print("lobemap: --atlas was removed in 0.2.0; open a coordinate "
+                  "space instead, such as `lobemap view GRABE` (`lobemap "
+                  "spaces` lists them)", file=sys.stderr)
+            return 2
     args = p.parse_args(argv)
 
     from .core.registry import RegistryError

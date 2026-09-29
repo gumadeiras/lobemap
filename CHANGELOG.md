@@ -61,6 +61,7 @@
 - Version set to 0.2.0.dev0: the two declarations in `pyproject.toml` and
   `__init__.py` disagreed (0.0.0 and 0.1.0.dev0) and both sat below the
   released 0.1.4 on the same PyPI name.
+- `lobemap --atlas <name>`, the 0.1.x way to open an atlas, says it was replaced by `lobemap view <space>` instead of failing with "invalid choice"; `lobemap spaces` points at `fetch` for assets that are not on disk; `--registry --help` names the real default.
 
 ### Added
 

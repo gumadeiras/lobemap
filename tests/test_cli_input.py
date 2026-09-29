@@ -85,3 +85,17 @@ def test_an_unknown_name_is_refused_before_any_work(capsys, tmp_path, command, e
     _refused(capsys, ["--registry", str(REGISTRY), "--data-root", str(empty),
                       *command], expect)
     assert not any(empty.iterdir()), "wrote into the data root"
+
+
+def test_the_old_atlas_flag_says_what_replaced_it(capsys):
+    """0.1.x took `--atlas`; argparse alone answered "invalid choice"."""
+    _refused(capsys, ["--atlas", "grabe-2015"], "--atlas was removed in 0.2.0")
+    _refused(capsys, ["--atlas=hemibrain"], "`lobemap spaces` lists them")
+
+
+def test_spaces_points_at_fetch_for_what_is_missing(capsys, tmp_path):
+    from lobemap.cli import main
+
+    assert main(["--registry", str(REGISTRY), "--data-root", str(tmp_path),
+                 "spaces"]) == 0
+    assert "`lobemap fetch` downloads them" in capsys.readouterr().out
