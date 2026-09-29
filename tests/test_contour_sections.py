@@ -340,6 +340,42 @@ def assert_draws(overlay, position, where, selection=None) -> None:
                          _expected(overlay, position, selection), TOL_UM, where)
 
 
+def _assert_styled(overlay, colors=None) -> None:
+    """Every shape has the overlay's width and its compartment's edge color.
+
+    A write keeps the old shapes' attributes and gives new ones napari's
+    defaults, and only some are written again, so this is checked across
+    planes where the shape count rises and falls.
+    """
+    from napari.utils.colormaps.standardize_color import transform_color
+
+    layer = overlay.layer
+    if not layer.nshapes:
+        return
+    np.testing.assert_allclose(layer.edge_width, overlay.width)
+    names = overlay.meshset.names
+    owners = [names.index(overlay.name_at_shape(i)) for i in range(layer.nshapes)]
+    want = (np.asarray(colors)[owners] if colors is not None
+            else np.repeat(transform_color(overlay.color), layer.nshapes, axis=0))
+    np.testing.assert_allclose(np.asarray(layer.edge_color), want, atol=1e-6)
+
+
+def test_reference_contours_keep_their_color_and_width(registry):
+    viewer, session, _primary = _open(registry, "FAFB14")
+    try:
+        shell = session.contours["fafb_neuropil"]
+        shell.layer.visible = True
+        counts = []
+        for fraction in (0.2, 0.5, 0.8, 0.35, 0.65, 0.5):
+            position = _step_into(viewer, session.surfaces["fafb_neuropil"], fraction)
+            assert_draws(shell, position, f"neuropil at {position}:")
+            _assert_styled(shell)
+            counts.append(shell.layer.nshapes)
+        assert len(set(counts)) > 2, f"the shape count should vary: {counts}"
+    finally:
+        viewer.close()
+
+
 @pytest.mark.parametrize("space", SPACES)
 def test_2d_draws_the_same_contours_labels_and_fills(registry, space):
     viewer, session, primary = _open(registry, space)
@@ -347,9 +383,10 @@ def test_2d_draws_the_same_contours_labels_and_fills(registry, space):
         overlay = session.contours[primary]
         surface = session.surfaces[primary]
         assert overlay.layer.visible
-        for fraction in (0.3, 0.5, 0.7):
+        for fraction in (0.3, 0.5, 0.7, 0.4, 0.6):
             position = _step_into(viewer, surface, fraction)
             assert_draws(overlay, position, f"{space} at {position}:")
+            _assert_styled(overlay, surface.colors)
 
         everything = set(overlay.selection)
         overlay.set_labels(everything)

@@ -392,6 +392,8 @@ class ContourOverlay:
         #: shape, which saves re-sending it on every step while nothing is
         #: labeled. The layer is created with it.
         self._text_blank = True
+        #: Whether any drawn shape is filled, so its face color needs undoing.
+        self._faces_filled = False
         self._fill_rgba = None
 
         self.layer = viewer.add_shapes(
@@ -474,7 +476,14 @@ class ContourOverlay:
         colors = self._colors_for(owners)
         if colors is self.color:
             return self.color
-        return {"array": colors, "default": self.color}
+        from napari.layers.utils.color_encoding import ManualColorEncoding
+
+        # The encoding itself, not a dict or a list. A list of N colors
+        # napari cannot tell from one color given component-wise, and it
+        # silently collapsed it to a single constant -- `text.color` came
+        # back 0-dimensional. A dict it parses by building a pydantic
+        # TypeAdapter each time, which was most of a label update's cost.
+        return ManualColorEncoding(array=colors, default=self.color)
 
     FILL_ALPHA = 0.35
 
@@ -519,12 +528,16 @@ class ContourOverlay:
     # -- updates ---------------------------------------------------------
 
     def _state(self, axis: int, position: float) -> tuple:
-        """Everything the drawn shapes depend on."""
+        """Everything the drawn shapes depend on that can change.
+
+        Not `color`, `colors` or `width`, which are the overlay's for its
+        life: `_draw` relies on the layer's defaults being `color` and
+        `width` too.
+        """
         shown = frozenset(self.selection)
         return (
             axis, position, shown,
             frozenset(self.filled & shown), frozenset(self.labels & shown),
-            self.width, repr(self.color), id(self.colors),
         )
 
     def refresh(self) -> None:
@@ -557,20 +570,34 @@ class ContourOverlay:
         One write rather than clearing and then adding, because napari
         recomputes the extent of every layer, and the dims from it, on each
         data event, and a write emits two of them.
+
+        The write keeps each position's old attributes and gives new
+        positions the layer's defaults: width 1, this overlay's `color`, no
+        fill. Each attribute written afterwards costs napari a full redraw
+        of the layer, labels included, so only those that can be wrong are.
         """
         self._shape_index = list(owners)
         layer = self.layer
-        # napari redraws the layer-list thumbnail after each of these writes,
-        # rasterizing every shape each time; once, at the end, is enough.
-        with layer.block_thumbnail_update():
-            layer.data = list(zip(paths, self._shape_types(owners), strict=True))
-            if paths:
-                # The write keeps each position's old attributes and gives
-                # new positions napari's defaults, so they are set afterwards.
-                layer.edge_width = [self.width] * len(paths)
-                layer.edge_color = self._colors_for(owners)
+        # napari lays the labels out again after every write below, and blank
+        # ones cost nothing, so they go blank until the shapes are final and
+        # are then laid out once.
+        self._blank_text()
+        filled = bool(self.filled.intersection(owners))
+        writes = [("data", list(zip(paths, self._shape_types(owners), strict=True)))]
         if paths:
-            layer.face_color = self._face_colors(owners)
+            if len(paths) > layer.nshapes:
+                writes.append(("edge_width", [self.width] * len(paths)))
+            if self.colors is not None:
+                writes.append(("edge_color", self._colors_for(owners)))
+            if filled or self._faces_filled:
+                writes.append(("face_color", self._face_colors(owners)))
+        # napari redraws the layer-list thumbnail after each write,
+        # rasterizing every shape each time; after the last is enough.
+        with layer.block_thumbnail_update():
+            for name, value in writes[:-1]:
+                setattr(layer, name, value)
+        setattr(layer, *writes[-1])
+        self._faces_filled = filled
         # Text after data: napari requires one string per shape, so setting it
         # first would leave the counts disagreeing.
         self._apply_text(owners, paths)
@@ -582,27 +609,35 @@ class ContourOverlay:
         whole `layer.text` rebuilt napari's text manager on every slice
         step, five times the cost of updating these two fields in place.
         """
-        blank = not (self.labels and self.labels.intersection(owners))
-        if blank and self._text_blank:
-            return      # already the blank constant, whatever the shape count
-        text = self.layer.text
+        if not (self.labels and self.labels.intersection(owners)):
+            self._blank_text()
+            return
+        self._update_text({
+            "string": self._label_strings(owners, paths),
+            # One color per shape, matching that glomerulus's mesh. A single
+            # color for the layer would put every label in the atlas color
+            # while the outline under it was its own.
+            "color": self._text_color(owners),
+        }, blank=False)
+
+    def _blank_text(self) -> None:
+        """No label on any shape.
+
+        A constant rather than a string per shape: napari broadcasts it to
+        any number of shapes, so it stays right through later writes without
+        being sent again.
+        """
+        if self._text_blank:
+            return
+        from napari.layers.utils.string_encoding import ConstantStringEncoding
+
+        self._update_text({"string": ConstantStringEncoding(constant="")}, blank=True)
+
+    def _update_text(self, values: dict, blank: bool) -> None:
         try:
-            if blank:
-                # A constant rather than a string per shape: napari
-                # broadcasts it to any number of shapes, so it stays right
-                # through later writes without being sent again.
-                text.string = {"constant": ""}
-            else:
-                text.string = self._label_strings(owners, paths)
-                # One color per shape, matching that glomerulus's mesh. A
-                # single color for the layer would put every label in the
-                # atlas color while the outline under it was its own.
-                #
-                # Spelled as ManualColorEncoding rather than a bare list:
-                # napari cannot tell a list of N colors from one color
-                # given component-wise, and silently collapsed the list to a
-                # single constant -- `text.color` came back 0-dimensional.
-                text.color = self._text_color(owners)
+            # One update, which napari reports as one event and so lays the
+            # labels out once however many fields change.
+            self.layer.text.update(values, recurse=False)
             self._text_blank = blank
         except Exception as exc:      # noqa: BLE001 - never worth a crash
             self._text_blank = False
