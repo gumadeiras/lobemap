@@ -1,7 +1,10 @@
 """Derive a built asset from its source, per `registry/recipes.toml`.
 
 Sources are addressed relative to the registry root: `sources/<dataset>/...`
-for what ships, or a URL for what is downloaded. See `registry/sources/`.
+for what ships, or a URL for what is downloaded. See `registry/sources/`. A
+recipe's `sha256` table records a digest per downloaded file name; a download
+that does not match is discarded, and one with no digest recorded is used but
+reported as not verified.
 
 Every asset under `registry/data/` is derived, which is the justification for
 keeping the large ones out of git. That justification was only half true: the
@@ -18,8 +21,8 @@ differs from the day it was first built. `manifest.toml` therefore verifies
 TRANSFER integrity -- that a download arrived intact -- and not
 reproducibility. What is reproducible is the `content_hash` each container
 computes over its actual content: vertices, faces and names for a MeshSet,
-voxels and geometry for a Volume. That is what `--expect` checks, and what
-the build reports so it can be recorded.
+voxels and geometry for a Volume. The build reports it, so a rebuild can be
+compared with the asset it replaces.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .core.atomic import replacing
+from .core.manifest import sha256_file
 
 DEFAULT_RECIPES = "recipes.toml"
 
@@ -69,6 +73,8 @@ class Recipe:
     #: have to be named, so nobody starts one by accident.
     expensive: bool = False
     params: dict = field(default_factory=dict)
+    #: sha256 of each downloaded file, keyed by its file name.
+    sha256: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -86,6 +92,12 @@ def load_recipes(registry_root) -> dict[str, Recipe]:
     spec = tomllib.loads(path.read_text(encoding="utf-8"))
     out = {}
     for asset, body in spec.items():
+        downloads = {Path(u).name for u in [body.get("url"), *body.get("urls", [])] if u}
+        stray = sorted(set(body.get("sha256", {})) - downloads)
+        if stray:
+            # A misspelled name would otherwise switch its check off quietly.
+            raise ValueError(f"{asset}: sha256 names files the recipe does not "
+                             f"download: {', '.join(stray)}")
         out[asset] = Recipe(
             asset=asset,
             pipeline=body["pipeline"],
@@ -95,6 +107,7 @@ def load_recipes(registry_root) -> dict[str, Recipe]:
             into=body.get("into"),
             expensive=bool(body.get("expensive", False)),
             params=dict(body.get("params", {})),
+            sha256=dict(body.get("sha256", {})),
         )
     return out
 
@@ -119,35 +132,55 @@ def resolve_source(recipe: Recipe, registry_root: Path, cache: Path,
         return path
     if recipe.urls:
         folder = cache / (recipe.into or recipe.asset)
-        folder.mkdir(parents=True, exist_ok=True)
         for i, url in enumerate(recipe.urls, start=1):
-            target = folder / Path(url).name
-            if target.exists():
-                continue
-            if progress:
-                progress(f"downloading [{i}/{len(recipe.urls)}] "
-                         f"{Path(url).name}")
-            _download(url, target)
+            _fetch_source(recipe, url, folder, progress,
+                          label=f"[{i}/{len(recipe.urls)}] {Path(url).name}")
         return folder
     if not recipe.url:
         return None
-    cache.mkdir(parents=True, exist_ok=True)
-    target = cache / Path(recipe.url).name
-    if target.exists():
-        return target
-    if progress:
-        progress(f"downloading {recipe.url}")
-    _download(recipe.url, target)
+    return _fetch_source(recipe, recipe.url, cache, progress, label=recipe.url)
+
+
+def _fetch_source(recipe: Recipe, url: str, folder: Path, progress,
+                  label: str) -> Path:
+    """The cached copy of `url`, downloaded unless a good one is there.
+
+    A cached copy is checked like a fresh download, and fetched again if
+    it fails: the cache is disposable, and a bad one would otherwise be
+    trusted forever.
+    """
+    name = Path(url).name
+    target = folder / name
+    expected = recipe.sha256.get(name)
+    if target.exists() and expected is not None \
+            and sha256_file(target)[0] != expected:
+        target.unlink()
+    if not target.exists():
+        if progress:
+            progress(f"downloading {label}")
+        folder.mkdir(parents=True, exist_ok=True)
+        _download(url, target, expected)
+    if expected is None and progress:
+        progress(f"not verified: no sha256 recorded for {name}")
     return target
 
 
-def _download(url: str, target: Path) -> None:
+def _download(url: str, target: Path, sha256: str | None = None) -> None:
     """Fetch to a .part file and rename, so an interrupted download is not
-    mistaken for a complete one on the next run."""
+    mistaken for a complete one on the next run. With `sha256`, a download
+    that does not match is discarded and raises."""
     tmp = target.with_suffix(target.suffix + ".part")
-    with urllib.request.urlopen(url) as resp, tmp.open("wb") as fh:
-        shutil.copyfileobj(resp, fh, 1 << 20)
-    tmp.replace(target)
+    try:
+        with urllib.request.urlopen(url) as resp, tmp.open("wb") as fh:
+            shutil.copyfileobj(resp, fh, 1 << 20)
+        if sha256 is not None:
+            digest, _ = sha256_file(tmp)
+            if digest != sha256:
+                raise ValueError(f"{url}: downloaded sha256 {digest[:12]} != "
+                                 f"recorded {sha256[:12]}")
+        tmp.replace(target)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 # -- pipelines ------------------------------------------------------------
