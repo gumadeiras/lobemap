@@ -75,15 +75,10 @@ def test_frame_agrees_with_positional_nomenclature(registry, space, atlas):
 def test_lateral_points_at_the_biological_right_in_fafb(registry):
     """A mirrored space MUST flip the lateral axis.
 
-    FAFB is the one space where apparent and biological sides come apart,
-    and the two kinds of label in it disagree about which they use: FlyWire's
-    neuropil annotations are post-correction and biological, so `AL(L)` really
-    is the left lobe, while Benton's glomerulus sides are apparent -- it
-    declares R while sitting inside `AL(L)`.
-
-    The shell is warped in from the male CNS with `align_biology`, so its
-    sides are biological too; without that mirror its AL(L) lands on the
-    other lobe entirely.
+    FAFB is the one space where apparent and biological sides come apart.
+    Both kinds of label in it are biological: FlyWire's neuropil names are
+    post-correction, so `AL_L` really is the left lobe, and the Benton asset
+    declares side L for the glomeruli sitting inside it.
 
     So the R arrow has to run from `AL(L)` toward `AL(R)`. Unnegated,
     cross(anterior, dorsal) runs the other way, and FAFB is precisely where

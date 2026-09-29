@@ -121,7 +121,8 @@ exclude the VNC -- the ROI tree splits into CentralBrain, Optic(L), Optic(R), \
 VNC and CV, so brain = CentralBrain + Optic(L) + Optic(R)."""
 
 [GRABE]
-# Confocal, so the optical axis is antero-posterior. Names give anterior -y
+# Confocal, imaged in vivo, with the optical axis along array z (0.96 um
+# steps), which runs dorso-ventral to within 32 deg. Names give anterior -y
 # and dorsal -z, at a weaker 0.75 dominance than the EM volumes -- this is
 # an AL-only stack, so the positional contrasts have a shorter baseline --
 # but the handedness check agrees: the left AL lands 126 um to the
