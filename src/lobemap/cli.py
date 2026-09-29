@@ -17,6 +17,23 @@ from . import __version__
 DEFAULT_SPACE = "FAFB14"
 
 
+class UsageError(Exception):
+    """Wrong input. `main` prints it as one line and exits 2, with no traceback."""
+
+
+def _require_known(kind: str, names, known) -> None:
+    """Refuse names that are not in `known`, before any work starts.
+
+    An unknown name used to be dropped (`fetch --asset <typo>` said there
+    was nothing to fetch and exited 0) or to surface as a KeyError
+    traceback from wherever it was first looked up.
+    """
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        raise UsageError(f"unknown {kind} {', '.join(unknown)}; "
+                         f"known: {', '.join(sorted(known))}")
+
+
 def _registry_root(args) -> Path:
     from .core.registry import default_registry_root
 
@@ -175,6 +192,7 @@ def cmd_fetch(args) -> int:
     # Asking for less is the rarer case, so it is the one that needs a flag.
     optional = _optional_assets(root)
     if args.asset:
+        _require_known("asset", args.asset, {a.asset for a in arts})
         wanted = [a for a in arts if a.asset in set(args.asset)]
     elif args.nostains:
         wanted = [a for a in arts if a.asset not in optional]
@@ -248,11 +266,7 @@ def cmd_pack(args) -> int:
     if args.all:
         wanted = list(arts)
     elif args.asset:
-        unknown = [a for a in args.asset if a not in by_asset]
-        if unknown:
-            print(f"not in the manifest: {', '.join(unknown)}", file=sys.stderr)
-            print(f"known: {', '.join(sorted(by_asset))}", file=sys.stderr)
-            return 2
+        _require_known("asset", args.asset, by_asset)
         wanted = [by_asset[a] for a in args.asset]
     else:
         print(f"name the assets to pack, or --all. In {path.name}:")
@@ -401,6 +415,9 @@ def cmd_stain(args) -> int:
 
     root = _registry_root(args)
     reg = Registry.load(root, validate=False)
+    _require_known("space", [args.space], reg.spaces)
+    if args.bounds_from:
+        _require_known("asset", [args.bounds_from], reg.assets)
 
     # Bounds come from geometry we hold, never from an aggregate query: an
     # unfiltered min/max over the synapse table times out server-side.
@@ -921,6 +938,8 @@ def cmd_bridge(args) -> int:
 
     root = _registry_root(args)
     reg = Registry.load(root, data_root=_data_root(args, root))
+    _require_known("asset", [args.asset], reg.assets)
+    _require_known("space", [args.to], reg.spaces)
     t0 = time.perf_counter()
     out = resolve(
         reg, args.asset, args.to, mirror=args.mirror, use_cache=not args.no_cache
@@ -946,6 +965,7 @@ def cmd_repair(args) -> int:
     from .core.registry import Registry
 
     reg = Registry.load(_registry_root(args), validate=False)
+    _require_known("asset", args.assets, reg.assets)
     targets = args.assets or [
         a.id for a in reg.assets.values()
         if a.kind == "meshset" and a.path.exists()
@@ -1017,6 +1037,7 @@ def cmd_build(args) -> int:
             print("build them by name when you want them.")
     else:
         wanted = list(args.asset or ())
+        _require_known("asset", wanted, reg.assets)
     if not wanted:
         print("nothing to build; --list shows what has a recipe")
         return 0
@@ -1309,7 +1330,14 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None and len(sys.argv) == 1:
         argv = ["view"]
     args = p.parse_args(argv)
-    return args.func(args)
+
+    from .core.registry import RegistryError
+
+    try:
+        return args.func(args)
+    except (UsageError, RegistryError) as exc:
+        print(f"lobemap: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

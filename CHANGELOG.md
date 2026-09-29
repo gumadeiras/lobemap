@@ -29,6 +29,7 @@
 - The table's `side` column now reports the BIOLOGICAL side, matching every other side label in the catalog. It was converting the asset's declared side to the apparent one, so Benton's glomeruli read `R` in FAFB14 while sitting inside the shell FlyWire names `AL_L` and while their own asset declared `L` — two conventions in one space. All 58 Benton centroids are contained by `AL_L` and none by `AL_R`, so the atlas is the fly's LEFT antennal lobe and now says so.
 - `grabe2015_glomeruli` declared `side = "L"` but carries both lobes — 108 meshes, 54 per side, each name already suffixed `(L)` or `(R)`. It declares `both`, so nothing infers a side for an atlas that states one per compartment.
 - An installed lobemap carries its registry metadata, so `lobemap spaces`, `validate` and `fetch` work after `pip install lobemap` instead of reporting 0 spaces or no manifest; the data still does not ship in the package.
+- Wrong input fails with one line and exit 2 instead of succeeding or printing a traceback: a registry directory that does not exist, and an unknown asset or space given to `fetch`, `pack`, `build`, `repair`, `bridge` or `stain`.
 
 ### Changed
 

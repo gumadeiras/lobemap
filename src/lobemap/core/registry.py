@@ -125,6 +125,11 @@ class Registry:
     def load(cls, root: str | Path, validate: bool = True,
              data_root: str | Path | None = None) -> Registry:
         r = cls(root, data_root=data_root)
+        # Every table is optional on its own, so a wrong path used to load
+        # as an empty registry and each command reported on nothing:
+        # `validate` said "ok: 0 spaces" and exited 0.
+        if not (r.root / "spaces.toml").is_file():
+            raise RegistryError(f"no registry at {r.root}: it has no spaces.toml")
         r._load_spaces()
         r._load_assets()
         r.names = Nomenclature.load(r.root / "nomenclature.csv")
@@ -134,10 +139,7 @@ class Registry:
         return r
 
     def _load_spaces(self) -> None:
-        path = self.root / "spaces.toml"
-        if not path.exists():
-            return
-        for sid, body in _read_toml(path).items():
+        for sid, body in _read_toml(self.root / "spaces.toml").items():
             tmpl = body.get("flybrains_template") or None
             self.spaces[sid] = Space(
                 id=sid,
