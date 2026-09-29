@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .core.atomic import replacing
-from .core.manifest import sha256_file
+from .core.manifest import TIMEOUT_S, sha256_file
 
 DEFAULT_RECIPES = "recipes.toml"
 
@@ -171,7 +171,8 @@ def _download(url: str, target: Path, sha256: str | None = None) -> None:
     that does not match is discarded and raises."""
     tmp = target.with_suffix(target.suffix + ".part")
     try:
-        with urllib.request.urlopen(url) as resp, tmp.open("wb") as fh:
+        with urllib.request.urlopen(url, timeout=TIMEOUT_S) as resp, \
+                tmp.open("wb") as fh:
             shutil.copyfileobj(resp, fh, 1 << 20)
         if sha256 is not None:
             digest, _ = sha256_file(tmp)

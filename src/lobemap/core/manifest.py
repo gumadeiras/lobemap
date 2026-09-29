@@ -56,6 +56,10 @@ MANIFEST_VERSION = 2
 #: from a `ZipInfo` carries its own level. Stated so the code says what it
 #: does; changing it would change every published hash.
 ZIP_LEVEL = 6
+#: Seconds a download may wait on a connect or a read before it fails.
+#: Without one, a stalled connection hung `fetch` -- and bare `lobemap`,
+#: which fetches before it opens a window -- with nothing on screen.
+TIMEOUT_S = 60.0
 
 
 class ChecksumMismatch(ValueError):
@@ -318,7 +322,7 @@ def verify(artifacts, data_root: Path, progress=None) -> list[Status]:
 
 
 def fetch(artifacts, data_root: Path, base_url: str, workdir: Path | None = None,
-          progress=None) -> list[Status]:
+          progress=None, timeout: float = TIMEOUT_S) -> list[Status]:
     """Download and verify. A failed checksum leaves nothing behind.
 
     A store is checked twice: the zip against `sha256` before it is
@@ -337,7 +341,8 @@ def fetch(artifacts, data_root: Path, base_url: str, workdir: Path | None = None
         url = f"{base}/{art.transfer_name}"
         tmp = workdir / f"{Path(art.transfer_name).name}.part"
         try:
-            with urllib.request.urlopen(url) as resp, tmp.open("wb") as fh:
+            with urllib.request.urlopen(url, timeout=timeout) as resp, \
+                    tmp.open("wb") as fh:
                 shutil.copyfileobj(resp, fh, CHUNK)
             digest, size = sha256_file(tmp)
             if digest != art.sha256:

@@ -41,6 +41,7 @@
 - An interrupted `fetch`, `build`, `stain` or bridge-cache write leaves nothing at the artifact's path, and a rewrite keeps the old file until the new one is complete. A Zarr store cut off part-way used to open without error and read zeros, and `fetch` then skipped it as present.
 - `lobemap build <stain>` removes its scratch files, 10-25 GB per whole-brain stain, when it finishes or fails. They were left in `.stainwork` under the data root after every build.
 - `lobemap build` checks each downloaded source against a `sha256` table in its recipe, discards a download that does not match, fetches a failing cached copy again, and says when a source has no digest recorded. Downloaded sources were never checked.
+- Downloads in `lobemap fetch` and `lobemap build` fail after 60 seconds without a response instead of hanging on a stalled connection.
 
 ### Changed
 
