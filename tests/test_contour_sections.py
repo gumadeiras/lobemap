@@ -33,16 +33,11 @@ must draw at most once.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
 from lobemap.core.meshfmt import MeshSet
-from lobemap.core.registry import Registry
 from lobemap.viewer.contours import ContourOverlay, MeshSections
-
-REGISTRY = Path(__file__).resolve().parents[1] / "registry"
 
 #: MIN_EDGE_UM, plus one cell diagonal of trimesh's 1e-5 um merge grid in a
 #: plane and one of float32's below 1024 um (8.6e-5). A contour line is
@@ -181,17 +176,6 @@ def assert_same_sections(meshset, axis, position, got: dict, want: dict,
             drawn.pop(best)
 
 
-def _need(registry, *asset_ids) -> None:
-    missing = [a for a in asset_ids if not registry.assets[a].path.exists()]
-    if missing:
-        pytest.skip(f"data not fetched: {', '.join(missing)}")
-
-
-@pytest.fixture(scope="module")
-def registry():
-    return Registry.load(REGISTRY)
-
-
 # -- the geometry ------------------------------------------------------------
 
 
@@ -251,9 +235,9 @@ def test_a_mesh_with_loose_ends_is_left_to_trimesh():
     np.testing.assert_array_equal(got[0][0], want[0][0])
 
 
-@pytest.mark.parametrize("asset", MESH_ASSETS)
+@pytest.mark.parametrize("asset", [
+    pytest.param(a, marks=pytest.mark.requires_data(a)) for a in MESH_ASSETS])
 def test_sections_match_trimesh_on_every_shipped_mesh(registry, asset):
-    _need(registry, asset)
     meshset = registry.mesh(asset)
     sections = MeshSections(meshset)
     for axis in range(3):
@@ -285,7 +269,6 @@ def _open(registry, space, ndisplay=2):
 
     napari = pytest.importorskip("napari")
     atlas = registry.primary_atlas(space)
-    _need(registry, atlas.asset)
     viewer = napari.Viewer(show=False, ndisplay=ndisplay)
     session = load_space(viewer, registry, space, fit=False)
     _settle()
@@ -360,6 +343,7 @@ def _assert_styled(overlay, colors=None) -> None:
     np.testing.assert_allclose(np.asarray(layer.edge_color), want, atol=1e-6)
 
 
+@pytest.mark.requires_data
 def test_reference_contours_keep_their_color_and_width(registry):
     viewer, session, _primary = _open(registry, "FAFB14")
     try:
@@ -376,6 +360,7 @@ def test_reference_contours_keep_their_color_and_width(registry):
         viewer.close()
 
 
+@pytest.mark.requires_data
 @pytest.mark.parametrize("space", SPACES)
 def test_2d_draws_the_same_contours_labels_and_fills(registry, space):
     viewer, session, primary = _open(registry, space)
@@ -422,6 +407,7 @@ def test_2d_draws_the_same_contours_labels_and_fills(registry, space):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_filling_works_without_a_compiled_triangulator(registry):
     """napari's pure-Python fill raised `KeyError: (0, 0)` on a zero-length edge.
 
@@ -446,6 +432,7 @@ def test_filling_works_without_a_compiled_triangulator(registry):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_contours_follow_the_table_on_a_cached_plane(registry):
     from qtpy.QtCore import Qt
 
@@ -490,6 +477,7 @@ def _switcher(viewer, registry, session):
     )
 
 
+@pytest.mark.requires_data
 def test_contours_follow_the_mirror(registry):
     """Slicing along the mirrored axis, the plane on screen is the reflected one."""
     viewer, session, primary = _open(registry, "FAFB14")
@@ -533,8 +521,8 @@ def test_contours_follow_the_mirror(registry):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_a_new_space_draws_its_own_contours(registry):
-    _need(registry, registry.primary_atlas("GRABE").asset)
     viewer, session, _primary = _open(registry, "FAFB14")
     switcher = _switcher(viewer, registry, session)
     try:
@@ -553,6 +541,7 @@ def test_a_new_space_draws_its_own_contours(registry):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_a_mode_switch_draws_the_contours_at_most_once(registry):
     """Three hooks reach `refresh` on a switch into 2D; it used to rebuild three times."""
     viewer, session, primary = _open(registry, "FAFB14", ndisplay=3)
