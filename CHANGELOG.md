@@ -19,6 +19,13 @@
 - With **Mirror** on and the slider on the left-right axis, 2D shows the contours of the plane on screen instead of none.
 - The compartment table's checked rows are what is drawn, in 3D and in 2D. Secondary atlases and reference shells open unchecked instead of reading "N / N shown" while hidden, unticking one row of a hidden atlas no longer shows all the others, the mesh no longer comes back under a 2D slice a moment after a row change, and switching between 2D and 3D no longer restores a stale visibility. Hiding a layer with napari's eye unchecks its rows.
 - Ticking one row takes 1-2 ms in 3D instead of 44-218 ms: napari does not skip a `visible` write that changes nothing, and each toggle made several.
+- A failed space switch leaves the previous space as it was. The failed scene's layers, a second Compartments panel, and handlers that kept redrawing on every slice step used to stay behind.
+- `--show` applies to the first scene only, so switching space after `lobemap view FAFB14 --show fafb_neuropil` no longer fails.
+- `--show` accepts an asset id, an atlas id or a role, so `--show neuropil` and `--show schlegel2021_s12` work instead of crashing at launch.
+- `lobemap view` checks the space and `--show` before it fetches anything or opens a window: an unknown name exits 2 with one line, a space with nothing on disk exits 1 with the `lobemap fetch` advice, and a download that fails prints its cause.
+- `lobemap view --data-root` opens the data it fetched there, not the default data root.
+- Loading a space no longer connects another set of view-fit handlers to the canvas each time.
+- The FlyWire-derived neuropil layer is labeled `fafb_neuropil [bridged]` again.
 - The annotation columns keep names that contain `+`, so VP4's sensillum reads `Sacculus, Chambers I + II` instead of being split into `Chambers I` and `II`, and DL2v's receptors include `Ir75c` again instead of only the pooled `Ir75c (subset)`.
 - `lobemap fetch --check` verifies the published stains on macOS and Linux. Hashing a Zarr store re-zips it, and each zip entry recorded the platform that wrote it, so stores published from Windows reported as corrupt elsewhere and every `lobemap fetch` downloaded the 2.44 GB of stains again. The zip now records the same platform everywhere.
 - The virtual stains and the GRABE confocal stack render in grayscale rather than magenta. They are reference imagery under colored glomerulus meshes, and a magenta wash tinted everything drawn over it. The GRABE stack carried its own per-asset `display` override, so it needed changing in `assets.toml` too.

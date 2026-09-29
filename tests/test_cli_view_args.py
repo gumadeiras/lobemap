@@ -39,13 +39,13 @@ def _view(captured, argv):
 
 
 def test_show_is_forwarded(captured):
-    assert _view(captured, ["FAFB14", "--show", "axes"])["show"] == ("axes",)
+    assert _view(captured, ["FAFB14", "--show", "neuropil"])["show"] == ("neuropil",)
 
 
 def test_show_is_repeatable(captured):
-    call = _view(captured, ["FAFB14", "--show", "axes",
+    call = _view(captured, ["FAFB14", "--show", "neuropil",
                             "--show", "fafb_stain"])
-    assert call["show"] == ("axes", "fafb_stain")
+    assert call["show"] == ("neuropil", "fafb_stain")
 
 
 def test_no_show_means_no_layers_forced(captured):

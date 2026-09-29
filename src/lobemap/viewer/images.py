@@ -109,6 +109,7 @@ def add_images(viewer, registry, space: str) -> list:
             )
             layer.metadata["lobemap"] = {
                 "kind": "labels",
+                "asset": asset.id,
                 "role": asset.role,
                 # Written at ingest: voxel value -> the name the matching
                 # mesh carries, which is what lets the two be colored alike.
@@ -143,6 +144,7 @@ def add_images(viewer, registry, space: str) -> list:
         )
         layer.metadata["lobemap"] = {
             "kind": "image",
+            "asset": asset.id,
             "role": asset.role,
             "level_3d": level_for_3d(data) if volume.is_multiscale else 0,
         }

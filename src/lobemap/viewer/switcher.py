@@ -24,6 +24,8 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from .request import loadable_spaces
+
 
 class SpaceSwitcher(QWidget):
     """Choose the coordinate space; rebuilds the scene on change.
@@ -32,6 +34,8 @@ class SpaceSwitcher(QWidget):
     no ingested assets raises from `build_scene`, and offering a choice that
     cannot be honoured is worse than not offering it.
     """
+
+    loadable_spaces = staticmethod(loadable_spaces)
 
     def __init__(self, viewer, registry, session, load, parent=None) -> None:
         super().__init__(parent)
@@ -74,29 +78,6 @@ class SpaceSwitcher(QWidget):
         outer.addWidget(self.status)
         # No trailing stretch: it made the widget claim any height it was
         # given, which is the opposite of what is wanted here.
-
-    @staticmethod
-    def loadable_spaces(registry) -> list[str]:
-        """Spaces with at least one ingested atlas or reference meshset."""
-        out = []
-        for space_id in registry.spaces:
-            atlases = list(registry.atlases_in_space(space_id))
-            has_atlas = False
-            for atlas in atlases:
-                try:
-                    has_atlas = registry.assets[atlas.asset].path.exists()
-                except KeyError:
-                    has_atlas = False
-                if has_atlas:
-                    break
-            if not has_atlas:
-                has_atlas = any(
-                    asset.role in ("neuropil", "brain") and asset.path.exists()
-                    for asset in registry.assets_in_space(space_id)
-                )
-            if has_atlas:
-                out.append(space_id)
-        return out
 
     def settle(self) -> None:
         """Sit below the compartment panel, however it was just re-added.
@@ -173,6 +154,7 @@ class SpaceSwitcher(QWidget):
                 self.session = self._load(previous)
                 if self.mirror.isChecked():
                     self.session.set_mirror(True)
+                self.settle()
             index = self.combo.findData(self.session.space)
             if index >= 0:
                 self.combo.setCurrentIndex(index)

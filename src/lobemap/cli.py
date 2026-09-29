@@ -74,7 +74,9 @@ def _autofetch(root: Path, data_root: Path) -> None:
     what a scene cannot open without -- the meshes and the Grabe stack, 76
     MB -- and leave the stains to be asked for. Silent when there is
     nothing to do, and never fatal: a failure here should still let the
-    viewer start and report what it is missing in its own terms.
+    viewer start and report what it is missing in its own terms. Each
+    failure is printed with its reason, so a dead proxy or a missing
+    release reads as that rather than as missing data.
     """
     from .core import manifest as mf
 
@@ -97,14 +99,18 @@ def _autofetch(root: Path, data_root: Path) -> None:
 
     def progress(i, n, status):
         mark = {"ok": "OK  ", "missing": "MISS", "corrupt": "BAD "}[status.state]
-        print(f"  [{i}/{n}] {mark} {status.artifact.asset}", flush=True)
+        why = f": {status.detail}" if status.state != "ok" and status.detail else ""
+        print(f"  [{i}/{n}] {mark} {status.artifact.asset}{why}", flush=True)
 
-    with contextlib.suppress(Exception):
+    try:
         results = mf.fetch(absent, data_root, base_url, progress=progress)
-        failed = [s for s in results if s.state != "ok"]
-        if failed:
-            print(f"  {len(failed)} could not be fetched; the viewer will "
-                  f"say what is missing", file=sys.stderr)
+    except Exception as exc:                        # noqa: BLE001 - advisory
+        print(f"  fetch failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return
+    failed = [s for s in results if s.state != "ok"]
+    if failed:
+        print(f"  {len(failed)} could not be fetched; the viewer will "
+              f"say what is missing", file=sys.stderr)
 
 
 def cmd_manifest(args) -> int:
@@ -1049,24 +1055,47 @@ def _install_crash_log() -> None:
 
 
 def cmd_view(args) -> int:
-    _install_crash_log()
+    from .core.registry import Registry
+    from .viewer.request import MissingAssets, ViewRequestError, check_request
 
+    root = _registry_root(args)
+    data_root = _data_root(args, root)
+    show = tuple(args.show or ())
+    # A mistyped space or `--show` is a usage error, said in one line before
+    # anything is fetched or any window opens.
+    try:
+        check_request(Registry.load(root, data_root=data_root), args.space, show)
+    except ViewRequestError as exc:
+        print(f"lobemap view: {exc}", file=sys.stderr)
+        return 2
+
+    _install_crash_log()
     # A fresh clone has no data: nothing runs on `uv sync`, so this is the
     # first opportunity to get it.
-    root = _registry_root(args)
-    _autofetch(root, _data_root(args, root))
+    _autofetch(root, data_root)
 
     from .viewer.app import run
 
-    run(
-        root,
-        args.space,
-        ndisplay=args.ndisplay,
-        # `--show` was parsed and then never forwarded, so it silently did
-        # nothing: layers start hidden, and asking for one by name was the
-        # documented way to see it.
-        show=tuple(args.show or ()),
-    )
+    try:
+        run(
+            root,
+            args.space,
+            ndisplay=args.ndisplay,
+            # `--show` was parsed and then never forwarded, so it silently did
+            # nothing: layers start hidden, and asking for one by name was the
+            # documented way to see it.
+            show=show,
+            # Where `_autofetch` just put the data. `run` read the default
+            # root instead, so `--data-root` fetched into one place and
+            # opened another.
+            data_root=data_root,
+        )
+    except ViewRequestError as exc:
+        print(f"lobemap view: {exc}", file=sys.stderr)
+        return 2
+    except MissingAssets as exc:
+        print(exc, file=sys.stderr)
+        return 1
     return 0
 
 
@@ -1131,9 +1160,9 @@ def main(argv: list[str] | None = None) -> int:
                    help=f"space id; `lobemap spaces` lists them "
                         f"(default: {DEFAULT_SPACE})")
     v.add_argument("--ndisplay", type=int, default=3, choices=(2, 3))
-    v.add_argument("--show", action="append", metavar="LAYER",
-                   help="start this layer visible; an asset id or a role "
-                        "such as virtual_stain. Repeatable.")
+    v.add_argument("--show", action="append", metavar="NAME",
+                   help="start this visible in the first scene: an asset id, "
+                        "an atlas id, or a role such as neuropil. Repeatable.")
     v.set_defaults(func=cmd_view)
 
     val = sub.add_parser("validate", help="load and check the registry")

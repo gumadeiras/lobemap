@@ -1,8 +1,8 @@
 """Scene assembly and the napari application entry point.
 
 This is the viewer's public module: `run` and `load_space` open a space, and
-the image display defaults (`images`) and the camera helpers (`view`) are
-importable from here as well.
+the image display defaults (`images`), the camera helpers (`view`) and the
+request errors (`request`) are importable from here as well.
 """
 
 from __future__ import annotations
@@ -24,6 +24,13 @@ from .images import (
     level_for_3d,
 )
 from .layers import AtlasSurface, canonical_colors, match_label_colors
+from .request import (
+    REFERENCE_ROLES,
+    MissingAssets,
+    ViewRequestError,
+    check_request,
+    show_targets,
+)
 from .view import (
     GIMBAL_NUDGE_DEG,
     MIRROR_AXIS,
@@ -50,150 +57,6 @@ ATLAS_CONTOUR_COLORS = [
 REFERENCE_CONTOUR_COLOR = "#9aa0a6"
 REFERENCE_CONTOUR_WIDTH = 0.2
 
-
-def _tag(meshset) -> str:
-    """Mark bridged, degraded and mirrored layers in their name.
-
-    Only ingest-time bridging reaches this now: an asset transformed into
-    the space it is declared in, such as the FlyWire neuropils bridged
-    FLYWIRE -> FAFB14. The viewer no longer bridges atlases across spaces.
-    """
-    params = meshset.meta.get("derivation", {}).get("params", {})
-    if not params:
-        return ""
-    bits = ["bridged"]
-    if params.get("degraded"):
-        bits.append("DEGRADED")
-    if params.get("mirror"):
-        bits.append("mirrored")
-    return " [" + ", ".join(bits) + "]"
-
-
-class MissingAssets(RuntimeError):
-    """Nothing in this space is built yet, said usefully.
-
-    This used to be a bare RuntimeError telling the reader to run
-    `lobemap ingest ...`, with the ellipsis literal. `ingest` has subcommands
-    for two pipelines only, so for most assets that was not a command anyone
-    could run, and it arrived at the end of a twenty-line traceback. The
-    first thing a new user saw was a crash whose advice did not work.
-    """
-
-    def __init__(self, space: str, registry) -> None:
-        self.space = space
-        self.assets = [
-            a for a in registry.assets_in_space(space) if not a.path.exists()
-        ]
-        super().__init__(self._message(registry))
-
-    def _message(self, registry) -> str:
-        from ..build import load_recipes
-
-        recipes = load_recipes(registry.root)
-        large = [a.id for a in self.assets
-                 if a.id in recipes and recipes[a.id].expensive]
-        lines = [
-            (f"No data for space {self.space!r}: {len(self.assets)} of its "
-             f"assets are not on disk."),
-            "",
-        ]
-        lines += [f"  {asset.id}" for asset in self.assets]
-        # Fetch first. Building these takes anywhere from a neuPrint round
-        # trip to ~19 GB of synapse downloads and hours of compute, and the
-        # same bytes are a download away.
-        lines += ["", "Fetch them:", "", "  lobemap fetch"]
-        if large:
-            lines += [
-                "",
-                (f"{len(large)} of those is a virtual stain. `fetch` gets "
-                 f"them, but they are 2.4 GB"),
-                "together; `lobemap fetch --nostains` skips them.",
-            ]
-        lines += ["", "Or rebuild from source:", "", "  lobemap build --all"]
-        return chr(10).join(lines)
-
-
-def build_scene(
-    viewer,
-    registry: Registry,
-    space: str,
-) -> tuple[dict[str, AtlasSurface], dict[str, ContourOverlay]]:
-    """Add every atlas native to `space`, plus that space's reference meshes.
-
-    An atlas belongs to exactly one space and is only ever shown there. The
-    viewer used to be able to bridge atlases in from other spaces, which made
-    a scene's contents span vocabularies: each space names its glomeruli in
-    its own terms, so a bridged atlas arrived with names the host space does
-    not define, and the panel and the color palette had to reconcile them
-    through a single global vocabulary. Dropping it is what lets nomenclature
-    be per-space.
-
-    Bridging survives where it is about DATA rather than display -- ingest
-    puts an asset into its declared space, and `lobemap bridge` and
-    `lobemap reconcile` still compare across spaces on the command line.
-    """
-    if space not in registry.spaces:
-        raise KeyError(f"unknown space {space!r}; known: {sorted(registry.spaces)}")
-
-    surfaces: dict[str, AtlasSurface] = {}
-
-    # Reference geometry first, so it sits underneath and starts hidden.
-    for asset in registry.assets_in_space(space):
-        if asset.role not in ("neuropil", "brain"):
-            continue
-        try:
-            meshset = registry.mesh(asset.id)
-        except (FileNotFoundError, KeyError):
-            continue
-        # Additive, not translucent: a translucent shell writes depth and so
-        # hides the very glomeruli it is meant to give context to.
-        surface = AtlasSurface(
-            viewer, meshset, name=asset.id, opacity=0.35, blending="additive"
-        )
-        surface.layer.shading = "none"
-        surfaces[asset.id] = surface
-
-    add_images(viewer, registry, space)
-
-    vocabulary = registry.vocabulary(space)
-    for atlas in registry.atlases_in_space(space):
-        try:
-            meshset = registry.mesh(atlas.asset)
-        except (FileNotFoundError, KeyError):
-            continue
-        surfaces[atlas.id] = AtlasSurface(
-            viewer, meshset, name=atlas.title or atlas.id,
-            # The SPACE's vocabulary, not a global one: a glomerulus is
-            # one color across the atlases it can be compared with, which
-            # is exactly the atlases sharing its space.
-            colors=canonical_colors(atlas.compartments, vocabulary),
-        )
-
-    if not surfaces:
-        raise MissingAssets(space, registry)
-
-    # After the atlases, because the colors are read out of their Surface
-    # layers rather than recomputed.
-    for layer in viewer.layers:
-        if layer.metadata.get("lobemap", {}).get("kind") == "labels":
-            match_label_colors(layer, list(surfaces.values()))
-
-    contours = (
-        _add_contours(viewer, registry, surfaces) if USE_SLICE_CONTOURS else {}
-    )
-
-    show_primary_atlas(registry, space, surfaces, contours)
-
-    # Anatomical names for the dimension sliders and napari's own axis
-    # overlay. No layer of our own: see `viewer/axes.py`. It shows the
-    # anatomy in 3D and the voxel grid in 2D, and is kept up to date by
-    # `install_display_mode`, whose handlers a scene switch disconnects
-    # -- connecting here instead leaked one per switch.
-    apply_axis_mode(viewer, registry.spaces[space])
-
-    return surfaces, contours
-
-
 #: Slice x-y and step through z, the way a confocal stack is read. Volume axes
 #: are (x, y, z) to match the mesh columns, and napari would otherwise display
 #: the last two -- y-z -- and put the slider on x.
@@ -205,29 +68,6 @@ def build_scene(
 #: the stain out from under the meshes, with no warning -- it just looks like a
 #: registration failure. So 3D keeps the identity order, where the two agree.
 DIMS_ORDER_XYZ = (2, 1, 0)
-
-
-def show_primary_atlas(registry: Registry, space: str, surfaces,
-                       contours=None) -> None:
-    """Select the space's primary atlas and nothing of anything else.
-
-    Every atlas native to the space is loaded -- that is what makes them
-    superposable -- but two glomerular parcellations drawn on top of each
-    other are unreadable, so one opens. Reference geometry opens off too.
-
-    Off means NOTHING SELECTED, not a hidden layer with every row still
-    checked: the table's checkboxes are what is drawn, so a secondary atlas
-    and a neuropil shell open with their rows unchecked and "0 / N shown",
-    and `Show all` or a row tick is what turns them on.
-    """
-    primary = registry.primary_atlas(space)
-    for name, surface in surfaces.items():
-        if primary is not None and name == primary.id:
-            continue
-        surface.set_selection(set())
-        if contours and name in contours:
-            contours[name].selection = set()
-
 
 #: Whether 2D gets its own exact mesh-plane contour layers, or just shows
 #: the Surface layers sliced by napari.
@@ -250,6 +90,147 @@ def show_primary_atlas(registry: Registry, space: str, surfaces,
 #:
 #: So: outlines, and a Shapes layer beside every Surface layer.
 USE_SLICE_CONTOURS = True
+
+
+def _tag(meshset) -> str:
+    """Mark bridged, degraded and mirrored layers in their name.
+
+    Only ingest-time bridging reaches this now: an asset transformed into
+    the space it is declared in, such as the FlyWire neuropils bridged
+    FLYWIRE -> FAFB14. The viewer no longer bridges atlases across spaces.
+    """
+    params = meshset.meta.get("derivation", {}).get("params", {})
+    if not params:
+        return ""
+    bits = ["bridged"]
+    if params.get("degraded"):
+        bits.append("DEGRADED")
+    if params.get("mirror"):
+        bits.append("mirrored")
+    return " [" + ", ".join(bits) + "]"
+
+
+def build_scene(
+    viewer,
+    registry: Registry,
+    space: str,
+    into=None,
+) -> tuple[dict[str, AtlasSurface], dict[str, ContourOverlay]]:
+    """Add every atlas native to `space`, plus that space's reference meshes.
+
+    An atlas belongs to exactly one space and is only ever shown there. The
+    viewer used to be able to bridge atlases in from other spaces, which made
+    a scene's contents span vocabularies: each space names its glomeruli in
+    its own terms, so a bridged atlas arrived with names the host space does
+    not define, and the panel and the color palette had to reconcile them
+    through a single global vocabulary. Dropping it is what lets nomenclature
+    be per-space.
+
+    Bridging survives where it is about DATA rather than display -- ingest
+    puts an asset into its declared space, and `lobemap bridge` and
+    `lobemap reconcile` still compare across spaces on the command line.
+
+    `into` is a `SceneSession` to record into as each part is made, so a
+    failure part-way leaves it holding everything it must tear down.
+    """
+    if space not in registry.spaces:
+        raise ViewRequestError(
+            f"unknown space {space!r}; known spaces: {', '.join(sorted(registry.spaces))}"
+        )
+
+    surfaces: dict[str, AtlasSurface] = {}
+    if into is not None:
+        into.surfaces = surfaces
+
+    def _meta(surface, key, asset) -> None:
+        surface.layer.metadata["lobemap"].update(
+            id=key, asset=asset.id, role=asset.role
+        )
+
+    # Reference geometry first, so it sits underneath.
+    for asset in registry.assets_in_space(space):
+        if asset.role not in REFERENCE_ROLES:
+            continue
+        try:
+            meshset = registry.mesh(asset.id)
+        except (FileNotFoundError, KeyError):
+            continue
+        # Additive, not translucent: a translucent shell writes depth and so
+        # hides the very glomeruli it is meant to give context to.
+        surface = AtlasSurface(
+            viewer, meshset, name=asset.id + _tag(meshset), opacity=0.35,
+            blending="additive",
+        )
+        surface.layer.shading = "none"
+        _meta(surface, asset.id, asset)
+        surfaces[asset.id] = surface
+
+    images = add_images(viewer, registry, space)
+    if into is not None:
+        into.images = images
+
+    vocabulary = registry.vocabulary(space)
+    for atlas in registry.atlases_in_space(space):
+        try:
+            meshset = registry.mesh(atlas.asset)
+        except (FileNotFoundError, KeyError):
+            continue
+        surfaces[atlas.id] = AtlasSurface(
+            viewer, meshset, name=(atlas.title or atlas.id) + _tag(meshset),
+            # The SPACE's vocabulary, not a global one: a glomerulus is
+            # one color across the atlases it can be compared with, which
+            # is exactly the atlases sharing its space.
+            colors=canonical_colors(atlas.compartments, vocabulary),
+        )
+        _meta(surfaces[atlas.id], atlas.id, registry.assets[atlas.asset])
+
+    if not surfaces:
+        raise MissingAssets(space, registry)
+
+    # After the atlases, because the colors are read out of their Surface
+    # layers rather than recomputed.
+    for layer in images:
+        if layer.metadata.get("lobemap", {}).get("kind") == "labels":
+            match_label_colors(layer, list(surfaces.values()))
+
+    contours: dict[str, ContourOverlay] = {}
+    if into is not None:
+        into.contours = contours
+    if USE_SLICE_CONTOURS:
+        _add_contours(viewer, registry, surfaces, into=contours)
+
+    show_primary_atlas(registry, space, surfaces, contours)
+
+    # Anatomical names for the dimension sliders and napari's own axis
+    # overlay. No layer of our own: see `viewer/axes.py`. It shows the
+    # anatomy in 3D and the voxel grid in 2D, and is kept up to date by
+    # `install_display_mode`, whose handlers a scene switch disconnects
+    # -- connecting here instead leaked one per switch.
+    apply_axis_mode(viewer, registry.spaces[space])
+
+    return surfaces, contours
+
+
+def show_primary_atlas(registry: Registry, space: str, surfaces,
+                       contours=None) -> None:
+    """Select the space's primary atlas and nothing of anything else.
+
+    Every atlas native to the space is loaded -- that is what makes them
+    superposable -- but two glomerular parcellations drawn on top of each
+    other are unreadable, so one opens. Reference geometry opens off too.
+
+    Off means NOTHING SELECTED, not a hidden layer with every row still
+    checked: the table's checkboxes are what is drawn, so a secondary atlas
+    and a neuropil shell open with their rows unchecked and "0 / N shown",
+    and `Show all` or a row tick is what turns them on.
+    """
+    primary = registry.primary_atlas(space)
+    for name, surface in surfaces.items():
+        if primary is not None and name == primary.id:
+            continue
+        surface.set_selection(set())
+        if contours and name in contours:
+            contours[name].selection = set()
 
 
 def install_display_mode(viewer, surfaces, contours, images=(),
@@ -305,14 +286,15 @@ def install_display_mode(viewer, surfaces, contours, images=(),
         for surface in surfaces.values():
             surface.sync()
 
-    viewer.dims.events.ndisplay.connect(_apply)
+    # Applied before it is connected, so a failure here leaves nothing behind.
     _apply()
+    viewer.dims.events.ndisplay.connect(_apply)
     return [(viewer.dims.events.ndisplay, _apply)]
 
 
-def _add_contours(viewer, registry, surfaces) -> dict[str, ContourOverlay]:
+def _add_contours(viewer, registry, surfaces, into=None) -> dict[str, ContourOverlay]:
     """One contour overlay per surface, including the reference geometry."""
-    overlays: dict[str, ContourOverlay] = {}
+    overlays: dict[str, ContourOverlay] = {} if into is None else into
     palette = iter(ATLAS_CONTOUR_COLORS * 4)
     for name, surface in surfaces.items():
         reference = name in registry.assets
@@ -450,6 +432,29 @@ class SceneSession:
             with contextlib.suppress(Exception):
                 overlay.refresh()
 
+    def show(self, names) -> None:
+        """Turn on what `--show` names: every compartment of a mesh, or a layer.
+
+        Through the panel, so the table says what is drawn.
+        """
+        targets = show_targets(self.registry, self.space)
+        wanted: set[str] = set()
+        for name in names:
+            if name not in targets:
+                raise ViewRequestError(f"--show {name!r} names nothing in {self.space}")
+            wanted |= targets[name]
+        for key, surface in self.surfaces.items():
+            if surface.layer.metadata["lobemap"].get("asset") not in wanted:
+                continue
+            tab = self.panel.tabs.get(key) if self.panel is not None else None
+            if tab is not None:
+                tab.select(range(surface.meshset.n_compartments))
+            else:
+                surface.show_all()
+        for layer in self.images:
+            if layer.metadata.get("lobemap", {}).get("asset") in wanted:
+                layer.visible = True
+
     def teardown(self) -> None:
         for event, handler in self.handlers:
             with contextlib.suppress(Exception):
@@ -459,6 +464,8 @@ class SceneSession:
             for event, handler in getattr(overlay, "handlers", ()) or ():
                 with contextlib.suppress(Exception):
                     event.disconnect(handler)
+        for surface in self.surfaces.values():
+            surface.stop()
         # LAYERS FIRST, then the dock. The other order crashes the process.
         #
         # Removing a dock widget relays out the window, which resizes the
@@ -501,41 +508,43 @@ def load_space(
 ) -> SceneSession:
     """Build a scene into a viewer that may already hold one.
 
-    `--show` runs after the display-mode hook. It turns a layer on the way
-    napari's eye does, which a surface reads as showing all of it.
+    All or nothing: anything that fails part-way -- a corrupt asset, a
+    `--show` naming nothing -- tears down what was already built before the
+    error propagates, so no layer, dock or handler of a failed scene stays
+    behind to be driven by the next one.
     """
     session = SceneSession(viewer, registry, space)
-    surfaces, contours = build_scene(viewer, registry, space)
-    session.surfaces, session.contours = surfaces, contours
+    try:
+        build_scene(viewer, registry, space, into=session)
 
-    from .panel import CompartmentPanel
+        from .panel import CompartmentPanel
 
-    panel = CompartmentPanel(viewer, surfaces, registry=registry,
-                             contours=contours, space=space)
-    session.panel = panel
-    session.dock = viewer.window.add_dock_widget(
-        panel, area="right", name="Compartments"
-    )
-    install_picking(viewer, surfaces, contours, panel=panel)
-
-    session.images = [
-        layer for layer in viewer.layers
-        if layer.metadata.get("lobemap", {}).get("kind") in ("image", "labels")
-    ]
-    # Before any mirror is applied, so the plane is the data's own.
-    session.mirror_center = mirror_center(
-        [s.layer for s in surfaces.values()] + list(session.images)
-    )
-    session.handlers = install_display_mode(
-        viewer, surfaces, contours, session.images,
-        space=registry.spaces[space],
-        mirror_axis=lambda: MIRROR_AXIS if session.mirrored else None,
-    ) or []
-    if show:
-        _show_layers(viewer, show)
-
-    orient_anterior(viewer, registry.spaces[space])
-    install_home_orientation(viewer, registry.spaces[space])
+        session.panel = CompartmentPanel(
+            viewer, session.surfaces, registry=registry,
+            contours=session.contours, space=space,
+        )
+        session.dock = viewer.window.add_dock_widget(
+            session.panel, area="right", name="Compartments"
+        )
+        install_picking(
+            viewer, session.surfaces, session.contours, panel=session.panel
+        )
+        # Before any mirror is applied, so the plane is the data's own.
+        session.mirror_center = mirror_center(
+            [s.layer for s in session.surfaces.values()] + list(session.images)
+        )
+        session.handlers += install_display_mode(
+            viewer, session.surfaces, session.contours, session.images,
+            space=registry.spaces[space],
+            mirror_axis=lambda: MIRROR_AXIS if session.mirrored else None,
+        )
+        if show:
+            session.show(show)
+        orient_anterior(viewer, registry.spaces[space])
+        install_home_orientation(viewer, registry.spaces[space])
+    except BaseException:
+        session.teardown()
+        raise
     if fit:
         install_initial_fit(viewer)
     return session
@@ -546,36 +555,47 @@ def run(
     space: str | None = None,
     ndisplay: int = 3,
     show: tuple[str, ...] = (),
+    data_root=None,
 ) -> None:
+    """Open `space` in a new window and run the event loop.
+
+    Everything that can be checked without a window is checked first --
+    the space, `--show`, and whether the data is on disk -- so a mistake
+    is a one-line error instead of a traceback behind an empty window.
+    `show` applies to this first scene only; a space picked later opens
+    with its own defaults.
+    """
     import napari
 
-    registry = Registry.load(registry_root)
+    registry = Registry.load(registry_root, data_root=data_root)
     if space is None:
-        raise ValueError("need a space")
+        raise ViewRequestError("need a space")
+    check_request(registry, space, show, on_disk=True)
 
     viewer = napari.Viewer(title=f"lobemap - {space}", ndisplay=ndisplay)
+    try:
+        def _load(target: str, show: tuple[str, ...] = ()):
+            session = load_space(viewer, registry, target, show=show)
+            viewer.title = f"lobemap - {session.space}"
+            return session
 
-    def _load(target: str):
-        session = load_space(viewer, registry, target, show=show)
-        viewer.title = f"lobemap - {session.space}"
-        return session
+        session = _load(space, tuple(show))
 
-    session = _load(space)
+        from .switcher import SpaceSwitcher
 
-    from .switcher import SpaceSwitcher
-
-    switcher = SpaceSwitcher(viewer, registry, session, _load)
-    # Added ONCE and never torn down, unlike the compartment panel: it is the
-    # control that does the switching, so it cannot be owned by the scene it
-    # replaces.
-    #
-    # Right, not left, and added AFTER the compartment panel so Qt splits the
-    # area with this underneath it -- the two are the scene's controls and
-    # belong together, away from napari's own layer list on the left.
-    switcher.dock = viewer.window.add_dock_widget(
-        switcher, area="right", name="Space", tabify=False
-    )
-    switcher.settle()
+        switcher = SpaceSwitcher(viewer, registry, session, _load)
+        # Added ONCE and never torn down, unlike the compartment panel: it is
+        # the control that does the switching, so it cannot be owned by the
+        # scene it replaces. Right, beside the compartment panel and above it:
+        # the two are the scene's controls, and which space is open is read
+        # before anything about it.
+        switcher.dock = viewer.window.add_dock_widget(
+            switcher, area="right", name="Space", tabify=False
+        )
+        switcher.settle()
+    except BaseException:
+        viewer.close()
+        raise
 
     maximize(viewer)
     # Maximizing is asynchronous, so the fit follows the canvas rather than
@@ -583,28 +603,6 @@ def run(
     # after the dock widgets, which change the canvas size.
     install_initial_fit(viewer)
     napari.run()
-
-
-def _show_layers(viewer, wanted) -> None:
-    """Turn on layers named on the command line, by id or by role.
-
-    Reference images are visible already; what this is for is the layers
-    that are not -- the neuropil shells, the Grabe label volume -- and
-    anything a scene preset deliberately turned off.
-    """
-    names = {layer.name for layer in viewer.layers}
-    for want in wanted:
-        hits = [
-            layer for layer in viewer.layers
-            if layer.name == want
-            or layer.metadata.get("lobemap", {}).get("role") == want
-        ]
-        if not hits:
-            raise KeyError(
-                f"nothing called {want!r} in this scene; layers: {sorted(names)}"
-            )
-        for layer in hits:
-            layer.visible = True
 
 
 __all__ = [
@@ -618,7 +616,9 @@ __all__ = [
     "VIEW3D_MAX_VOXELS",
     "MissingAssets",
     "SceneSession",
+    "ViewRequestError",
     "build_scene",
+    "check_request",
     "default_colormap",
     "display_for",
     "fit_view",
@@ -632,4 +632,5 @@ __all__ = [
     "orient_anterior",
     "run",
     "show_primary_atlas",
+    "show_targets",
 ]

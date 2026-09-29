@@ -177,12 +177,19 @@ def install_initial_fit(viewer, margin: float = 0.02) -> bool:
     Refitting on every resize until the user does something removes the
     timing from the question. After the first click, scroll or keypress the
     view is theirs and this stops touching it.
+
+    Installed once per canvas. Every scene load calls this, and each call
+    used to connect five more handlers, so they piled up one set per space
+    switch; a canvas that is already watched is only fitted to the new scene.
     """
     canvas = getattr(getattr(viewer.window, "_qt_viewer", None), "canvas", None)
     events = getattr(canvas, "events", None)
     if events is None:
         fit_view(viewer, margin)
         return False
+    if getattr(canvas, "_lobemap_fit", None) is not None:
+        fit_view(viewer, margin)
+        return True
 
     state = {"touched": False, "size": None}
 
@@ -222,6 +229,7 @@ def install_initial_fit(viewer, margin: float = 0.02) -> bool:
     for name in ("mouse_press", "mouse_wheel", "key_press"):
         with contextlib.suppress(Exception):
             getattr(events, name).connect(_release)
+    canvas._lobemap_fit = state
     return connected
 
 
