@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -15,6 +16,14 @@ from . import __version__
 #: nomenclature is anchored in, so it is the least surprising thing to see
 #: first. `lobemap spaces` lists the others.
 DEFAULT_SPACE = "FAFB14"
+
+#: Seconds any network read or connect may stall before it fails. The
+#: downloads go through urllib, which waits forever by default, so a server
+#: that accepted a connection and never answered held `fetch` open for good,
+#: and bare `lobemap`, which fetches missing data before it opens a window,
+#: never showed one. The limit is per socket operation: a slow download
+#: that keeps receiving is never cut off.
+NETWORK_TIMEOUT_S = 30
 
 
 class UsageError(Exception):
@@ -1339,11 +1348,15 @@ def main(argv: list[str] | None = None) -> int:
 
     from .core.registry import RegistryError
 
+    previous_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(NETWORK_TIMEOUT_S)
     try:
         return args.func(args)
     except (UsageError, RegistryError) as exc:
         print(f"lobemap: {exc}", file=sys.stderr)
         return 2
+    finally:
+        socket.setdefaulttimeout(previous_timeout)
 
 
 if __name__ == "__main__":
