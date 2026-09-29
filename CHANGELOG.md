@@ -4,6 +4,7 @@
 
 ### Added
 
+- A **Slice along** menu chooses the axis 2D steps along. Each choice is named by the nearest anatomical axis with the angle between them, for example `Anterior-Posterior (z, 17.5° off)`, and the image and the contours move together.
 - A **Mirror** checkbox beside the space picker shows the whole space reflected left-right, for display only. Every layer moves -- meshes, reference image, label volume and slice contours -- by a world-space reflection on `layer.affine`, so the data on disk is untouched and nothing downstream sees a different geometry.
 - It reflects about array axis 0, which napari names `x`, and about the mid-plane of the data rather than about zero: reflecting about the origin would also throw a space published at x 192-853 um clean off screen. `x` is the left-right axis in all four spaces -- 1.0 deg off in the hemibrain, 1.3 in the male CNS, 3.7 in FAFB14, 5.5 in GRABE -- so this is a left-right mirror, and using the array axis rather than the measured lateral direction is what keeps a 2D slice cutting the voxel grid squarely.
 - Both axis triads follow the mirror, so the anatomical one still names the side on screen. `anatomical_triad` takes a `reflect_axis`, and its sign choice is now made against the world arrows AS DRAWN: napari's `x` arrow is reflected too, and measuring against `+x` put an anatomical arrow on top of it. Minimum separation is back to the unmirrored 58.6-75.3 deg. The lateral label does not necessarily swap -- both poles are reachable among the right-handed candidates -- but each arrow always points where its own label says.
@@ -26,6 +27,8 @@
 - `lobemap view --data-root` opens the data it fetched there, not the default data root.
 - Loading a space no longer connects another set of view-fit handlers to the canvas each time.
 - The FlyWire-derived neuropil layer is labeled `fafb_neuropil [bridged]` again.
+- 2D opens on a plane that cuts the shown atlas. FAFB14, the hemibrain and the male CNS opened 2D, and came back from 3D, on a plane with no glomerulus in it; a plane you chose is still kept.
+- The mirror reflects napari's `x` arrow in 2D as well as in 3D, a scene opened in 2D faces the anatomy the first time it enters 3D, and under the mirror the home button faces the mirrored anatomy.
 - The annotation columns keep names that contain `+`, so VP4's sensillum reads `Sacculus, Chambers I + II` instead of being split into `Chambers I` and `II`, and DL2v's receptors include `Ir75c` again instead of only the pooled `Ir75c (subset)`.
 - `lobemap fetch --check` verifies the published stains on macOS and Linux. Hashing a Zarr store re-zips it, and each zip entry recorded the platform that wrote it, so stores published from Windows reported as corrupt elsewhere and every `lobemap fetch` downloaded the 2.44 GB of stains again. The zip now records the same platform everywhere.
 - The virtual stains and the GRABE confocal stack render in grayscale rather than magenta. They are reference imagery under colored glomerulus meshes, and a magenta wash tinted everything drawn over it. The GRABE stack carried its own per-asset `display` override, so it needed changing in `assets.toml` too.

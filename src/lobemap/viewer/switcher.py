@@ -25,6 +25,15 @@ from qtpy.QtWidgets import (
 )
 
 from .request import loadable_spaces
+from .slicing import slice_axes
+
+#: What the slice-axis menu is for, and why its angles are shown.
+SLICE_TIP = (
+    "The array axis 2D steps along, named by the anatomical axis nearest it. "
+    "A slice is cut along the voxel grid, and the angle is how far that grid "
+    "is turned from the anatomy -- which is also why no anatomical arrows are "
+    "drawn over a 2D slice. 2D only."
+)
 
 
 class SpaceSwitcher(QWidget):
@@ -33,6 +42,9 @@ class SpaceSwitcher(QWidget):
     Only spaces that actually have something to show are listed. A space with
     no ingested assets raises from `build_scene`, and offering a choice that
     cannot be honoured is worse than not offering it.
+
+    Also holds the two controls that belong to the scene rather than to one
+    atlas: the mirror, and the axis a 2D slice steps along.
     """
 
     loadable_spaces = staticmethod(loadable_spaces)
@@ -65,6 +77,15 @@ class SpaceSwitcher(QWidget):
         )
         self.mirror.toggled.connect(self._on_mirror)
 
+        #: The slice axis, by the anatomical name of each choice.
+        self.slice = QComboBox()
+        self.slice.setToolTip(SLICE_TIP)
+        self.slice.currentIndexChanged.connect(self._on_slice)
+        self._fill_slices()
+        # The switcher outlives every scene, so it is connected once.
+        viewer.dims.events.ndisplay.connect(self._on_mode)
+        self._on_mode()
+
         self.status = QLabel("")
         self.status.setWordWrap(True)
 
@@ -72,9 +93,13 @@ class SpaceSwitcher(QWidget):
         row.addWidget(QLabel("Space:"))
         row.addWidget(self.combo, 1)
         row.addWidget(self.mirror)
+        slicing = QHBoxLayout()
+        slicing.addWidget(QLabel("Slice along:"))
+        slicing.addWidget(self.slice, 1)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 4, 6, 4)
         outer.addLayout(row)
+        outer.addLayout(slicing)
         outer.addWidget(self.status)
         # No trailing stretch: it made the widget claim any height it was
         # given, which is the opposite of what is wanted here.
@@ -121,6 +146,38 @@ class SpaceSwitcher(QWidget):
             window.resizeDocks([panel, self.dock], [10_000, wanted],
                                Qt.Vertical)
 
+    def _fill_slices(self, keep: str | None = None) -> None:
+        """List the open space's slice axes, keeping the anatomy chosen.
+
+        The same anatomical axis is a different array axis in another space
+        -- anterior-posterior is z in FAFB and y in the hemibrain -- so a
+        switch keeps the name the user picked and finds its axis anew.
+        """
+        space = self.registry.spaces.get(self.session.space)
+        choices = slice_axes(space)
+        self.slice.blockSignals(True)
+        try:
+            self.slice.clear()
+            for choice in choices:
+                self.slice.addItem(choice.label, choice.axis)
+            wanted = next((c.axis for c in choices if keep and c.anatomy == keep),
+                          self.session.slice_axis)
+            self.slice.setCurrentIndex(max(0, self.slice.findData(wanted)))
+        finally:
+            self.slice.blockSignals(False)
+        self._anatomy = {c.axis: c.anatomy for c in choices}
+        self.session.slice_axis = int(self.slice.currentData())
+
+    def _on_slice(self, _index: int) -> None:
+        axis = self.slice.currentData()
+        if self._busy or axis is None:
+            return
+        with contextlib.suppress(Exception):
+            self.session.set_slice_axis(int(axis))
+
+    def _on_mode(self, event=None) -> None:
+        self.slice.setEnabled(self.viewer.dims.ndisplay == 2)
+
     def _on_mirror(self, on: bool) -> None:
         """Reflect the loaded scene, or put it back."""
         if self._busy:
@@ -136,6 +193,7 @@ class SpaceSwitcher(QWidget):
         # signal, which would try to load the failed space a second time.
         self._busy = True
         previous = self.session.space
+        anatomy = self._anatomy.get(self.session.slice_axis)
         try:
             self.status.setText(f"loading {want}...")
             self.session.teardown()
@@ -144,6 +202,8 @@ class SpaceSwitcher(QWidget):
             # itself onto the new one rather than the state being implicit.
             if self.mirror.isChecked():
                 self.session.set_mirror(True)
+            self._fill_slices(keep=anatomy)
+            self.session.set_slice_axis(self.session.slice_axis)
             self.settle()
             self.status.setText("")
         except Exception as exc:                      # noqa: BLE001
@@ -154,6 +214,8 @@ class SpaceSwitcher(QWidget):
                 self.session = self._load(previous)
                 if self.mirror.isChecked():
                     self.session.set_mirror(True)
+                self._fill_slices(keep=anatomy)
+                self.session.set_slice_axis(self.session.slice_axis)
                 self.settle()
             index = self.combo.findData(self.session.space)
             if index >= 0:

@@ -35,12 +35,17 @@ GIMBAL_NUDGE_DEG = 1.0
 MIRROR_AXIS = 0
 
 
-def orient_anterior(viewer, space, nudge_deg: float = GIMBAL_NUDGE_DEG) -> bool:
+def orient_anterior(viewer, space, nudge_deg: float = GIMBAL_NUDGE_DEG,
+                    reflect_axis: int | None = None) -> bool:
     """Face the anterior surface of the brain, dorsal up. True if applied.
 
     Uses the space's MEASURED anatomy, so the view really is down the
     antero-posterior axis rather than down the nearest array axis to it
     -- which differs by 15-18 degrees in the EM volumes and 31 in GRABE.
+
+    `reflect_axis` is the array axis the scene is shown mirrored along, or
+    None. The frame is reflected with it, so a mirrored scene is looked at
+    from its own reflected front, the mirror image of the unmirrored view.
 
     Needs the whole frame. A view direction alone leaves the roll free,
     so a camera built from anterior without dorsal would face the right
@@ -48,14 +53,15 @@ def orient_anterior(viewer, space, nudge_deg: float = GIMBAL_NUDGE_DEG) -> bool:
     it looks deliberate. A space with no rotation declared is left
     alone.
     """
-    import numpy as np
-
     from ..core.model import anatomical_axes
 
     frame = anatomical_axes(space)
     if viewer.dims.ndisplay != 3 or frame is None:
         return False
-    anterior, dorsal = frame["A"], frame["D"]
+    anterior, dorsal = np.array(frame["A"]), np.array(frame["D"])
+    if reflect_axis is not None:
+        anterior[reflect_axis] *= -1.0
+        dorsal[reflect_axis] *= -1.0
 
     # Yaw the camera slightly about the dorsal axis, off the singularity.
     view = -anterior
@@ -122,7 +128,7 @@ def fit_view(viewer, margin: float = 0.02) -> None:
         viewer.reset_view()
 
 
-def install_home_orientation(viewer, space) -> bool:
+def install_home_orientation(viewer, space, reflect_axis=None) -> bool:
     """Make the home button restore the anatomical view, not napari's.
 
     `ViewerModel.reset_view` sets the camera angles to (0, 0, 0) before
@@ -131,6 +137,10 @@ def install_home_orientation(viewer, space) -> bool:
     hemibrain -- so "Reset view to original state" left the brain at an
     arbitrary attitude, and the orientation `orient_anterior` sets at
     load could not be got back without reopening the scene.
+
+    `reflect_axis` is a callable returning the axis the scene is mirrored
+    along, or None, read on every press: the mirror is toggled long after
+    this is installed, and home has to face the scene as it is shown.
 
     Wrapped on the viewer INSTANCE rather than on `ViewerModel`: the class
     is shared by every viewer in the process, including the ones tests
@@ -146,6 +156,7 @@ def install_home_orientation(viewer, space) -> bool:
     if getattr(existing, "_lobemap_home", False):
         # A scene switch: same wrapper, new space.
         existing._lobemap_space = space
+        existing._lobemap_reflect = reflect_axis
         return True
 
     original = type(viewer).reset_view.__get__(viewer)
@@ -153,10 +164,13 @@ def install_home_orientation(viewer, space) -> bool:
     def reset(*args, **kwargs):
         original(*args, **kwargs)
         if kwargs.get("reset_camera_angle", True):
-            orient_anterior(viewer, reset._lobemap_space)
+            axis = reset._lobemap_reflect
+            orient_anterior(viewer, reset._lobemap_space,
+                            reflect_axis=axis() if callable(axis) else axis)
 
     reset._lobemap_home = True
     reset._lobemap_space = space
+    reset._lobemap_reflect = reflect_axis
     try:
         object.__setattr__(viewer, "reset_view", reset)
     except Exception:                       # noqa: BLE001 - cosmetic

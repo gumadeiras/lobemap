@@ -69,6 +69,7 @@ def test_show_accepts_asset_ids_atlas_ids_and_roles(monkeypatch, space, name,
         else:
             contour = sess.contours[shown]
             assert contour.layer.visible and not surface.layer.visible
+            assert drawn(surface, contour), f"{shown}: no contour on the opening plane"
 
 
 def test_show_turns_on_a_label_volume(monkeypatch):

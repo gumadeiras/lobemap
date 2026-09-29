@@ -201,20 +201,22 @@ def _anatomy_triad(overlay):
     return node
 
 
-def _reflection_4x4(axis: int) -> np.ndarray:
+def _reflection_4x4(axis: int, displayed=(0, 1, 2)) -> np.ndarray:
     """A reflection along one ARRAY axis, in vispy's geometry order.
 
-    The triad is drawn in vispy x,y,z, the reverse of the array order,
-    and vispy multiplies row vectors -- so conjugate by the reversal
-    and transpose, exactly as the anatomical triad's matrix is handled
-    below. A reflection is symmetric, so the transpose is a no-op here;
-    it is written out to stay parallel with that code.
+    napari draws arrow k of its triad for array axis `displayed[::-1][k]`,
+    along vispy axis k, so the reflection goes on whichever vispy axis
+    carries `axis` in the current mode. In 3D that is the reversal of the
+    array order; in 2D it is the column axis for x. Taking 3D's answer in
+    2D reflected a vispy axis that does not exist there, so the x arrow
+    kept pointing the unmirrored way. An axis that is not displayed -- a
+    slice stepping along it -- has no arrow to reflect.
     """
-    flip = np.eye(3)[::-1]
-    mirror = np.eye(3)
-    mirror[axis, axis] = -1.0
     mat = np.eye(4)
-    mat[:3, :3] = (flip @ mirror @ flip).T
+    order = list(displayed)[::-1]
+    if axis in order:
+        k = order.index(axis)
+        mat[k, k] = -1.0
     return mat
 
 
@@ -280,7 +282,9 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
         # move.
         overlay.node.axes.transform = (
             NullTransform() if mirror_axis is None
-            else MatrixTransform(_reflection_4x4(mirror_axis))
+            else MatrixTransform(
+                _reflection_4x4(mirror_axis, tuple(viewer.dims.displayed))
+            )
         )
         overlay.node.axes._default_color = VOXEL_COLORS
         overlay._on_data_change()

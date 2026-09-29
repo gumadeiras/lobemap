@@ -31,6 +31,13 @@ from .request import (
     check_request,
     show_targets,
 )
+from .slicing import (
+    DEFAULT_SLICE_AXIS,
+    busiest_plane,
+    compartment_spans,
+    crosses,
+    order_for,
+)
 from .view import (
     GIMBAL_NUDGE_DEG,
     MIRROR_AXIS,
@@ -59,7 +66,8 @@ REFERENCE_CONTOUR_WIDTH = 0.2
 
 #: Slice x-y and step through z, the way a confocal stack is read. Volume axes
 #: are (x, y, z) to match the mesh columns, and napari would otherwise display
-#: the last two -- y-z -- and put the slider on x.
+#: the last two -- y-z -- and put the slider on x. The slice-axis control
+#: picks another order; see `slicing.order_for`.
 #:
 #: **2D only.** In 3D napari applies `dims.order` to an Image but NOT to a
 #: Surface: `surface/_slice.py` returns `self.data[0]` unpermuted as soon as
@@ -67,7 +75,7 @@ REFERENCE_CONTOUR_WIDTH = 0.2
 #: `np.transpose(data, order)`. A non-identity order in 3D therefore transposes
 #: the stain out from under the meshes, with no warning -- it just looks like a
 #: registration failure. So 3D keeps the identity order, where the two agree.
-DIMS_ORDER_XYZ = (2, 1, 0)
+DIMS_ORDER_XYZ = order_for(DEFAULT_SLICE_AXIS)
 
 #: Whether 2D gets its own exact mesh-plane contour layers, or just shows
 #: the Surface layers sliced by napari.
@@ -234,7 +242,7 @@ def show_primary_atlas(registry: Registry, space: str, surfaces,
 
 
 def install_display_mode(viewer, surfaces, contours, images=(),
-                         space=None, mirror_axis=None) -> list[tuple]:
+                         session=None) -> list[tuple]:
     """Show only what the current `ndisplay` can actually use.
 
     Returns (event, handler) pairs, so a scene switch can disconnect them;
@@ -253,9 +261,13 @@ def install_display_mode(viewer, surfaces, contours, images=(),
     - **Images pin a pyramid level in 3D.** napari's automatic choice there is
       the coarsest level; `level_for_3d` picks the finest one that fits in a
       texture. In 2D the lock is released so zoom-driven selection works.
-    - **`dims.order` is permuted only in 2D**, to put the slider on z. In 3D
-      it must stay the identity, because napari permutes an Image by it and a
-      Surface not at all (see `DIMS_ORDER_XYZ`).
+    - **`dims.order` is permuted only in 2D**, to put the slider on the
+      chosen slice axis. In 3D it must stay the identity, because napari
+      permutes an Image by it and a Surface not at all (see `DIMS_ORDER_XYZ`).
+
+    With a `session`, it also moves an empty 2D slice onto the shown atlases,
+    follows the mirror and the slice axis, sets the panel's 2D-only controls,
+    and turns the camera onto the anatomy the first time 3D is entered.
     """
     for name, surface in surfaces.items():
         if name in contours:
@@ -264,27 +276,34 @@ def install_display_mode(viewer, surfaces, contours, images=(),
     def _apply(event=None) -> None:
         three_d = viewer.dims.ndisplay == 3
         ndim = viewer.dims.ndim
-        # Identity in 3D, or the stain transposes away from the meshes.
+        axis = session.slice_axis if session is not None else DEFAULT_SLICE_AXIS
         want_order = (
-            tuple(range(ndim)) if three_d or ndim != 3 else DIMS_ORDER_XYZ
+            tuple(range(ndim)) if three_d or ndim != 3 else order_for(axis)
         )
         if tuple(viewer.dims.order) != want_order:
             viewer.dims.order = want_order
-        # The triad shows the anatomy in 3D and the voxel grid in 2D,
-        # and this is already the hook that fires on a mode change and
-        # is torn down with the scene.
-        if space is not None:
-            # A callable, not a value: the mirror is toggled long after
-            # this hook is installed, and the triads have to follow it.
-            axis = mirror_axis() if callable(mirror_axis) else mirror_axis
-            apply_axis_mode(viewer, space, mirror_axis=axis)
+        space = None
+        if session is not None:
+            space = session.registry.spaces.get(session.space)
+            # After the order: the triads are drawn for the displayed axes.
+            if space is not None:
+                apply_axis_mode(viewer, space, mirror_axis=session.reflect_axis())
         for layer in images:
             info = layer.metadata.get("lobemap", {})
             if "level_3d" not in info:
                 continue            # labels carry no pyramid to pin
             layer.locked_data_level = info["level_3d"] if three_d else None
+        if not three_d and session is not None:
+            # Before the contours turn on, so they draw once, on this plane.
+            session.populate_plane()
         for surface in surfaces.values():
             surface.sync()
+        if session is None:
+            return
+        if three_d and not session.oriented and space is not None:
+            session.oriented = orient_anterior(
+                viewer, space, reflect_axis=session.reflect_axis()
+            )
 
     # Applied before it is connected, so a failure here leaves nothing behind.
     _apply()
@@ -398,6 +417,12 @@ class SceneSession:
         self.mirrored = False
         #: The plane it reflects about, measured once while unmirrored.
         self.mirror_center = 0.0
+        #: The array axis 2D steps along.
+        self.slice_axis = DEFAULT_SLICE_AXIS
+        #: Whether the camera has been turned onto the anatomy yet. A scene
+        #: opened in 2D is oriented the first time it enters 3D.
+        self.oriented = False
+        self._spans: dict[tuple[str, int], object] = {}
 
     def all_layers(self) -> list:
         """Every layer this session owns."""
@@ -405,6 +430,10 @@ class SceneSession:
         out += [c.layer for c in self.contours.values()]
         out += [layer for layer in self.images if layer not in out]
         return out
+
+    def reflect_axis(self) -> int | None:
+        """The array axis the scene is shown mirrored along, or None."""
+        return MIRROR_AXIS if self.mirrored else None
 
     def set_mirror(self, on: bool) -> None:
         """Show the space reflected, or stop.
@@ -424,13 +453,68 @@ class SceneSession:
                 surface.set_mirrored(self.mirrored)
         space = self.registry.spaces.get(self.space)
         if space is not None:
-            apply_axis_mode(
-                self.viewer, space,
-                mirror_axis=MIRROR_AXIS if self.mirrored else None,
-            )
+            apply_axis_mode(self.viewer, space, mirror_axis=self.reflect_axis())
         for overlay in self.contours.values():
             with contextlib.suppress(Exception):
                 overlay.refresh()
+
+    def set_slice_axis(self, axis: int) -> None:
+        """Step 2D along another array axis; image and contours follow.
+
+        Remembered for the session, so 3D and back keeps it. The contours
+        read the axis from `dims.order` and redraw when it changes. The view
+        is refitted, since the camera was framing the other plane's axes.
+        """
+        self.slice_axis = int(axis)
+        if self.viewer.dims.ndisplay == 3:
+            return
+        order = order_for(self.slice_axis)
+        if tuple(self.viewer.dims.order) == order:
+            return
+        self.viewer.dims.order = order
+        space = self.registry.spaces.get(self.space)
+        if space is not None:
+            apply_axis_mode(self.viewer, space, mirror_axis=self.reflect_axis())
+        self.populate_plane()
+        fit_view(self.viewer)
+
+    def _atlas_order(self) -> list[str]:
+        primary = self.registry.primary_atlas(self.space)
+        names = [n for n in self.surfaces if n in self.registry.atlases]
+        return sorted(names, key=lambda n: primary is None or n != primary.id)
+
+    def _world_spans(self, name: str, axis: int):
+        key = (name, axis)
+        if key not in self._spans:
+            self._spans[key] = compartment_spans(self.surfaces[name].meshset, axis)
+        spans = self._spans[key][sorted(self.surfaces[name].selection)]
+        if self.mirrored and axis == MIRROR_AXIS:
+            spans = 2.0 * self.mirror_center - spans[:, ::-1]
+        return spans
+
+    def populate_plane(self) -> bool:
+        """Move a 2D slice that cuts no shown atlas onto one that does.
+
+        napari opens each slider mid-range, and mid-range of a whole-brain
+        volume is nowhere near the antennal lobe: FAFB14, the hemibrain and
+        the male CNS all opened 2D on a plane with no glomerulus in it. A
+        plane that cuts any shown atlas is the user's and is kept; an empty
+        one moves to the plane cutting the most compartments of the first
+        shown atlas, the primary one when it is shown. True if it moved.
+        """
+        shown = [n for n in self._atlas_order() if self.surfaces[n].selection]
+        if not shown:
+            return False
+        axis = int(self.viewer.dims.order[0])
+        point = float(self.viewer.dims.point[axis])
+        spans = [self._world_spans(name, axis) for name in shown]
+        if any(crosses(s, point) for s in spans):
+            return False
+        target = busiest_plane(spans[0])
+        if target is None:
+            return False
+        self.viewer.dims.set_point(axis, target)
+        return True
 
     def show(self, names) -> None:
         """Turn on what `--show` names: every compartment of a mesh, or a layer.
@@ -535,13 +619,12 @@ def load_space(
         )
         session.handlers += install_display_mode(
             viewer, session.surfaces, session.contours, session.images,
-            space=registry.spaces[space],
-            mirror_axis=lambda: MIRROR_AXIS if session.mirrored else None,
+            session=session,
         )
         if show:
             session.show(show)
-        orient_anterior(viewer, registry.spaces[space])
-        install_home_orientation(viewer, registry.spaces[space])
+        install_home_orientation(viewer, registry.spaces[space],
+                                 reflect_axis=session.reflect_axis)
     except BaseException:
         session.teardown()
         raise
