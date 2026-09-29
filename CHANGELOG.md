@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- Filling glomeruli in 2D costs about a third more than outlines alone instead of five times more: napari's compiled triangulation, bermuda, is now a dependency.
 - `lobemap fetch --check` verifies the published stains on every platform and zlib build, and writes nothing. It checked a Zarr store by zipping it again, which gave a different hash wherever the platform byte or the zlib output differed, so good stores read as corrupt, every `fetch` downloaded the 2.44 GB of stains again, and each check wrote a temporary zip of up to 1.1 GB. A store is now checked by its content, recorded as `tree_sha256` in manifest format 2; downloads are still checked against the published zip's sha256, which is unchanged, and format 1 manifests still load.
 - 2D slice steps are about 2 to 5 times faster, and 2.5 to 8 times on a slice visited before: contours are cut for a whole atlas at once and kept per slice, and a step redraws the contour layer once, writing only what changed.
 - Switching from 3D to 2D redraws the slice contours at most once instead of three or four times, and opening a space in 3D no longer draws contours it then hides.
