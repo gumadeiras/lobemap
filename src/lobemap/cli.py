@@ -114,8 +114,8 @@ def cmd_manifest(args) -> int:
     from .core.registry import Registry
 
     root = _registry_root(args)
-    reg = Registry.load(root, validate=False)
     data_root = _data_root(args, root)
+    reg = Registry.load(root, validate=False, data_root=data_root)
     assets = [a for a in reg.assets.values() if a.path.exists()]
 
     def progress(i, n, asset_id, size):
@@ -356,7 +356,7 @@ def cmd_ingest_neuprint(args) -> int:
     )
     ms = result.meshset
     root = _registry_root(args)
-    out = root / "data" / f"{args.asset_id}.npz"
+    out = _data_root(args, root) / f"{args.asset_id}.npz"
     ms.save(out)
 
     print(f"{args.dataset}  role={args.role}")
@@ -414,7 +414,8 @@ def cmd_stain(args) -> int:
         return 2
 
     root = _registry_root(args)
-    reg = Registry.load(root, validate=False)
+    data_root = _data_root(args, root)
+    reg = Registry.load(root, validate=False, data_root=data_root)
     _require_known("space", [args.space], reg.spaces)
     if args.bounds_from:
         _require_known("asset", [args.bounds_from], reg.assets)
@@ -444,7 +445,7 @@ def cmd_stain(args) -> int:
     # Progress also goes to a file. stdout can be block-buffered through a
     # wrapper shell, which on a multi-hour job is indistinguishable from a
     # hang -- and cost one needlessly killed run.
-    log_path = root / "data" / f"{args.asset_id}.progress.log"
+    log_path = data_root / f"{args.asset_id}.progress.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     seen = {"n": 0}
 
@@ -488,13 +489,13 @@ def cmd_stain(args) -> int:
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
-    workdir = Path(args.workdir) if args.workdir else root / "data" / ".stainwork"
+    workdir = Path(args.workdir) if args.workdir else data_root / ".stainwork"
     volume, stats = build_stain(
         batches, lo, hi, space=args.space, source=source,
         voxel_um=args.voxel, sigma_um=args.sigma, confidence=confidence,
         dtype=np.dtype(args.dtype), workdir=workdir, on_stage=on_stage,
     )
-    out = root / "data" / f"{args.asset_id}.npz"
+    out = data_root / f"{args.asset_id}.npz"
     volume.save(out)
 
     print(f"  synapses     : {stats.n_points:,} ({stats.n_outside:,} outside grid)")
@@ -606,7 +607,8 @@ def cmd_spaces(args) -> int:
     from .core import spaces as sp
     from .core.registry import Registry
 
-    reg = Registry.load(_registry_root(args), validate=False)
+    root = _registry_root(args)
+    reg = Registry.load(root, validate=False, data_root=_data_root(args, root))
     have = sp.available()
     print(f"flybrains available: {have}")
     # The `ok` column is about the flybrains TEMPLATE, not about data on
@@ -815,7 +817,7 @@ def cmd_nomenclature(args) -> int:
     from .core.registry import Registry
 
     root = _registry_root(args)
-    reg = Registry.load(root, validate=False)
+    reg = Registry.load(root, validate=False, data_root=_data_root(args, root))
     path = root / "nomenclature.csv"
     nom = Nomenclature.load(path)
 
@@ -964,7 +966,8 @@ def cmd_repair(args) -> int:
     from .core.meshrepair import repair_meshset
     from .core.registry import Registry
 
-    reg = Registry.load(_registry_root(args), validate=False)
+    root = _registry_root(args)
+    reg = Registry.load(root, validate=False, data_root=_data_root(args, root))
     _require_known("asset", args.assets, reg.assets)
     targets = args.assets or [
         a.id for a in reg.assets.values()
@@ -1292,7 +1295,7 @@ def main(argv: list[str] | None = None) -> int:
                          "stacks this emulates and halves the file")
     st.add_argument("--workdir", default=None,
                     help="scratch space for grids too large for RAM "
-                         "(default: <registry>/data/.stainwork)")
+                         "(default: <data root>/.stainwork)")
     st.add_argument("--keep-workdir", action="store_true",
                     help="do not delete the scratch space afterwards")
     st.add_argument("--slabs", type=int, default=24)
