@@ -192,6 +192,7 @@ def build_scene(
             # one color across the atlases it can be compared with, which
             # is exactly the atlases sharing its space.
             colors=canonical_colors(atlas.compartments, vocabulary),
+            display_names=[c.label for c in atlas.compartments] or None,
         )
         _meta(surfaces[atlas.id], atlas.id, registry.assets[atlas.asset])
 
@@ -333,6 +334,7 @@ def _add_contours(viewer, registry, surfaces, into=None) -> dict[str, ContourOve
             # Reference shells stay a single gray: they are context, and
             # coloring each neuropil would compete with the glomeruli.
             colors=None if reference else surface.colors,
+            display_names=surface.display_names,
         )
     # The overlays carry their own event handlers, so a scene switch can
     # disconnect them without build_scene having to hand them back.
@@ -398,7 +400,8 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
                 label = overlay.name_at_shape(shape)
                 index = overlay.meshset.names.index(label) if label else None
             if label:
-                viewer.status = f"{name}: {label}"
+                shown_as = surface.display_names[index] if index is not None else label
+                viewer.status = f"{name}: {shown_as}"
                 if panel is not None and index is not None:
                     panel.highlight(name, index)
                 return

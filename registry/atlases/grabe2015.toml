@@ -4,3 +4,15 @@ native_space = "GRABE"
 asset = "grabe2015_glomeruli"
 citation = "Grabe V, Strutz A, Baschwitz A, Hansson BS, Sachse S (2015) J Comp Neurol 523(3):530-544"
 doi = "10.1002/cne.23697"
+
+# Glomeruli whose identity is uncertain. The viewer writes `note` after the
+# name wherever it names the glomerulus, and gives `reason` in the table.
+# The published name and the nomenclature row stay VP2: the doubt is shown,
+# not resolved.
+[uncertain."VP2(L)"]
+note = "VM6?"
+reason = "Grabe 2015's Amira material is VP2_left_VM6andVC6, and in affine fits to the male CNS and Schlegel S12 it lies at VM6's position rather than VP2's."
+
+[uncertain."VP2(R)"]
+note = "VM6?"
+reason = "Grabe 2015's Amira material is VP2_right_VM6andVC6, and in affine fits to the male CNS and Schlegel S12 it lies at VM6's position rather than VP2's."

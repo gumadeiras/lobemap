@@ -241,7 +241,9 @@ class AtlasTab(QWidget):
             check.setData(INDEX_ROLE, row)
             self.table.setItem(row, VISIBLE_COL, check)
 
-            label = _Cell(name)
+            label = _Cell(comp.label if comp else name)
+            if comp and comp.uncertain_reason:
+                label.setToolTip(comp.uncertain_reason)
             rgba = surface.colors[row]
             label.setForeground(
                 QColor.fromRgbF(float(rgba[0]), float(rgba[1]), float(rgba[2]))

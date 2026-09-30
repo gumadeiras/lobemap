@@ -356,10 +356,15 @@ class ContourOverlay:
         axis: int | None = None,
         width: float = 0.35,
         colors=None,
+        display_names: list[str] | None = None,
     ) -> None:
         self.viewer = viewer
         self.meshset = meshset
         self.name = name
+        #: The text written on the slice for each compartment; see
+        #: `AtlasSurface.display_names`.
+        self.display_names = list(meshset.names if display_names is None
+                                  else display_names)
         #: Compartments whose name is drawn on the slice. Empty by default:
         #: with several atlases loaded every glomerulus would be written two
         #: or three times over, so labels are opt-in per glomerulus.
@@ -685,7 +690,7 @@ class ContourOverlay:
                 best[owner] = i
         chosen = set(best.values())
         return [
-            self.meshset.names[owner] if i in chosen else ""
+            self.display_names[owner] if i in chosen else ""
             for i, owner in enumerate(owners)
         ]
 

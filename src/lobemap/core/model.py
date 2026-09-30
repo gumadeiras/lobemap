@@ -371,9 +371,18 @@ class Compartment:
     canonical: tuple[str, ...] = ()
     relation: Relation = "exact"
     color: tuple[float, float, float, float] | None = None
+    #: A short note shown after the name when its identity is in doubt, such
+    #: as "VM6?", and why. Declared per atlas; see `Atlas.uncertain`. The
+    #: published name and the correspondence stay as they are: the doubt is
+    #: shown to the reader, not resolved.
+    uncertain: str = ""
+    uncertain_reason: str = ""
 
     @property
     def label(self) -> str:
+        """The name to show a reader, with any doubt about it."""
+        if self.uncertain:
+            return f"{self.published_name} ({self.uncertain})"
         return self.published_name
 
 
@@ -387,6 +396,9 @@ class Atlas:
     doi: str = ""
     parent: str | None = None
     compartments: tuple[Compartment, ...] = ()
+    #: (published name, note, reason) for each compartment whose identity is
+    #: uncertain, from the atlas TOML's `[uncertain]` table.
+    uncertain: tuple[tuple[str, str, str], ...] = ()
 
     def by_name(self, name: str) -> Compartment | None:
         for c in self.compartments:

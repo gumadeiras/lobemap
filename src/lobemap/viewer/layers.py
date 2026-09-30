@@ -176,11 +176,17 @@ class AtlasSurface:
         opacity: float = 0.75,
         blending: str = "translucent",
         compact_delay_ms: int = 250,
+        display_names: list[str] | None = None,
     ) -> None:
         self.viewer = viewer
         self.meshset = meshset
         self.name = name
         n = meshset.n_compartments
+        #: What a reader sees for each compartment: its published name, with
+        #: any doubt about it (`Compartment.label`). `meshset.names` stays the
+        #: identity every lookup uses.
+        self.display_names = list(meshset.names if display_names is None
+                                  else display_names)
         self.colors = categorical_colors(n) if colors is None else colors
         self.selection: set[int] = set(
             range(n) if selection is None else selection

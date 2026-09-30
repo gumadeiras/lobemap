@@ -206,6 +206,10 @@ class Registry:
                 citation=body.get("citation", ""),
                 doi=body.get("doi", ""),
                 parent=body.get("parent") or None,
+                uncertain=tuple(
+                    (name, entry["note"], entry.get("reason", ""))
+                    for name, entry in body.get("uncertain", {}).items()
+                ),
             )
             self.atlases[aid] = replace(
                 atlas, compartments=self._compartments_for(atlas)
@@ -226,6 +230,12 @@ class Registry:
         # two conventions in one space: Benton's glomeruli reported side R
         # while sitting inside the shell named `AL_L`.
         default_side = asset.side if asset.side in ("L", "R") else None
+        doubts = {name: (note, why) for name, note, why in atlas.uncertain}
+        unknown = sorted(set(doubts) - set(ms.names))
+        if unknown:
+            # A misspelled name would otherwise drop its note silently.
+            raise RegistryError(f"{atlas.id}: [uncertain] names compartments the "
+                                f"atlas does not publish: {', '.join(unknown)}")
         out: list[Compartment] = []
         for i, name in enumerate(ms.names):
             _glom, side = parse_roi(name)
@@ -238,6 +248,8 @@ class Registry:
                     side=side,
                     canonical=corr.canonical if corr else (),
                     relation=corr.relation if corr else "absent",
+                    uncertain=doubts.get(name, ("", ""))[0],
+                    uncertain_reason=doubts.get(name, ("", ""))[1],
                 )
             )
         return tuple(out)
