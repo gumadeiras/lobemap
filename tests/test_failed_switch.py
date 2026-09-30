@@ -11,8 +11,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from viewer_harness import (
+    assert_renders_loops,
     assert_rows_match_drawing,
     checked,
+    contour_loops,
     docks,
     drawn,
     handler_counts,
@@ -20,6 +22,7 @@ from viewer_harness import (
     layer_names,
     planes_cut,
     pump,
+    rendered_labels,
     session,
     switch_to,
     switcher,
@@ -152,15 +155,16 @@ def _rendered(viewer) -> dict:
             "n rows": tab.table.rowCount(),
         }
         if contour is not None and contour.layer.visible:
-            layer = contour.layer
-            owners = [contour.name_at_shape(i) for i in range(len(layer.data))]
-            faces = np.asarray(layer.face_color).reshape(-1, 4)
+            # What the slice visuals draw: `assert_renders_loops` checks the
+            # vispy buffers are these loops, filled and labeled as listed.
+            assert_renders_loops(contour)
+            loops = contour_loops(contour)
+            names = contour.meshset.names
             out[name]["labels drawn"] = sorted(
-                str(s) for s in np.atleast_1d(layer.text.values) if s)
+                text for text, _pos, _rgba in rendered_labels(contour))
             out[name]["filled drawn"] = sorted(
-                o for o, face in zip(owners, faces, strict=True) if face[3] > 0)
-            out[name]["outlines"] = [np.round(np.asarray(d), 5).tobytes()
-                                     for d in layer.data]
+                names[owner] for owner, _loop in loops if owner in contour.filled)
+            out[name]["outlines"] = [np.round(loop, 5).tobytes() for _owner, loop in loops]
     return out
 
 
