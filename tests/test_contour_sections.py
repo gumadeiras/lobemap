@@ -1,7 +1,7 @@
 """Slice contours: the same polygons as before, and redrawn exactly when needed.
 
 Until 2e3ae7a every contour came from `trimesh.Trimesh.section`, one
-compartment at a time; `viewer.contours.MeshSections` now computes them for a
+compartment at a time; `viewer.sections.MeshSections` now computes them for a
 whole atlas at once. `trimesh_sections` below is the old computation, kept as
 the reference, and `assert_same_sections` states what "the same" means:
 
@@ -12,7 +12,7 @@ the reference, and `assert_same_sections` states what "the same" means:
 - wherever trimesh also drew each segment at most once, the polylines pair
   up one to one, each within TOL_UM of its partner.
 
-Edges shorter than `contours.MIN_EDGE_UM`, 1e-4 um, are merged away, and so
+Edges shorter than `sections.MIN_EDGE_UM`, 1e-4 um, are merged away, and so
 is any edge float32 cannot resolve, as napari stores points; a loop that
 collapses whole is too small to see and is left out on both sides. TOL_UM
 covers that and trimesh's own vertex merging, which rounds to a 1e-5 um grid.
@@ -37,7 +37,8 @@ import numpy as np
 import pytest
 
 from lobemap.core.meshfmt import MeshSet
-from lobemap.viewer.contours import ContourOverlay, MeshSections
+from lobemap.viewer.contours import ContourOverlay
+from lobemap.viewer.sections import MeshSections
 
 #: MIN_EDGE_UM, plus one cell diagonal of trimesh's 1e-5 um merge grid in a
 #: plane and one of float32's below 1024 um (8.6e-5). A contour line is
