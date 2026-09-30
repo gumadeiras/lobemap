@@ -11,6 +11,8 @@ import weakref
 
 import numpy as np
 
+from .chunkcache import cached_levels
+
 #: Per-role display defaults for image layers.
 #:
 #: Gray for the stains and the Grabe stack: they are reference imagery under
@@ -307,7 +309,9 @@ def add_images(viewer, registry, space: str) -> list:
             layers.append(layer)
             continue
 
-        data = volume.napari_data()
+        # A pyramid is read through a cache of decoded chunks, so a slice
+        # step decodes nothing the step before it already did; see chunkcache.
+        data = cached_levels(volume.levels) if volume.is_multiscale else volume.napari_data()
         layer = viewer.add_image(
             data,
             multiscale=volume.is_multiscale,
