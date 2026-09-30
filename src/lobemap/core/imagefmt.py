@@ -21,6 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .atomic import replacing
+
 FORMAT_VERSION = 1
 
 #: Past this size the array is written beside the .npz as a plain .npy and
@@ -154,25 +156,29 @@ class Volume:
 
         if sidecar is None:
             sidecar = self.data.nbytes > LARGE_VOLUME_BYTES
-        if not sidecar:
-            np.savez_compressed(
-                path,
-                data=self.data,
+        # Staged and renamed into place, sidecar first, like every other
+        # artifact write: an interrupted save left an npz that loaded
+        # without error and read zeros.
+        with replacing(path) as scratch:
+            if not sidecar:
+                np.savez_compressed(
+                    scratch,
+                    data=self.data,
+                    voxel_um=np.asarray(self.voxel_um),
+                    origin_um=np.asarray(self.origin_um),
+                    meta=np.asarray(json.dumps(meta)),
+                )
+                return path
+
+            npy = scratch.with_suffix(".data.npy")
+            _stream_to_npy(self.data, npy)
+            meta["data_file"] = npy.name
+            np.savez(
+                scratch,
                 voxel_um=np.asarray(self.voxel_um),
                 origin_um=np.asarray(self.origin_um),
                 meta=np.asarray(json.dumps(meta)),
             )
-            return path
-
-        npy = path.with_suffix(".data.npy")
-        _stream_to_npy(self.data, npy)
-        meta["data_file"] = npy.name
-        np.savez(
-            path,
-            voxel_um=np.asarray(self.voxel_um),
-            origin_um=np.asarray(self.origin_um),
-            meta=np.asarray(json.dumps(meta)),
-        )
         return path
 
     @classmethod

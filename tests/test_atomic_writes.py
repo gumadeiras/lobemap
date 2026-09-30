@@ -132,6 +132,25 @@ def test_an_interrupted_build_leaves_the_asset_missing(tmp_path, monkeypatch):
     assert _leftovers(tmp_path / "data", set()) == []
 
 
+@pytest.mark.parametrize("sidecar", [False, True])
+def test_an_interrupted_volume_save_keeps_the_old_file(tmp_path, monkeypatch, sidecar):
+    """`Volume.save` wrote the npz in place: cut off, it loaded as zeros."""
+    path = _volume(value=7, shape=(8, 8, 8)).save(tmp_path / "v.npz", sidecar=sidecar)
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    writer = "savez" if sidecar else "savez_compressed"
+
+    def partial(fh, **arrays):
+        with open(fh, "wb") as out:
+            out.write(b"PK\x03\x04 half a zip")
+        raise Interrupted
+
+    monkeypatch.setattr(np, writer, partial)
+    with pytest.raises(Interrupted):
+        _volume(value=9, shape=(8, 8, 8)).save(path, sidecar=sidecar)
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+    assert (np.asarray(Volume.load(path).data) == 7).all()
+
+
 def test_a_sidecar_is_installed_with_its_volume(tmp_path):
     """The staged path has the real name, so a sidecar is named for it."""
     target = tmp_path / "v.npz"
