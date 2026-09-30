@@ -2,9 +2,10 @@
 
 Sources are addressed relative to the registry root: `sources/<dataset>/...`
 for what ships, or a URL for what is downloaded. See `registry/sources/`. A
-recipe's `sha256` table records a digest per downloaded file name; a download
-that does not match is discarded, and one with no digest recorded is used but
-reported as not verified.
+recipe records a digest per downloaded file name, in a `sha256` table or, for a
+file whose publisher serves its own checksum, an `md5` table holding that
+checksum; a download that does not match is discarded, and one with no digest
+recorded is used but reported as not verified.
 
 Every asset under `registry/data/` is derived, which is the justification for
 keeping the large ones out of git. That justification was only half true: the
@@ -28,6 +29,7 @@ compared with the asset it replaces.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import shutil
 import tempfile
 import tomllib
@@ -36,7 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .core.atomic import replacing
-from .core.manifest import TIMEOUT_S, sha256_file
+from .core.manifest import CHUNK, TIMEOUT_S
 
 DEFAULT_RECIPES = "recipes.toml"
 
@@ -75,6 +77,20 @@ class Recipe:
     params: dict = field(default_factory=dict)
     #: sha256 of each downloaded file, keyed by its file name.
     sha256: dict[str, str] = field(default_factory=dict)
+    #: md5 of a downloaded file as its publisher serves it -- a Cloud Storage
+    #: object's `x-goog-hash` -- so a multi-gigabyte source gets a recorded
+    #: checksum without being downloaded to compute one. Used when there is no
+    #: sha256 for the file. It detects a changed or damaged file, not one
+    #: forged by whoever controls the bucket.
+    md5: dict[str, str] = field(default_factory=dict)
+
+    def expected(self, name: str) -> tuple[str, str] | None:
+        """The (algorithm, hex digest) a downloaded `name` must match."""
+        if name in self.sha256:
+            return "sha256", self.sha256[name]
+        if name in self.md5:
+            return "md5", self.md5[name]
+        return None
 
 
 @dataclass
@@ -93,11 +109,12 @@ def load_recipes(registry_root) -> dict[str, Recipe]:
     out = {}
     for asset, body in spec.items():
         downloads = {Path(u).name for u in [body.get("url"), *body.get("urls", [])] if u}
-        stray = sorted(set(body.get("sha256", {})) - downloads)
-        if stray:
-            # A misspelled name would otherwise switch its check off quietly.
-            raise ValueError(f"{asset}: sha256 names files the recipe does not "
-                             f"download: {', '.join(stray)}")
+        for table in ("sha256", "md5"):
+            stray = sorted(set(body.get(table, {})) - downloads)
+            if stray:
+                # A misspelled name would otherwise switch its check off quietly.
+                raise ValueError(f"{asset}: {table} names files the recipe does "
+                                 f"not download: {', '.join(stray)}")
         out[asset] = Recipe(
             asset=asset,
             pipeline=body["pipeline"],
@@ -108,6 +125,7 @@ def load_recipes(registry_root) -> dict[str, Recipe]:
             expensive=bool(body.get("expensive", False)),
             params=dict(body.get("params", {})),
             sha256=dict(body.get("sha256", {})),
+            md5=dict(body.get("md5", {})),
         )
     return out
 
@@ -151,9 +169,9 @@ def _fetch_source(recipe: Recipe, url: str, folder: Path, progress,
     """
     name = Path(url).name
     target = folder / name
-    expected = recipe.sha256.get(name)
+    expected = recipe.expected(name)
     if target.exists() and expected is not None \
-            and sha256_file(target)[0] != expected:
+            and file_digest(target, expected[0]) != expected[1]:
         target.unlink()
     if not target.exists():
         if progress:
@@ -161,24 +179,36 @@ def _fetch_source(recipe: Recipe, url: str, folder: Path, progress,
         folder.mkdir(parents=True, exist_ok=True)
         _download(url, target, expected)
     if expected is None and progress:
-        progress(f"not verified: no sha256 recorded for {name}")
+        progress(f"not verified: no checksum recorded for {name}")
     return target
 
 
-def _download(url: str, target: Path, sha256: str | None = None) -> None:
+def file_digest(path: Path, algorithm: str) -> str:
+    """Hex digest of a file, read in chunks."""
+    h = hashlib.new(algorithm)
+    with Path(path).open("rb") as fh:
+        while block := fh.read(CHUNK):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _download(url: str, target: Path,
+              expected: tuple[str, str] | None = None) -> None:
     """Fetch to a .part file and rename, so an interrupted download is not
-    mistaken for a complete one on the next run. With `sha256`, a download
-    that does not match is discarded and raises."""
+    mistaken for a complete one on the next run. With `expected`, an
+    (algorithm, hex digest) pair, a download that does not match is
+    discarded and raises."""
     tmp = target.with_suffix(target.suffix + ".part")
     try:
         with urllib.request.urlopen(url, timeout=TIMEOUT_S) as resp, \
                 tmp.open("wb") as fh:
             shutil.copyfileobj(resp, fh, 1 << 20)
-        if sha256 is not None:
-            digest, _ = sha256_file(tmp)
-            if digest != sha256:
-                raise ValueError(f"{url}: downloaded sha256 {digest[:12]} != "
-                                 f"recorded {sha256[:12]}")
+        if expected is not None:
+            algorithm, want = expected
+            digest = file_digest(tmp, algorithm)
+            if digest != want:
+                raise ValueError(f"{url}: downloaded {algorithm} {digest[:12]} != "
+                                 f"recorded {want[:12]}")
         tmp.replace(target)
     finally:
         tmp.unlink(missing_ok=True)

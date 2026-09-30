@@ -23,7 +23,7 @@
 - `lobemap view --show NAME` starts an asset, an atlas or a role such as `neuropil` visible in the first scene, and `--ndisplay 2` opens in 2D.
 - `lobemap check` tests the data against its own geometry, including laterality, chirality, image orientation, label containment and compartment size, and reports the known defects in `registry/checks.toml` without failing. `check --compare A B SPACE` pairs two atlases by canonical name and biological side, and `lobemap reconcile` pairs them by geometry.
 - `lobemap validate` checks the registry, and `lobemap nomenclature` audits the name table against the atlases and changes it only when asked.
-- `lobemap build` rebuilds an asset from its source by the recipes in `registry/recipes.toml` and removes its scratch files; `build --list` shows which assets have a recipe. No recipe records a sha256 for its downloads yet, so `build` reports each download as not verified. `stain`, `ingest neuprint`, `bridge`, `repair` and `tozarr` run single steps, and `manifest` and `pack` prepare a data release.
+- `lobemap build` rebuilds an asset from its source by the recipes in `registry/recipes.toml` and removes its scratch files; `build --list` shows which assets have a recipe. Every download is checked against a checksum its recipe records, and one that does not match is discarded: a sha256 for the small eLife archives, and for the 20 GB of Cloud Storage sources the md5 each object's publisher serves, so recording them downloaded nothing. `stain`, `ingest neuprint`, `bridge`, `repair` and `tozarr` run single steps, and `manifest` and `pack` prepare a data release.
 - `python -m lobemap` runs the same command as `lobemap`.
 
 ### Changes

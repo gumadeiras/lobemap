@@ -183,3 +183,32 @@ bounds = [37.6, 37.3, 79.8, 732.1, 421.8, 345.3]
 # The published file is already filtered to minconf 0.5 (its name says so);
 # lobemap applies no further threshold, so this records the input's filter.
 confidence = 0.5
+
+# -- Download checksums ---------------------------------------------------
+# `build` checks each download against these and discards one that does not
+# match. The md5 values are the ones Cloud Storage serves for each object
+# (`curl -sI <url>` shows them, base64-encoded, as `x-goog-hash: md5=`), so
+# recording them downloaded nothing; they detect a changed or damaged file.
+# The eLife archives are small, so they carry a sha256 of their bytes.
+
+[schlegel2021_s11_glomeruli.sha256]
+"elife-66018-supp11-v2.zip" = "374fee33e5c44dd690b5ed073634654145a9be5e62864b2138056ac05cdc657f"
+
+[schlegel2021_s12_glomeruli.sha256]
+"elife-66018-supp12-v2.zip" = "7e10778d131f0486acfa8de5c91d5bd9eaf313087dce5b646ecaffd316b09ec3"
+
+[hemibrain_stain.md5]
+"0.shard" = "14b86464b66442b4539cdc87a91fd683"
+"1.shard" = "15b9dde1561d30c1073b46a8ab98e2eb"
+"2.shard" = "9751642f1fa25df687657c9335e08a6c"
+"3.shard" = "3b8b868c9557d9451c3049fa5d662b1a"
+"4.shard" = "16993240ec8c56240ca4306ab597da1f"
+"5.shard" = "909c6fbb4f40e683fcb488dc7fe51e62"
+"6.shard" = "f3db52044a9abdbfe3d54b243e96d60c"
+"7.shard" = "6f9b9cc804fc445575519b8278c5e2e7"
+
+[fafb_stain.md5]
+"fafb_v783_princeton_synapse_table.csv.gz" = "f5267110eea53075e084a8581142a476"
+
+[malecns_stain.md5]
+"syn-points-male-cns-v1.0-minconf-0.5.feather" = "c69d08758de07582035cc8843574493a"

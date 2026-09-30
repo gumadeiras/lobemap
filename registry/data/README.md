@@ -4,7 +4,7 @@ Nothing here is tracked except this README. The artifacts are published as relea
 
 What follows is how each asset is rebuilt from its source. `registry/recipes.toml` records it and `lobemap build <asset>` runs it; `lobemap build --list` shows which assets have a recipe and which are on disk. Rebuilding needs the ingest dependencies: `pip install "lobemap[ingest]"`, or a checkout's `uv sync`. Use it when you are regenerating an asset rather than installing; `lobemap pack` then writes the copies to upload (see `RELEASE.md`).
 
-`build` caches what it downloads in `<data root>/.build/`, so a second build does not download again; delete that directory to reclaim the space. A recipe can record a sha256 per downloaded file, and `build` then discards a download that does not match. No recipe records one yet, so `build` reports each download as not verified.
+`build` caches what it downloads in `<data root>/.build/`, so a second build does not download again; delete that directory to reclaim the space. Every recipe records a checksum per downloaded file, and `build` discards a download that does not match: a sha256 for the eLife archives, and for the Cloud Storage sources the md5 the storage serves (shown by `curl -sI <url>` as `x-goog-hash`).
 
 ## neuPrint: hemibrain and male CNS
 
