@@ -1693,7 +1693,7 @@ requires-dist = [
     { name = "fafbseg", marker = "extra == 'ingest'", specifier = ">=3.2" },
     { name = "flybrains", marker = "extra == 'ingest'", specifier = ">=0.6" },
     { name = "h5py", marker = "extra == 'ingest'", specifier = ">=3.11" },
-    { name = "napari", extras = ["pyqt6", "bermuda"], specifier = ">=0.6" },
+    { name = "napari", extras = ["pyqt6", "bermuda"], specifier = ">=0.9.1,<0.10" },
     { name = "navis", marker = "extra == 'ingest'", specifier = ">=1.12" },
     { name = "neuprint-python", marker = "extra == 'ingest'", specifier = ">=0.6.3" },
     { name = "numcodecs", specifier = ">=0.12" },
