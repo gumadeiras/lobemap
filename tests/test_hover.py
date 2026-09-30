@@ -10,7 +10,15 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from viewer_harness import SPACES, canvas_position, hover, launched, pump, session
+from viewer_harness import (
+    SPACES,
+    canvas_position,
+    contour_loops,
+    hover,
+    launched,
+    pump,
+    session,
+)
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
@@ -18,7 +26,7 @@ pytest.importorskip("napari")
 
 def _inside_contour(overlay) -> np.ndarray:
     """A world point inside the largest drawn loop of the overlay."""
-    paths = [np.asarray(p) for p in overlay.layer.data]
+    paths = [loop for _owner, loop in contour_loops(overlay)]
     assert paths, "nothing drawn to hover over"
     path = max(paths, key=len)
     return path.mean(axis=0)

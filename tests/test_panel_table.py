@@ -58,12 +58,9 @@ def _drawn(tab) -> set[int]:
     import numpy as np
 
     if tab.surface.viewer.dims.ndisplay == 2 and tab.contour is not None:
-        layer = tab.contour.layer
-        if not layer.visible:
-            return set()
-        names = tab.surface.meshset.names
-        return {names.index(tab.contour.name_at_shape(i))
-                for i in range(len(layer.data))}
+        from viewer_harness import contour_loops
+
+        return {owner for owner, _loop in contour_loops(tab.contour)}
     layer = tab.surface.layer
     if not layer.visible:
         return set()
@@ -292,13 +289,18 @@ def test_a_hex_color_spec_does_not_break_filling():
         assert all(0.0 <= v <= 1.0 for v in (r, g, b, a)), spec
 
 
-def _shape_kinds(layer) -> set[str]:
-    return {getattr(s, "name", str(s)).lower() for s in layer.shape_type}
+def _fill_alphas(contour) -> set[float]:
+    """The alpha of every filled triangle the contour's mesh visual draws."""
+    from viewer_harness import assert_renders_loops, rendered_mesh
+
+    assert_renders_loops(contour)
+    _vertices, faces, colors = rendered_mesh(contour)
+    alphas = {round(float(a), 4) for a in colors[faces[:, 0], 3]} if len(faces) else set()
+    return alphas - {1.0}
 
 
 def test_fill_all_works_on_a_neuropil_layer(session):
     """End to end, in 2D, where the contours actually draw."""
-    import numpy as np
 
     viewer, sess = session
     tab = sess.panel.tabs["fafb_neuropil"]
@@ -310,13 +312,11 @@ def test_fill_all_works_on_a_neuropil_layer(session):
 
     _click(tab, "Fill all")
     assert tab.contour.filled == set(tab.surface.selection)
-    assert _shape_kinds(tab.contour.layer) == {"polygon"}
-    faces = np.asarray(tab.contour.layer.face_color)
-    assert np.allclose(faces[:, 3], tab.contour.FILL_ALPHA)
+    assert _fill_alphas(tab.contour) == {round(tab.contour.FILL_ALPHA, 4)}
 
     _click(tab, "Fill none")
     assert tab.contour.filled == set()
-    assert _shape_kinds(tab.contour.layer) == {"path"}
+    assert _fill_alphas(tab.contour) == set()
 
 
 def test_fill_buttons_track_the_checkboxes(session):

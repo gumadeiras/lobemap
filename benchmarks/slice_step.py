@@ -181,7 +181,7 @@ def work_steps(space, mode, planes, registry_root, data_root) -> dict:
             "space": space, "mode": mode, "axis": axis, "planes": len(ks),
             **load, **_backend(),
             "sweeps": _sweeps(viewer, axis, ks, app,
-                              shapes_of=lambda: len(overlay.layer.data)),
+                              shapes_of=lambda: len(overlay.paths)),
         }
         if mode == "primary":
             result["toggle"] = _row_toggles(session, primary, app)

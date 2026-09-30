@@ -140,6 +140,154 @@ def layer_names(viewer) -> list[str]:
 # -- what is drawn --------------------------------------------------------
 
 
+def contour_loops(contour) -> list[tuple[int, np.ndarray]]:
+    """(compartment, loop) for every loop a contour overlay has on screen.
+
+    Nothing unless its layer is on and its mesh visual is drawing: the
+    loops are the overlay's, and `assert_renders_loops` checks that the
+    vispy visuals draw exactly them.
+    """
+    if not (contour.layer.visible and contour.visual.mesh.visible):
+        return []
+    names = contour.meshset.names
+    return [(names.index(contour.name_at_shape(i)), np.asarray(loop, float))
+            for i, loop in enumerate(contour.paths)]
+
+
+def rendered_mesh(contour) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Vertices (vispy x, y), faces and vertex RGBA the contour's mesh visual holds."""
+    mesh = contour.visual.mesh
+    if not (contour.layer.visible and mesh.visible):
+        return np.empty((0, 2)), np.empty((0, 3), int), np.empty((0, 4))
+    data = mesh.mesh_data
+    return (np.asarray(data.get_vertices(), float)[:, :2],
+            np.asarray(data.get_faces(), int),
+            np.asarray(data.get_vertex_colors(), float))
+
+
+def rendered_labels(contour) -> list[tuple[str, np.ndarray, np.ndarray]]:
+    """(text, vispy x-y position, RGBA) for every label the text visual draws."""
+    text = contour.visual.text
+    if not (contour.layer.visible and text.visible):
+        return []
+    strings = [text.text] if isinstance(text.text, str) else list(text.text)
+    pos = np.asarray(text.pos, float)[:, :2]
+    rgba = np.atleast_2d(np.asarray(text.color.rgba, float))
+    rgba = np.broadcast_to(rgba, (len(strings), 4)) if len(rgba) == 1 else rgba
+    return [(s, pos[i], rgba[i]) for i, s in enumerate(strings) if s]
+
+
+def _edge_rgba(contour, owner: int) -> np.ndarray:
+    from napari.utils.colormaps.standardize_color import transform_color
+
+    spec = contour.colors[owner] if contour.colors is not None else contour.color
+    return np.asarray(transform_color(spec), float)[0]
+
+
+def _areas(points: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    a, b, c = (points[faces[:, i]] for i in range(3))
+    return np.abs((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
+                  - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0])) / 2.0
+
+
+def _napari_fill_area(ring: np.ndarray) -> float:
+    """The area napari's Shapes filled for a polygon: bermuda's triangulation of it."""
+    import bermuda
+
+    faces, points = bermuda.triangulate_polygons_face(
+        [np.ascontiguousarray(ring, np.float32)])
+    return float(_areas(np.asarray(points, float), np.asarray(faces, int)).sum())
+
+
+def assert_renders_loops(contour, tol: float = 1e-3) -> None:
+    """The contour's vispy visuals draw exactly its loops, and nothing else.
+
+    - Outlines: the rendered outline triangles are, vertex for vertex and
+      triangle for triangle, the stroke napari's Shapes gives a closed path
+      `contour.width` wide (bermuda's `triangulate_path_edge`, the call
+      napari makes), in each loop's compartment color.
+    - Fills: each filled compartment's fill triangles, drawn before every
+      outline, cover the area napari's Shapes filled for its loops, in its
+      color at `FILL_ALPHA`; nothing else is filled.
+    - Labels: each labeled compartment's name, once, at the mean of its
+      longest loop's points, in its color.
+    - Placement: vispy maps the rendered points to where the layer's
+      data-to-world transform puts them, so the mirror moves them too.
+    """
+    import bermuda
+    from scipy.spatial import cKDTree
+
+    loops = contour_loops(contour)
+    vertices, faces, colors = rendered_mesh(contour)
+    xy = list(contour.viewer.dims.displayed)[::-1]
+    alpha = colors[faces[:, 0], 3] if len(faces) else np.empty(0)
+    is_fill = np.isclose(alpha, contour.FILL_ALPHA, atol=1e-6)
+    if is_fill.any():
+        assert is_fill[: is_fill.sum()].all(), "an outline drawn under a fill"
+    stroke_faces, fill_faces = faces[~is_fill], faces[is_fill]
+
+    want_v, want_c, want_tri = [], [], 0
+    for owner, loop in loops:
+        ring = np.ascontiguousarray(loop[:-1][:, xy], np.float32)
+        centers, offsets, tris = bermuda.triangulate_path_edge(ring, closed=True)
+        want_v.append(centers + contour.width * offsets)
+        want_c.append(np.broadcast_to(_edge_rgba(contour, owner), (len(centers), 4)))
+        want_tri += len(tris)
+    assert len(stroke_faces) == want_tri, (len(stroke_faces), want_tri)
+    if loops:
+        # Matched on position and color together: the outlines of two
+        # touching compartments can share a point.
+        used = np.unique(stroke_faces)
+        got = np.hstack((vertices[used], 1e3 * colors[used]))
+        want = np.hstack((np.vstack(want_v), 1e3 * np.vstack(want_c)))
+        distance, _ = cKDTree(got).query(want)
+        assert distance.max() <= tol, f"an outline vertex {distance.max():.2e} off"
+        back, _ = cKDTree(want).query(got)
+        assert back.max() <= tol, f"a stray outline vertex {back.max():.2e} off"
+
+    fill_area: dict[tuple, float] = {}
+    for tri, area in zip(fill_faces, _areas(vertices, fill_faces)):
+        key = tuple(np.round(colors[tri[0]], 4))
+        fill_area[key] = fill_area.get(key, 0.0) + float(area)
+    want_area: dict[tuple, float] = {}
+    for owner, loop in loops:
+        if owner in contour.filled:
+            rgba = _edge_rgba(contour, owner).copy()
+            rgba[3] = contour.FILL_ALPHA
+            key = tuple(np.round(rgba, 4))
+            want_area[key] = want_area.get(key, 0.0) + _napari_fill_area(loop[:-1][:, xy])
+    assert set(fill_area) == set(want_area), "filled colors differ"
+    for key, area in want_area.items():
+        assert abs(fill_area[key] - area) <= 1e-4 * max(area, 1.0), (key, fill_area[key], area)
+
+    # Where vispy puts the rendered points is where napari's own transform
+    # puts those points of the plane: the layer's, the mirror included.
+    if len(vertices):
+        to_scene = contour.visual.mesh.get_transform("visual", "scene")
+        displayed = list(contour.viewer.dims.displayed)
+        for v in vertices[np.linspace(0, len(vertices) - 1, 8).astype(int)]:
+            data = np.zeros(3)
+            data[xy] = v
+            data[contour.axis] = contour.slice_position()
+            want = np.asarray(contour.layer.data_to_world(data))[displayed][::-1]
+            got = np.asarray(to_scene.map(np.r_[v, 0.0, 1.0]), float)
+            np.testing.assert_allclose(got[:2] / got[3], want, atol=tol)
+
+    longest: dict[int, np.ndarray] = {}
+    for owner, loop in loops:
+        if owner in contour.labels and (owner not in longest
+                                        or len(loop) > len(longest[owner])):
+            longest[owner] = loop
+    got = sorted(rendered_labels(contour), key=lambda t: t[0])
+    want = sorted(((contour.display_names[o], loop[:, xy].mean(axis=0),
+                    _edge_rgba(contour, o)) for o, loop in longest.items()),
+                  key=lambda t: t[0])
+    assert [g[0] for g in got] == [w[0] for w in want], "labels differ"
+    for (_s, pos, rgba), (_t, wpos, wrgba) in zip(got, want):
+        np.testing.assert_allclose(pos, wpos, atol=tol)
+        np.testing.assert_allclose(rgba, wrgba, atol=1e-6)
+
+
 def mode_layer(surface, contour=None):
     """The layer that draws this atlas in the current mode."""
     if contour is not None and surface.viewer.dims.ndisplay == 2:
@@ -152,15 +300,12 @@ def drawn(surface, contour=None) -> set[int]:
 
     3D: the mesh layer is visible, the compartment's geometry is resident,
     and its color is opaque. 2D, with a contour overlay: the contour layer
-    is visible and holds a shape of that compartment -- and the mesh, if it
+    is visible and draws a loop of that compartment -- and the mesh, if it
     is on as well, draws everything it holds.
     """
-    names = surface.meshset.names
     out: set[int] = set()
     if contour is not None and surface.viewer.dims.ndisplay == 2:
-        if contour.layer.visible:
-            out = {names.index(contour.name_at_shape(i))
-                   for i in range(len(contour.layer.data))}
+        out = {owner for owner, _loop in contour_loops(contour)}
         if not surface.layer.visible:
             return out
     if not surface.layer.visible:

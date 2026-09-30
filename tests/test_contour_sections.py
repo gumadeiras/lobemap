@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from viewer_harness import assert_renders_loops, contour_loops, rendered_labels
 
 from lobemap.core.meshfmt import MeshSet
 from lobemap.viewer.contours import ContourOverlay
@@ -332,12 +333,10 @@ def _step_into(viewer, surface, fraction: float) -> float:
 
 
 def _drawn(overlay: ContourOverlay) -> dict:
-    """What the contour layer holds, by compartment, named as picking names it."""
-    names = overlay.meshset.names
+    """The loops on screen, by compartment, named as picking names them."""
     out: dict[int, list] = {}
-    for i, pts in enumerate(overlay.layer.data):
-        out.setdefault(names.index(overlay.name_at_shape(i)), []).append(
-            np.asarray(pts, float))
+    for owner, loop in contour_loops(overlay):
+        out.setdefault(owner, []).append(loop)
     return out
 
 
@@ -352,29 +351,15 @@ def _expected(overlay: ContourOverlay, position: float, selection=None) -> dict:
 
 
 def assert_draws(overlay, position, where, selection=None) -> None:
-    """The layer holds trimesh's sections at `position`, as float32."""
+    """The visuals draw trimesh's sections at `position`, and only them.
+
+    Checked on the rendered geometry too, across planes where the loop
+    count rises and falls: the visuals are rebuilt on every step, and each
+    outline must still be the overlay's width and its compartment's color.
+    """
     assert_same_sections(overlay.meshset, overlay.axis, position, _drawn(overlay),
                          _expected(overlay, position, selection), TOL_UM, where)
-
-
-def _assert_styled(overlay, colors=None) -> None:
-    """Every shape has the overlay's width and its compartment's edge color.
-
-    A write keeps the old shapes' attributes and gives new ones napari's
-    defaults, and only some are written again, so this is checked across
-    planes where the shape count rises and falls.
-    """
-    from napari.utils.colormaps.standardize_color import transform_color
-
-    layer = overlay.layer
-    if not layer.nshapes:
-        return
-    np.testing.assert_allclose(layer.edge_width, overlay.width)
-    names = overlay.meshset.names
-    owners = [names.index(overlay.name_at_shape(i)) for i in range(layer.nshapes)]
-    want = (np.asarray(colors)[owners] if colors is not None
-            else np.repeat(transform_color(overlay.color), layer.nshapes, axis=0))
-    np.testing.assert_allclose(np.asarray(layer.edge_color), want, atol=1e-6)
+    assert_renders_loops(overlay)
 
 
 @pytest.mark.requires_data
@@ -388,9 +373,8 @@ def test_reference_contours_keep_their_color_and_width(registry):
         for fraction in (0.2, 0.5, 0.8, 0.35, 0.65, 0.5):
             position = _step_into(viewer, session.surfaces["fafb_neuropil"], fraction)
             assert_draws(shell, position, f"neuropil at {position}:")
-            _assert_styled(shell)
-            counts.append(shell.layer.nshapes)
-        assert len(set(counts)) > 2, f"the shape count should vary: {counts}"
+            counts.append(len(contour_loops(shell)))
+        assert len(set(counts)) > 2, f"the loop count should vary: {counts}"
     finally:
         viewer.close()
 
@@ -406,64 +390,55 @@ def test_2d_draws_the_same_contours_labels_and_fills(registry, space):
         for fraction in (0.3, 0.5, 0.7, 0.4, 0.6):
             position = _step_into(viewer, surface, fraction)
             assert_draws(overlay, position, f"{space} at {position}:")
-            _assert_styled(overlay, surface.colors)
 
+        # Filled and labeled: every drawn compartment's fill covers its
+        # loops, in its color, and its name is written once, on its longest
+        # loop (`assert_renders_loops`).
         everything = set(overlay.selection)
         overlay.set_labels(everything)
         overlay.set_fills(everything)
         _settle()
-        layer = overlay.layer
-        assert layer.nshapes
-        assert {str(t) for t in layer.shape_type} == {"polygon"}
-        faces = np.asarray(layer.face_color)
-        owners = [overlay.meshset.names.index(overlay.name_at_shape(i))
-                  for i in range(layer.nshapes)]
-        np.testing.assert_allclose(faces[:, 3], overlay.FILL_ALPHA, atol=1e-6)
-        np.testing.assert_allclose(faces[:, :3], surface.colors[owners][:, :3], atol=1e-6)
-        np.testing.assert_allclose(np.asarray(layer.edge_color)[:, :3],
-                                   surface.colors[owners][:, :3], atol=1e-6)
-        # One name per compartment, on its longest polyline.
-        text = [str(s) for s in np.atleast_1d(layer.text.values)]
-        assert len(text) == layer.nshapes
-        for index, polys in _drawn(overlay).items():
-            name = overlay.meshset.names[index]
-            mine = [i for i in range(layer.nshapes) if overlay.name_at_shape(i) == name]
-            labeled = [i for i in mine if text[i]]
-            assert [text[i] for i in labeled] == [name]
-            assert len(layer.data[labeled[0]]) == max(len(p) for p in polys)
+        drawn = _drawn(overlay)
+        assert drawn
+        assert_draws(overlay, position, f"{space} filled at {position}:")
+        assert sorted(text for text, _pos, _rgba in rendered_labels(overlay)) == sorted(
+            overlay.display_names[i] for i in drawn)
 
         overlay.set_fills(set())
         overlay.set_labels(set())
         _settle()
-        assert {str(t) for t in layer.shape_type} == {"path"}
-        np.testing.assert_allclose(np.asarray(layer.face_color)[:, 3], 0.0)
-        assert not any(str(s) for s in np.atleast_1d(layer.text.values))
+        assert_draws(overlay, position, f"{space} unfilled at {position}:")
+        assert not rendered_labels(overlay)
     finally:
         viewer.close()
 
 
 @pytest.mark.requires_data
-def test_filling_works_without_a_compiled_triangulator(registry):
+def test_filling_works_without_a_compiled_triangulator(registry, monkeypatch):
     """napari's pure-Python fill raised `KeyError: (0, 0)` on a zero-length edge.
 
     GRABE's slider steps fall on its float32 vertex grid, so crossings a
     fraction of a float32 step apart were common there, and fills failed on
     every plane from 79.68 to 87.36 um before repeats were dropped.
+
+    Without bermuda the outlines and the fills that are not a fan come
+    from napari's pure-Python triangulation.
     """
-    from napari.utils.triangulation_backend import TriangulationBackend, set_backend
+    import sys
 
     viewer, session, primary = _open(registry, "GRABE")
-    previous = set_backend(TriangulationBackend.pure_python)
     try:
         overlay = session.contours[primary]
         overlay.set_fills(set(overlay.selection))
+        # An import that fails, exactly as when the package is absent.
+        monkeypatch.setitem(sys.modules, "bermuda", None)
         for world in (79.68, 83.52, 87.36):
             position = _step_to(viewer, world)
-            assert overlay.layer.nshapes
-            assert {str(t) for t in overlay.layer.shape_type} == {"polygon"}
+            assert _drawn(overlay)
+            monkeypatch.undo()          # the check itself uses bermuda
             assert_draws(overlay, position, f"filled at {position}:")
+            monkeypatch.setitem(sys.modules, "bermuda", None)
     finally:
-        set_backend(previous)
         viewer.close()
 
 
@@ -545,7 +520,7 @@ def test_contours_follow_the_mirror(registry):
         assert _expected(overlay, mirrored), "the reflected plane cuts nothing"
         assert_draws(overlay, mirrored, "mirrored, cut in x:")
         # And it is drawn on the plane the slider shows.
-        for pts in overlay.layer.data:
+        for _owner, pts in contour_loops(overlay):
             world = overlay.layer.data_to_world(pts[0])
             assert world[0] == pytest.approx(x, abs=1e-3)
 
@@ -583,14 +558,15 @@ def test_a_mode_switch_draws_the_contours_at_most_once(registry):
     try:
         writes = {name: 0 for name in session.contours}
 
-        def counter(name):
-            def count(event):
-                if str(event.action) in ("added", "changed", "removed"):
-                    writes[name] += 1
+        def counter(name, draw):
+            # Every time the visuals are handed a new slice.
+            def count(*args, **kwargs):
+                writes[name] += 1
+                return draw(*args, **kwargs)
             return count
 
         for name, overlay in session.contours.items():
-            overlay.layer.events.data.connect(counter(name))
+            overlay.visual.draw = counter(name, overlay.visual.draw)
         overlay = session.contours[primary]
 
         def switch(ndisplay):
@@ -607,6 +583,9 @@ def test_a_mode_switch_draws_the_contours_at_most_once(registry):
         assert_draws(overlay, position, "first entry into 2D:")
         for _ in range(2):
             assert all(n == 0 for n in switch(3).values())
+            # Nothing of the slice is drawn over the 3D scene.
+            for other in session.contours.values():
+                assert not (other.visual.mesh.visible or other.visual.text.visible)
             again = switch(2)
             assert all(n <= 1 for n in again.values()), again
             assert overlay.layer.visible

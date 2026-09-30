@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from viewer_harness import assert_renders_loops, contour_loops
 
 from lobemap.core.meshfmt import MeshSet
 from lobemap.viewer.contours import ContourOverlay
@@ -65,7 +66,8 @@ def test_cycling_between_2d_and_3d_keeps_redrawing():
         for _ in range(3):
             viewer.dims.ndisplay = 2
             overlay.refresh()
-            drawn.append(len(overlay.layer.data))
+            drawn.append(len(contour_loops(overlay)))
+            assert_renders_loops(overlay)
             viewer.dims.ndisplay = 3
             overlay.refresh()
 
@@ -89,9 +91,10 @@ def test_refresh_replaces_rather_than_appends():
         viewer.dims.order = (2, 1, 0)
         viewer.dims.set_point(2, 1.5)
         overlay.refresh()
-        once = len(overlay.layer.data)
+        once = len(contour_loops(overlay))
         overlay.refresh()
-        assert len(overlay.layer.data) == once
+        assert len(contour_loops(overlay)) == once
         assert len(overlay._shape_index) == once
+        assert_renders_loops(overlay)
     finally:
         viewer.close()

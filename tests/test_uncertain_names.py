@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import shutil
 
-import numpy as np
 import pytest
-from viewer_harness import hover, launched, pump, session
+from viewer_harness import contour_loops, hover, launched, pump, rendered_labels, session
 
 pytestmark = pytest.mark.requires_data(
     "grabe2015_glomeruli", "grabe2015_labels", "grabe2015_stack")
@@ -64,10 +63,10 @@ def test_the_viewer_shows_the_doubt_where_it_names_the_glomerulus(monkeypatch):
         axis = int(viewer.dims.order[0])
         viewer.dims.set_point(axis, float(surface.meshset.centroid(vp2)[axis]))
         pump(300)
-        assert "VP2(L) (VM6?)" in [str(t) for t in overlay.layer.text.values]
+        assert "VP2(L) (VM6?)" in [text for text, _pos, _rgba in rendered_labels(overlay)]
 
         # The hover status, in 2D and in 3D.
-        path = max((np.asarray(p) for p in overlay.layer.data), key=len)
+        path = max((loop for _owner, loop in contour_loops(overlay)), key=len)
         assert hover(viewer, path.mean(axis=0)) == "grabe2015: VP2(L) (VM6?)"
         viewer.dims.ndisplay = 3
         pump()

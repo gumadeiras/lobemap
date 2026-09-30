@@ -193,25 +193,21 @@ def test_contours_and_labels_take_their_mesh_color(registry):
         owners = overlay._shape_index
         assert len(owners) > 10, "no cross-sections to check"
 
-        edges = np.asarray(overlay.layer.edge_color)
-        for shape, owner in enumerate(owners):
-            np.testing.assert_allclose(
-                edges[shape][:3], surface.colors[owner][:3], atol=1e-2,
-                err_msg=f"{overlay.meshset.names[owner]} outline is not its "
-                        f"mesh color",
-            )
+        # The rendered outlines are each loop's stroke in its compartment's
+        # color (`assert_renders_loops`), and those colors are the meshes'.
+        from viewer_harness import assert_renders_loops, rendered_labels
 
-        # A bare list of colors is indistinguishable from one color given
-        # component-wise, and napari collapses it to a constant. The
-        # encoding must survive as a per-shape array.
-        encoding = overlay.layer.text.color
-        array = np.asarray(getattr(encoding, "array", encoding))
-        assert array.shape == (len(owners), 4), (
-            f"label colors collapsed to {array.shape}; they are not per-shape"
-        )
-        for shape, owner in enumerate(owners):
+        assert_renders_loops(overlay)
+        np.testing.assert_allclose(overlay.colors, surface.colors)
+
+        # One label per compartment, each in its own mesh's color: a list
+        # of colors once collapsed to a single one for every label.
+        labels = rendered_labels(overlay)
+        assert len(labels) == len(set(owners)), "not one label per compartment"
+        for text, _pos, rgba in labels:
+            owner = overlay.display_names.index(text)
             np.testing.assert_allclose(
-                array[shape][:3], surface.colors[owner][:3], atol=1e-2,
+                rgba[:3], surface.colors[owner][:3], atol=1e-2,
                 err_msg=f"{overlay.meshset.names[owner]} label is not its "
                         f"mesh color",
             )

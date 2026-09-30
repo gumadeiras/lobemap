@@ -184,7 +184,7 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
                 shown = list(viewer.dims.displayed)
                 point = overlay.layer.world_to_data(event.position)
                 shape = polygon_at(
-                    [np.asarray(path)[:, shown] for path in overlay.layer.data],
+                    [np.asarray(path)[:, shown] for path in overlay.paths],
                     np.asarray(point)[shown],
                 )
                 label = overlay.name_at_shape(shape)

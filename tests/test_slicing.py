@@ -8,7 +8,16 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from viewer_harness import SPACES, launched, pump, session, switch_to, switcher
+from viewer_harness import (
+    SPACES,
+    assert_renders_loops,
+    contour_loops,
+    launched,
+    pump,
+    session,
+    switch_to,
+    switcher,
+)
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
@@ -24,9 +33,11 @@ def _on_plane(viewer, overlay) -> None:
     axis = int(viewer.dims.order[0])
     point = float(viewer.dims.point[axis])
     assert overlay.layer.visible
-    assert len(overlay.layer.data) > 0, "no contour on this plane"
-    for path in overlay.layer.data:
-        assert np.allclose(np.asarray(path)[:, axis], point), (axis, point)
+    loops = contour_loops(overlay)
+    assert loops, "no contour on this plane"
+    for _owner, path in loops:
+        assert np.allclose(path[:, axis], point), (axis, point)
+    assert_renders_loops(overlay)
 
 
 @pytest.mark.parametrize("space", SPACES)
@@ -216,9 +227,11 @@ def test_mirrored_contours_follow_a_slice_along_the_mirror_axis(monkeypatch):
         pump()
         overlay = _primary(viewer)
         plane = float(overlay.layer.world_to_data(viewer.dims.point)[0])
-        assert len(overlay.layer.data) > 0
-        for path in overlay.layer.data:
-            assert np.allclose(np.asarray(path)[:, 0], plane)
+        loops = contour_loops(overlay)
+        assert loops
+        for _owner, path in loops:
+            assert np.allclose(path[:, 0], plane)
+        assert_renders_loops(overlay)
 
 
 def test_napari_roll_button_is_a_slice_axis_choice(monkeypatch):
@@ -235,7 +248,6 @@ def test_napari_roll_button_is_a_slice_axis_choice(monkeypatch):
         axis = viewer.dims.order[0]
         assert sess.slice_axis == axis
         assert menu.currentData() == axis and menu.currentText() != before
-        assert len(overlay.layer.data) > 0
         _on_plane(viewer, overlay)
 
         viewer.dims.ndisplay = 3
