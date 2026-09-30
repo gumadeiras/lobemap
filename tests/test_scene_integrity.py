@@ -46,6 +46,7 @@ def _assert_intact(viewer, before, want: str) -> None:
     assert layer_names(viewer) == before["layers"]
 
 
+@pytest.mark.requires_data("hemibrain_stain")
 def test_a_corrupt_asset_leaves_the_previous_space_intact(monkeypatch, tmp_path):
     """The hemibrain stain fails to open after its neuropil shell is built."""
     root = tmp_path / "data"

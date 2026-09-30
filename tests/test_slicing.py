@@ -102,7 +102,13 @@ def _assert_image_slices(layer, axis) -> None:
         assert shown == tuple(layer.data.shape[d] for d in request.displayed)
 
 
-@pytest.mark.parametrize("space", SPACES)
+#: The reference image each space slices; the EM stains are optional data.
+IMAGE_ASSET = {"FAFB14": "fafb_stain", "JRCFIB2018F": "hemibrain_stain",
+               "JRCFIB2022M": "malecns_stain", "GRABE": "grabe2015_stack"}
+
+
+@pytest.mark.parametrize("space", [
+    pytest.param(s, marks=pytest.mark.requires_data(IMAGE_ASSET[s])) for s in SPACES])
 def test_a_slice_axis_moves_image_and_contours_together(monkeypatch, space):
     with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
         menu = switcher(viewer).slice
