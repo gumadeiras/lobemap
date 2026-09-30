@@ -85,6 +85,12 @@ def add_images(viewer, registry, space: str) -> list:
     same micrometer world as the meshes. Getting either wrong yields a
     plausible picture that is simply in the wrong place, which is why the
     stain has its own alignment validator.
+
+    Every layer is added hidden, with the visibility it opens with recorded
+    in its metadata; `show_images` applies it. napari does not slice a
+    hidden layer, so a scene that first moves the plane onto its atlas (2D)
+    or pins the pyramid level (3D) reads the image once, where it ends up,
+    rather than once where napari put the slider and again there.
     """
     layers = []
     for asset in registry.assets_in_space(space):
@@ -99,9 +105,6 @@ def add_images(viewer, registry, space: str) -> list:
             layer = viewer.add_labels(
                 np.asarray(volume.data),
                 name=asset.id,
-                # Off, unlike the images above: this is a segmentation of
-                # the same glomeruli the meshes already draw, so showing
-                # both by default draws each one twice.
                 visible=False,
                 opacity=0.6,
                 **volume.napari_kwargs(),
@@ -110,6 +113,10 @@ def add_images(viewer, registry, space: str) -> list:
                 "kind": "labels",
                 "asset": asset.id,
                 "role": asset.role,
+                # Off, unlike the images below: this is a segmentation of
+                # the same glomeruli the meshes already draw, so showing
+                # both by default draws each one twice.
+                "opens_visible": False,
                 # Written at ingest: voxel value -> the name the matching
                 # mesh carries, which is what lets the two be colored alike.
                 "label_names": {
@@ -125,6 +132,15 @@ def add_images(viewer, registry, space: str) -> list:
             data,
             multiscale=volume.is_multiscale,
             name=asset.id,
+            visible=False,
+            **display_for(asset.role, asset.colormap, asset.display),
+            **volume.napari_kwargs(),
+        )
+        layer.metadata["lobemap"] = {
+            "kind": "image",
+            "asset": asset.id,
+            "role": asset.role,
+            "level_3d": level_for_3d(data) if volume.is_multiscale else 0,
             # Visible if it is here at all. These are backdrops -- the
             # confocal channel, the synapse-density stain -- and a scene
             # reads as incomplete without one. They used to be created
@@ -137,18 +153,17 @@ def add_images(viewer, registry, space: str) -> list:
             # Nothing here is conditional on the asset being built: this
             # loop skips what is not on disk, so an absent stain is an
             # absent layer rather than an invisible one.
-            visible=True,
-            **display_for(asset.role, asset.colormap, asset.display),
-            **volume.napari_kwargs(),
-        )
-        layer.metadata["lobemap"] = {
-            "kind": "image",
-            "asset": asset.id,
-            "role": asset.role,
-            "level_3d": level_for_3d(data) if volume.is_multiscale else 0,
+            "opens_visible": True,
         }
         layers.append(layer)
     return layers
+
+
+def show_images(layers) -> None:
+    """Give each layer from `add_images` the visibility it opens with."""
+    for layer in layers:
+        if layer.metadata.get("lobemap", {}).get("opens_visible"):
+            layer.visible = True
 
 
 __all__ = [
@@ -161,4 +176,5 @@ __all__ = [
     "default_colormap",
     "display_for",
     "level_for_3d",
+    "show_images",
 ]

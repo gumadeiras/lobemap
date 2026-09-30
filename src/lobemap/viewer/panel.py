@@ -573,17 +573,44 @@ class AtlasTab(QWidget):
             self.table.scrollToItem(self.table.item(row, NAME_COL))
 
 
+class _Tabs(dict):
+    """The panel's built tabs by name; asking for one not built yet builds it."""
+
+    def __init__(self, panel) -> None:
+        super().__init__()
+        self._panel = panel
+
+    def __missing__(self, name):
+        tab = self._panel.tab(name)
+        if tab is None:
+            raise KeyError(name)
+        return tab
+
+
 class CompartmentPanel(QTabWidget):
+    """One tab per atlas, then one per neuropil set.
+
+    `names` is every part of the scene in scene order; those without a
+    surface in `surfaces` were left for later (`SceneSession.realize`) and
+    get a tab that builds them when it is first opened, through `realize`.
+    `tabs` holds the built ones, and indexing it builds one on demand.
+    """
+
     def __init__(self, viewer, surfaces: dict, registry=None, contours=None,
-                 space: str | None = None) -> None:
+                 space: str | None = None, names=None, realize=None) -> None:
         super().__init__()
         self.viewer = viewer
-        self.tabs: dict[str, AtlasTab] = {}
+        self.registry = registry
+        self.tabs: dict[str, AtlasTab] = _Tabs(self)
+        #: Tabs not built yet: name -> the placeholder page standing in.
+        self._pages: dict[str, QWidget] = {}
+        self._realize = realize
+        self._three_d: bool | None = None
         contours = contours or {}
         # Read once for the whole panel: every tab joins against the same
         # table, and it is a 62-row csv.
-        annotation = reference.load(registry.root) if registry else {}
-        lines = reference.lines(registry.root) if registry else {}
+        self._annotation = reference.load(registry.root) if registry else {}
+        self._lines = reference.lines(registry.root) if registry else {}
         # Atlases first, reference geometry last. `build_scene` adds the
         # neuropil and brain shells before the atlases so they sit UNDER
         # the glomeruli, but that is a stacking order and this is a reading
@@ -592,24 +619,81 @@ class CompartmentPanel(QTabWidget):
         def is_reference(name: str) -> bool:
             return registry is None or name not in registry.atlases
 
-        for name in sorted(surfaces, key=is_reference):
-            surface = surfaces[name]
-            atlas = registry.atlases.get(name) if registry else None
-            tab = AtlasTab(
-                surface,
-                compartments=atlas.compartments if atlas else None,
-                contour=contours.get(name),
-                annotation=annotation,
-                is_atlas=atlas is not None,
-                lines=lines,
-            )
-            self.tabs[name] = tab
-            self.addTab(tab, name[:20])
+        for name in sorted(list(surfaces) if names is None else names,
+                           key=is_reference):
+            if name in surfaces:
+                tab = self._make_tab(name, surfaces[name], contours.get(name))
+                dict.__setitem__(self.tabs, name, tab)
+                self.addTab(tab, name[:20])
+            else:
+                page = QWidget()
+                self._pages[name] = page
+                self.addTab(page, name[:20])
         self._open_default_tab(registry, space)
+        self.currentChanged.connect(self._on_current)
+        self._on_current(self.currentIndex())
         if viewer is not None:
             self.set_mode(viewer.dims.ndisplay == 3)
 
+    def _make_tab(self, name: str, surface, contour) -> AtlasTab:
+        atlas = self.registry.atlases.get(name) if self.registry else None
+        return AtlasTab(
+            surface,
+            compartments=atlas.compartments if atlas else None,
+            contour=contour,
+            annotation=self._annotation,
+            is_atlas=atlas is not None,
+            lines=self._lines,
+        )
+
+    def tab(self, name: str) -> AtlasTab | None:
+        """The tab of `name`, built now if it was left for later.
+
+        None if there is no such tab, or if building it failed; the failure
+        is then written on the tab, which is where the user looks.
+        """
+        if name in self.tabs:
+            return dict.__getitem__(self.tabs, name)
+        page = self._pages.get(name)
+        if page is None or self._realize is None:
+            return None
+        try:
+            surface, contour = self._realize(name)
+        except Exception as exc:                      # noqa: BLE001
+            if page.layout() is None:
+                layout = QVBoxLayout(page)
+                label = QLabel(f"{name} could not be loaded: {exc}")
+                label.setWordWrap(True)
+                layout.addWidget(label)
+                layout.addStretch(1)
+            return None
+        tab = self._make_tab(name, surface, contour)
+        del self._pages[name]
+        index = self.indexOf(page)
+        current = index == self.currentIndex()
+        blocked = self.blockSignals(True)
+        try:
+            self.removeTab(index)
+            self.insertTab(index, tab, name[:20])
+            if current:
+                self.setCurrentIndex(index)
+        finally:
+            self.blockSignals(blocked)
+        page.deleteLater()
+        dict.__setitem__(self.tabs, name, tab)
+        if self._three_d is not None:
+            tab.set_mode(self._three_d)
+        return tab
+
+    def _on_current(self, index: int) -> None:
+        """Opening a tab not built yet builds it."""
+        page = self.widget(index)
+        name = next((n for n, p in self._pages.items() if p is page), None)
+        if name is not None:
+            self.tab(name)
+
     def set_mode(self, three_d: bool) -> None:
+        self._three_d = three_d
         for tab in self.tabs.values():
             tab.set_mode(three_d)
 

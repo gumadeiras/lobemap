@@ -347,6 +347,7 @@ def _assert_styled(overlay, colors=None) -> None:
 def test_reference_contours_keep_their_color_and_width(registry):
     viewer, session, _primary = _open(registry, "FAFB14")
     try:
+        session.panel.tab("fafb_neuropil")      # built when its tab opens
         shell = session.contours["fafb_neuropil"]
         shell.layer.visible = True
         counts = []

@@ -177,6 +177,8 @@ class AtlasSurface:
         blending: str = "translucent",
         compact_delay_ms: int = 250,
         display_names: list[str] | None = None,
+        shading: str = "smooth",
+        visible: bool = True,
     ) -> None:
         self.viewer = viewer
         self.meshset = meshset
@@ -213,8 +215,17 @@ class AtlasSurface:
             colormap=step_colormap(self.colors, name=f"{name}-colors"),
             contrast_limits=contrast_limits_for(n),
             opacity=opacity,
-            shading="smooth",
+            # Given here rather than set afterwards, so vispy never computes
+            # the vertex normals a shell drawn with "none" does not use: they
+            # are most of the cost of showing a large mesh in 3D, 0.45 s for
+            # the hemibrain neuropils.
+            shading=shading,
             blending=blending,
+            # A scene makes its surfaces hidden and lets `sync` show each in
+            # the mode that draws it: napari slices a visible layer as it is
+            # added, so a surface made visible was sliced for nothing in 2D,
+            # and in 3D had its normals computed twice.
+            visible=visible,
         )
         self.layer.metadata["lobemap"] = {"meshset": meshset, "kind": "atlas"}
         self.layer.events.visible.connect(self._on_eye)

@@ -8,12 +8,15 @@ switch can tear it down again without touching anything else.
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass
+
+import numpy as np
 
 from ..core.registry import Registry
 from .axes import apply_axis_mode
 from .contours import ContourOverlay
 from .contours import install as install_contours
-from .images import add_images
+from .images import add_images, show_images
 from .layers import AtlasSurface, canonical_colors, match_label_colors
 from .request import (
     REFERENCE_ROLES,
@@ -33,6 +36,7 @@ from .view import (
     apply_mirror,
     fit_view,
     install_home_orientation,
+    mirror_center,
 )
 
 #: Distinct flat colors for contour overlays, one per atlas, so two atlases
@@ -90,11 +94,101 @@ def _tag(meshset) -> str:
     return " [" + ", ".join(bits) + "]"
 
 
+@dataclass(frozen=True)
+class ScenePart:
+    """One mesh a space shows: a neuropil or brain shell, or an atlas."""
+
+    #: The scene's key for it: the asset id of a shell, the atlas id.
+    name: str
+    asset: object
+    #: None for reference geometry.
+    atlas: object = None
+
+    @property
+    def reference(self) -> bool:
+        return self.atlas is None
+
+
+def scene_parts(registry: Registry, space: str) -> list[ScenePart]:
+    """Every mesh `space` shows that is on disk, reference geometry first."""
+    parts = [ScenePart(asset.id, asset)
+             for asset in registry.assets_in_space(space)
+             if asset.role in REFERENCE_ROLES and asset.path.exists()]
+    for atlas in registry.atlases_in_space(space):
+        asset = registry.assets.get(atlas.asset)
+        if asset is not None and asset.path.exists():
+            parts.append(ScenePart(atlas.id, asset, atlas))
+    return parts
+
+
+def contour_styles(parts) -> dict[str, tuple[str, float]]:
+    """Each part's contour color and width, by its place in the scene.
+
+    Assigned over every part, built or not, so an atlas built on first use
+    gets the color it would have had.
+    """
+    palette = iter(ATLAS_CONTOUR_COLORS * 4)
+    return {
+        part.name: (REFERENCE_CONTOUR_COLOR, REFERENCE_CONTOUR_WIDTH)
+        if part.reference else (next(palette), 0.35)
+        for part in parts
+    }
+
+
+def make_surface(viewer, registry: Registry, space: str, part: ScenePart) -> AtlasSurface:
+    """The Surface layer of one part, every compartment selected and resident.
+
+    Made hidden: `AtlasSurface.sync` shows it in the mode that draws it.
+    """
+    meshset = registry.mesh(part.asset.id)
+    if part.reference:
+        # Additive, not translucent: a translucent shell writes depth and so
+        # hides the very glomeruli it is meant to give context to.
+        surface = AtlasSurface(
+            viewer, meshset, name=part.asset.id + _tag(meshset), opacity=0.35,
+            blending="additive", shading="none", visible=False,
+        )
+    else:
+        atlas = part.atlas
+        surface = AtlasSurface(
+            viewer, meshset, name=(atlas.title or atlas.id) + _tag(meshset),
+            # The SPACE's vocabulary, not a global one: a glomerulus is
+            # one color across the atlases it can be compared with, which
+            # is exactly the atlases sharing its space.
+            colors=canonical_colors(atlas.compartments, registry.vocabulary(space)),
+            display_names=[c.label for c in atlas.compartments] or None,
+            visible=False,
+        )
+    surface.layer.metadata["lobemap"].update(
+        id=part.name, asset=part.asset.id, role=part.asset.role
+    )
+    return surface
+
+
+def make_contour(viewer, surface: AtlasSurface, style, reference: bool) -> ContourOverlay:
+    """The slice contours of one surface, hidden until its display mode shows them."""
+    color, width = style
+    return ContourOverlay(
+        viewer,
+        surface.meshset,
+        name=surface.name,
+        color=color,
+        width=width,
+        selection=set(surface.selection),
+        # The atlas palette, so an outline and its label match the mesh.
+        # Reference shells stay a single gray: they are context, and
+        # coloring each neuropil would compete with the glomeruli.
+        colors=None if reference else surface.colors,
+        display_names=surface.display_names,
+    )
+
+
 def build_scene(
     viewer,
     registry: Registry,
     space: str,
     into=None,
+    defer: bool = False,
 ) -> tuple[dict[str, AtlasSurface], dict[str, ContourOverlay]]:
     """Add every atlas native to `space`, plus that space's reference meshes.
 
@@ -112,60 +206,56 @@ def build_scene(
 
     `into` is a `SceneSession` to record into as each part is made, so a
     failure part-way leaves it holding everything it must tear down.
+
+    With `defer`, which needs `into`, only the primary atlas is built. The
+    other atlases and the reference shells open unchecked, so nothing of
+    them is drawn, and building their meshes, layers and tables was most of
+    what opening a space cost -- about 0.6 s of the hemibrain's. They are
+    left in `into.pending` for `SceneSession.realize`, which builds each the
+    first time it is needed, and the surfaces and images are left hidden for
+    `load_space` to show once the mode, the plane and the pyramid level are
+    set, so each is read once. Without it, everything is built and shown.
     """
     if space not in registry.spaces:
         raise ViewRequestError(
             f"unknown space {space!r}; known spaces: {', '.join(sorted(registry.spaces))}"
         )
+    if defer and into is None:
+        raise ValueError("defer needs a session to build the rest later")
 
+    parts = scene_parts(registry, space)
+    by_name = {part.name: part for part in parts}
+    styles = contour_styles(parts)
+    primary = registry.primary_atlas(space)
     surfaces: dict[str, AtlasSurface] = {}
+    pending: dict[str, ScenePart] = {}
     if into is not None:
-        into.surfaces = surfaces
+        into.surfaces, into.pending = surfaces, pending
+        into.parts, into.styles = by_name, styles
 
-    def _meta(surface, key, asset) -> None:
-        surface.layer.metadata["lobemap"].update(
-            id=key, asset=asset.id, role=asset.role
-        )
+    def _add(part: ScenePart) -> None:
+        if defer and (primary is None or part.name != primary.id):
+            pending[part.name] = part
+            return
+        try:
+            surfaces[part.name] = make_surface(viewer, registry, space, part)
+        except (FileNotFoundError, KeyError):
+            pass                    # unreadable: left out, as a missing file is
 
     # Reference geometry first, so it sits underneath.
-    for asset in registry.assets_in_space(space):
-        if asset.role not in REFERENCE_ROLES:
-            continue
-        try:
-            meshset = registry.mesh(asset.id)
-        except (FileNotFoundError, KeyError):
-            continue
-        # Additive, not translucent: a translucent shell writes depth and so
-        # hides the very glomeruli it is meant to give context to.
-        surface = AtlasSurface(
-            viewer, meshset, name=asset.id + _tag(meshset), opacity=0.35,
-            blending="additive",
-        )
-        surface.layer.shading = "none"
-        _meta(surface, asset.id, asset)
-        surfaces[asset.id] = surface
+    for part in parts:
+        if part.reference:
+            _add(part)
 
     images = add_images(viewer, registry, space)
     if into is not None:
         into.images = images
 
-    vocabulary = registry.vocabulary(space)
-    for atlas in registry.atlases_in_space(space):
-        try:
-            meshset = registry.mesh(atlas.asset)
-        except (FileNotFoundError, KeyError):
-            continue
-        surfaces[atlas.id] = AtlasSurface(
-            viewer, meshset, name=(atlas.title or atlas.id) + _tag(meshset),
-            # The SPACE's vocabulary, not a global one: a glomerulus is
-            # one color across the atlases it can be compared with, which
-            # is exactly the atlases sharing its space.
-            colors=canonical_colors(atlas.compartments, vocabulary),
-            display_names=[c.label for c in atlas.compartments] or None,
-        )
-        _meta(surfaces[atlas.id], atlas.id, registry.assets[atlas.asset])
+    for part in parts:
+        if not part.reference:
+            _add(part)
 
-    if not surfaces:
+    if not surfaces and not pending:
         raise MissingAssets(space, registry)
 
     # After the atlases, because the colors are read out of their Surface
@@ -178,9 +268,24 @@ def build_scene(
     if into is not None:
         into.contours = contours
     if USE_SLICE_CONTOURS:
-        _add_contours(viewer, registry, surfaces, into=contours)
+        for name, surface in surfaces.items():
+            contours[name] = make_contour(viewer, surface, styles[name],
+                                          by_name[name].reference)
+        # The overlays carry their own event handlers, so a scene switch can
+        # disconnect them without build_scene having to hand them back. The
+        # handlers read the dict itself, so an overlay added to it later is
+        # kept in step too.
+        handlers = install_contours(viewer, contours)
+        for overlay in contours.values():
+            overlay.handlers = handlers
+        if into is not None:
+            into.contour_handlers = handlers
 
     show_primary_atlas(registry, space, surfaces, contours)
+    if not defer:
+        for surface in surfaces.values():
+            surface.sync()
+        show_images(images)
 
     # Anatomical names for the dimension sliders and napari's own axis
     # overlay. No layer of our own: see `viewer/axes.py`. It shows the
@@ -214,33 +319,6 @@ def show_primary_atlas(registry: Registry, space: str, surfaces,
             contours[name].selection = set()
 
 
-def _add_contours(viewer, registry, surfaces, into=None) -> dict[str, ContourOverlay]:
-    """One contour overlay per surface, including the reference geometry."""
-    overlays: dict[str, ContourOverlay] = {} if into is None else into
-    palette = iter(ATLAS_CONTOUR_COLORS * 4)
-    for name, surface in surfaces.items():
-        reference = name in registry.assets
-        overlays[name] = ContourOverlay(
-            viewer,
-            surface.meshset,
-            name=surface.name,
-            color=REFERENCE_CONTOUR_COLOR if reference else next(palette),
-            width=REFERENCE_CONTOUR_WIDTH if reference else 0.35,
-            selection=set(surface.selection),
-            # The atlas palette, so an outline and its label match the mesh.
-            # Reference shells stay a single gray: they are context, and
-            # coloring each neuropil would compete with the glomeruli.
-            colors=None if reference else surface.colors,
-            display_names=surface.display_names,
-        )
-    # The overlays carry their own event handlers, so a scene switch can
-    # disconnect them without build_scene having to hand them back.
-    handlers = install_contours(viewer, overlays)
-    for overlay in overlays.values():
-        overlay.handlers = handlers
-    return overlays
-
-
 class SceneSession:
     """One loaded space, and everything needed to unload it again.
 
@@ -271,12 +349,19 @@ class SceneSession:
         self.handlers: list[tuple] = []
         #: Callbacks added to `viewer.mouse_move_callbacks`.
         self.callbacks: list = []
+        #: Every mesh the space shows, by scene key, built or not.
+        self.parts: dict[str, ScenePart] = {}
+        #: The parts not built yet; see `realize`.
+        self.pending: dict[str, ScenePart] = {}
+        #: Each part's contour color and width.
+        self.styles: dict[str, tuple] = {}
+        #: The contour handlers every overlay shares; see `build_scene`.
+        self.contour_handlers: list[tuple] = []
         #: Display-only left-right reflection. Held per session, so
         #: switching space rebuilds unmirrored and the control re-asserts
         #: itself rather than the state surviving invisibly.
         self.mirrored = False
-        #: The plane it reflects about, measured once while unmirrored.
-        self.mirror_center = 0.0
+        self._mirror_center: float | None = None
         #: The array axis 2D steps along.
         self.slice_axis = DEFAULT_SLICE_AXIS
         #: Whether the camera has been turned onto the anatomy yet. A scene
@@ -295,6 +380,122 @@ class SceneSession:
         """The array axis the scene is shown mirrored along, or None."""
         return MIRROR_AXIS if self.mirrored else None
 
+    @property
+    def mirror_center(self) -> float:
+        """The plane the mirror reflects about: the mid-plane of the scene.
+
+        Every part counts, built or not, so the plane is the same whichever
+        tabs have been opened, and it is where it always was: the meshes by
+        their whole extent -- their vertices, since a Surface carries no
+        transform -- and the images by their layers. Measured while nothing
+        is mirrored, because `extent.world` includes the reflection, and
+        held while the mirror is on.
+
+        Then moved, by less than half a slider step, onto the slider's own
+        half-step lattice. The sliders span only the layers there are, which
+        a deferred part is not yet one of, so they are not symmetric about
+        the plane and reflecting them would shift their grid: napari snaps
+        the plane onto the shifted grid, a fraction of a step off the one
+        the user was on. On the lattice the reflected grid is the same grid.
+        """
+        if self.mirrored and self._mirror_center is not None:
+            return self._mirror_center
+        bounds = []
+        for name, part in self.parts.items():
+            surface = self.surfaces.get(name)
+            if surface is None and name not in self.pending:
+                continue                    # could not be read
+            meshset = surface.meshset if surface is not None else None
+            if meshset is None:
+                # Unreadable leaves it out; its tab says why when opened.
+                with contextlib.suppress(Exception):
+                    meshset = self.registry.mesh(part.asset.id)
+            if meshset is None:
+                continue
+            coord = meshset.vertices[:, MIRROR_AXIS]
+            if len(coord):
+                bounds.append((float(coord.min()), float(coord.max())))
+        center = mirror_center(self.images, bounds=bounds)
+        dims = self.viewer.dims
+        if dims.ndim > MIRROR_AXIS:
+            start, stop, step = dims.range[MIRROR_AXIS]
+            if step > 0 and np.isfinite(start) and np.isfinite(stop):
+                middle, half = (start + stop) / 2.0, step / 2.0
+                center = middle + round((center - middle) / half) * half
+        return center
+
+    def realize(self, name: str):
+        """Build a part `build_scene` deferred; return its surface and contours.
+
+        The first time it is needed -- its tab opened, or `--show` naming it
+        -- and not before. Built as every part used to be at load: all its
+        geometry resident, hidden, nothing selected, so showing it is the
+        cheap alpha change it always was, and its extent is what it was. It
+        gets its contours and their color, the pairing that draws it in the
+        right layer for the mode, the mirror, and its place in the layer
+        stack. The layer selection is left as the user had it. All or
+        nothing: a failure removes whatever was added.
+        """
+        if name in self.surfaces:
+            return self.surfaces[name], self.contours.get(name)
+        part = self.pending[name]
+        layers = self.viewer.layers
+        selected, active = list(layers.selection), layers.selection.active
+        added = []
+        try:
+            surface = make_surface(self.viewer, self.registry, self.space, part)
+            added.append(surface.layer)
+            surface.set_selection(set())
+            contour = None
+            if USE_SLICE_CONTOURS:
+                contour = make_contour(self.viewer, surface, self.styles[name],
+                                       part.reference)
+                added.append(contour.layer)
+                contour.handlers = self.contour_handlers
+                surface.pair(contour)
+            surface.sync()          # nothing selected: both layers off
+            self._stack(surface.layer, self._rank(name))
+            if contour is not None:
+                self._stack(contour.layer, self._rank(name, contour=True))
+            if self.mirrored:
+                apply_mirror(added, True, self.mirror_center)
+                surface.set_mirrored(True)
+        except BaseException:
+            for layer in added:
+                with contextlib.suppress(Exception):
+                    layers.remove(layer)
+            raise
+        del self.pending[name]
+        self.surfaces[name] = surface
+        if contour is not None:
+            self.contours[name] = contour
+        with contextlib.suppress(Exception):
+            layers.selection.clear()
+            layers.selection.update(selected)
+            if active in selected:
+                layers.selection.active = active
+        return surface, contour
+
+    def _rank(self, name: str, contour: bool = False) -> int:
+        """Where a part's layer sits, bottom first, as `build_scene` adds them:
+        shells, images, atlases, then every contour layer."""
+        position = list(self.parts).index(name)
+        if contour:
+            return 30_000 + position
+        return position if self.parts[name].reference else 20_000 + position
+
+    def _stack(self, layer, rank: int) -> None:
+        """Move `layer`, just added on top, under this scene's layers ranked above it."""
+        ranks = {id(image): 10_000 + i for i, image in enumerate(self.images)}
+        for key, surface in self.surfaces.items():
+            ranks[id(surface.layer)] = self._rank(key)
+        for key, overlay in self.contours.items():
+            ranks[id(overlay.layer)] = self._rank(key, contour=True)
+        layers = self.viewer.layers
+        above = [i for i, other in enumerate(layers) if ranks.get(id(other), -1) > rank]
+        if above:
+            layers.move(layers.index(layer), min(above))
+
     def set_mirror(self, on: bool) -> None:
         """Show the space reflected, or stop.
 
@@ -303,6 +504,8 @@ class SceneSession:
         mirrored data would name the wrong side, which is the single
         error this project has had to correct most often.
         """
+        if on and not self.mirrored:
+            self._mirror_center = self.mirror_center
         self.mirrored = bool(on)
         apply_mirror(self.all_layers(), self.mirrored, self.mirror_center)
         # The reflection reverses every triangle's orientation, so the
@@ -383,7 +586,8 @@ class SceneSession:
     def show(self, names) -> None:
         """Turn on what `--show` names: every compartment of a mesh, or a layer.
 
-        Through the panel, so the table says what is drawn.
+        Through the panel, so the table says what is drawn; a part not built
+        yet is built for it.
         """
         targets = show_targets(self.registry, self.space)
         wanted: set[str] = set()
@@ -391,14 +595,17 @@ class SceneSession:
             if name not in targets:
                 raise ViewRequestError(f"--show {name!r} names nothing in {self.space}")
             wanted |= targets[name]
-        for key, surface in self.surfaces.items():
-            if surface.layer.metadata["lobemap"].get("asset") not in wanted:
+        for key, part in self.parts.items():
+            if part.asset.id not in wanted:
                 continue
-            tab = self.panel.tabs.get(key) if self.panel is not None else None
-            if tab is not None:
-                tab.select(range(surface.meshset.n_compartments))
+            if key not in self.surfaces and key not in self.pending:
+                continue                    # could not be read
+            if self.panel is not None:
+                tab = self.panel.tab(key)
+                if tab is not None:
+                    tab.select(range(tab.surface.meshset.n_compartments))
             else:
-                surface.show_all()
+                self.realize(key)[0].show_all()
         for layer in self.images:
             if layer.metadata.get("lobemap", {}).get("asset") in wanted:
                 layer.visible = True
@@ -485,6 +692,7 @@ class SceneSession:
                 self.dock.deleteLater()
         self.dock = self.panel = None
         self.surfaces, self.contours, self.images = {}, {}, []
+        self.pending = {}
 
 
 __all__ = [
@@ -492,7 +700,12 @@ __all__ = [
     "REFERENCE_CONTOUR_COLOR",
     "REFERENCE_CONTOUR_WIDTH",
     "USE_SLICE_CONTOURS",
+    "ScenePart",
     "SceneSession",
     "build_scene",
+    "contour_styles",
+    "make_contour",
+    "make_surface",
+    "scene_parts",
     "show_primary_atlas",
 ]

@@ -20,6 +20,7 @@ from .images import (
     default_colormap,
     display_for,
     level_for_3d,
+    show_images,
 )
 from .request import (
     REFERENCE_ROLES,
@@ -42,7 +43,6 @@ from .view import (
     install_home_orientation,
     install_initial_fit,
     maximize,
-    mirror_center,
     orient_anterior,
 )
 
@@ -153,17 +153,20 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
     napari rounds each shape's slice position to a whole number and compares
     it with the unrounded plane, so off a whole-micrometer plane it found no
     shape at all. Drags are skipped: they rotate or pan the view.
+
+    The dicts are read on every move, so a part the session builds later
+    (`SceneSession.realize`) is picked too.
     """
-    order = sorted(
-        surfaces,
-        key=lambda n: surfaces[n].layer.metadata.get("lobemap", {}).get("role")
-        in REFERENCE_ROLES,
-    )
 
     def _on_move(_viewer, event):
         if getattr(event, "buttons", None):
             return          # a drag: rotating or panning, not pointing
         three_d = viewer.dims.ndisplay == 3
+        order = sorted(
+            surfaces,
+            key=lambda n: surfaces[n].layer.metadata.get("lobemap", {}).get("role")
+            in REFERENCE_ROLES,
+        )
         for name in order:
             surface = surfaces[name]
             overlay = contours.get(name)
@@ -213,16 +216,22 @@ def load_space(
     behind to be driven by the next one. A scene already in the viewer is
     left in place: the switcher builds the next scene beside it and tears it
     down only once that build has succeeded.
+
+    Only the primary atlas is built; the rest of the scene is built the
+    first time it is needed (`SceneSession.realize`), and the images are
+    shown once the plane and the 3D pyramid level are set, so each is read
+    once. See `build_scene`.
     """
     session = SceneSession(viewer, registry, space)
     try:
-        build_scene(viewer, registry, space, into=session)
+        build_scene(viewer, registry, space, into=session, defer=True)
 
         from .panel import CompartmentPanel
 
         session.panel = CompartmentPanel(
             viewer, session.surfaces, registry=registry,
             contours=session.contours, space=space,
+            names=list(session.parts), realize=session.realize,
         )
         session.dock = viewer.window.add_dock_widget(
             session.panel, area="right", name="Compartments"
@@ -230,14 +239,11 @@ def load_space(
         session.callbacks += install_picking(
             viewer, session.surfaces, session.contours, panel=session.panel
         )
-        # Before any mirror is applied, so the plane is the data's own.
-        session.mirror_center = mirror_center(
-            [s.layer for s in session.surfaces.values()] + list(session.images)
-        )
         session.handlers += install_display_mode(
             viewer, session.surfaces, session.contours, session.images,
             session=session,
         )
+        show_images(session.images)
         if show:
             session.show(show)
         install_home_orientation(viewer, registry.spaces[space],

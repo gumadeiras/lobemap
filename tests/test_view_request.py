@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import pytest
 from viewer_harness import (
+    checked,
     data_root,
     dead_network,
     drawn,
     launched,
+    layer_names,
     pump,
     session,
     switch_to,
@@ -95,8 +97,12 @@ def test_show_applies_to_the_first_scene_only(monkeypatch):
         sess = session(viewer)
         assert sess.space == "FAFB14"
         # FAFB14 again, but chosen in the menu: its own defaults, shell off.
-        assert sess.surfaces["fafb_neuropil"].selection == set()
-        assert not sess.surfaces["fafb_neuropil"].layer.visible
+        # Not even built until its tab opens, and unchecked when it is.
+        assert not any(name.startswith("fafb_neuropil") for name in layer_names(viewer))
+        tab = sess.panel.tabs["fafb_neuropil"]
+        assert checked(tab) == set()
+        assert not tab.surface.layer.visible
+        assert not sess.contours["fafb_neuropil"].layer.visible
 
 
 def test_missing_data_is_reported_before_a_window(monkeypatch, capsys, tmp_path):

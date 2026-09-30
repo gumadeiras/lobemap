@@ -108,6 +108,7 @@ def test_a_bridged_asset_says_so_in_its_layer_name(monkeypatch):
     """`_tag` existed and was never called, so the tag went missing."""
     with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
         assert code == 0
+        session(viewer).panel.tab("fafb_neuropil")   # built when its tab opens
         names = layer_names(viewer)
         assert "fafb_neuropil [bridged]" in names, names
         assert "fafb_neuropil [bridged] [contours]" in names, names
