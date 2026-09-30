@@ -149,6 +149,34 @@ def test_the_layer_list_eye_is_a_selection_change(monkeypatch):
             assert_rows_match_drawing(sess)
 
 
+def test_the_eye_of_the_layer_the_mode_does_not_draw_means_the_atlas(monkeypatch):
+    """The mesh eye in 2D, or the contour eye in 3D, shows the atlas where
+    the mode draws it. It was ignored, and a hidden atlas's mesh drew
+    across the slice with no row checked."""
+    with launched(monkeypatch, "view", "JRCFIB2018F") as (code, viewer):
+        sess = session(viewer)
+        tab = sess.panel.tabs["schlegel2021_s12"]      # a hidden secondary atlas
+        for ndisplay in (2, 3):
+            viewer.dims.ndisplay = ndisplay
+            pump(300)
+            drawing = mode_layer(tab.surface, tab.contour)
+            other = tab.contour.layer if drawing is tab.surface.layer else tab.surface.layer
+            _buttons(tab)["Show none"].click()
+            pump(300)
+            assert checked(tab) == set()
+            other.visible = True                      # the user's click on that eye
+            pump(300)
+            assert checked(tab) == set(range(tab.table.rowCount()))
+            assert not other.visible
+            assert_rows_match_drawing(sess)
+            _tick(tab, 0, False)                      # a partial selection is kept
+            kept = set(tab.surface.selection)
+            other.visible = True
+            pump(300)
+            assert set(tab.surface.selection) == kept and not other.visible
+            assert_rows_match_drawing(sess)
+
+
 @pytest.mark.parametrize("space", SPACES)
 def test_a_row_toggle_takes_under_10_ms(monkeypatch, space):
     """PERF-3: the synchronous part of one checkbox toggle, in 3D.

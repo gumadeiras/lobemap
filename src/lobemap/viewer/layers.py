@@ -349,9 +349,22 @@ class AtlasSurface:
             return
         layer = self.mode_layer()
         source = getattr(event, "source", layer)
-        if source is not layer or layer.visible == bool(self.selection):
+        if source is not layer:
+            # The eye of the layer this mode does not draw -- the mesh in 2D,
+            # the contours in 3D -- still means this atlas. Turned on, it
+            # shows the atlas where the mode draws it and goes back off;
+            # ignored, it drew the whole mesh over a slice with no row checked.
+            if not source.visible:
+                return
+            if self.selection:
+                self.sync()
+                return
+            showing = True
+        elif layer.visible == bool(self.selection):
             return
-        if layer.visible:
+        else:
+            showing = layer.visible
+        if showing:
             restored = self._stashed or set(range(self.meshset.n_compartments))
             self.selection, self._stashed = set(restored), None
         else:
