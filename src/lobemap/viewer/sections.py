@@ -42,7 +42,9 @@ class MeshSections:
 
     This does the whole atlas at once, in array operations:
 
-    - Faces are culled by their extent along the sliced axis, kept per axis.
+    - Only the compartments whose bounds hold the plane are looked at, and
+      their faces are culled by their extent along the sliced axis, kept
+      per axis.
     - Each remaining face is classified exactly as trimesh classifies it --
       two vertices on one side and one on the other, a vertex on the plane
       between the other two, or an edge on the plane -- and yields the same
@@ -51,7 +53,10 @@ class MeshSections:
       its neighbors by THAT identity, not by rounding coordinates. Two faces
       sharing an edge therefore share the point exactly. On a closed
       manifold every such point has two segments, and walking them gives
-      each loop directly.
+      each loop directly: every compartment's in one graph search
+      (`_loops`), and every loop's too-close points dropped in one pass
+      (`_drawable`). Done per compartment, in Python, those two were most
+      of a plane's time.
 
     A compartment whose segments are not a set of simple loops -- an open
     or non-manifold mesh -- is handed to `trimesh` for that plane instead,
@@ -115,12 +120,20 @@ class MeshSections:
 
     def _compute(self, axis: int, p: float) -> dict[int, list[np.ndarray]]:
         fmin, fmax, lo, hi = self._extent(axis)
-        near = np.flatnonzero((fmin <= p + ON_PLANE_TOL) & (fmax >= p - ON_PLANE_TOL))
-        owner = np.searchsorted(self._offsets, near, side="right") - 1
         # A compartment is sectioned only when the plane is inside its
-        # bounds, as `contours_at` always required.
-        inside = (lo[owner] <= p) & (p <= hi[owner])
-        near, owner = near[inside], owner[inside]
+        # bounds, as `contours_at` always required, so only its faces are
+        # looked at: a plane crosses a fraction of an atlas.
+        offsets = self._offsets
+        near, owner = [], []
+        for index in np.flatnonzero((lo <= p) & (p <= hi)).tolist():
+            a, b = offsets[index], offsets[index + 1]
+            hit = np.flatnonzero((fmin[a:b] <= p + ON_PLANE_TOL)
+                                 & (fmax[a:b] >= p - ON_PLANE_TOL))
+            near.append(hit + a)
+            owner.append(np.full(len(hit), index))
+        if not near:
+            return {}
+        near, owner = np.concatenate(near), np.concatenate(owner)
         if not len(near):
             return {}
         vertices = self.meshset.vertices
@@ -168,20 +181,25 @@ class MeshSections:
         rows = np.concatenate(rows)
         keys, nodes = np.unique(np.concatenate(ends).ravel(), return_inverse=True)
         points = _node_points(vertices, keys, axis, p, n)
-        owners = owner[rows]
-        segments = nodes.reshape(-1, 2)
-
+        walk, lengths, loop_owners, handed_back = _loops(
+            nodes.reshape(-1, 2), owner[rows], len(keys))
+        rings, closed = points[walk], np.ones(len(lengths), dtype=bool)
+        if len(handed_back):
+            # Their loops join the others, so the whole plane is cleaned at
+            # once and each compartment keeps its place in the order.
+            extra = [(index, loop) for index in handed_back.tolist()
+                     for loop in self._trimesh_section(index, axis, p)]
+            shut = np.array([len(loop) > 1 and np.array_equal(loop[0], loop[-1])
+                             for _index, loop in extra], dtype=bool)
+            rings = np.vstack([rings] + [loop[:-1] if c else loop
+                                         for (_i, loop), c in zip(extra, shut, strict=True)])
+            lengths = np.concatenate((lengths, [len(loop) - c for (_i, loop), c
+                                                in zip(extra, shut, strict=True)]))
+            loop_owners = np.concatenate((loop_owners, [i for i, _loop in extra]))
+            closed = np.concatenate((closed, shut))
         out: dict[int, list[np.ndarray]] = {}
-        order = np.argsort(owners, kind="stable")
-        cuts = np.flatnonzero(np.diff(owners[order])) + 1
-        for group in np.split(order, cuts):
-            owner = int(owners[group[0]])
-            loops = _loops(segments[group], points)
-            if loops is None:
-                loops = self._trimesh_section(owner, axis, p)
-            loops = [kept for kept in map(_drawable, loops) if kept is not None]
-            if loops:
-                out[owner] = loops
+        for index, loop in _drawable(rings, lengths, closed, loop_owners):
+            out.setdefault(index, []).append(loop)
         return out
 
     def _trimesh_section(self, index: int, axis: int, p: float) -> list[np.ndarray]:
@@ -244,10 +262,16 @@ def _node_points(vertices, keys, axis: int, p: float, n: int) -> np.ndarray:
     return points
 
 
-def _drawable(loop: np.ndarray) -> np.ndarray | None:
-    """A loop without the points no one can tell apart, or None.
+def _drawable(rings: np.ndarray, lengths: np.ndarray, closed: np.ndarray,
+              owners: np.ndarray) -> list[tuple[int, np.ndarray]]:
+    """(compartment, loop) for each loop left after dropping the points no one
+    can tell apart, in compartment order.
 
-    Two kinds go:
+    `rings` holds every loop's points end to end, `lengths` how many each
+    has, without the repeated first point of a `closed` one. Each loop
+    comes back as a polyline, closed ones repeating their first point.
+
+    Two kinds of point go:
 
     - Points within MIN_EDGE_UM of the point kept before them. GRABE's
       slider steps fall on its vertex grid, so a vertex a hair off the plane
@@ -261,75 +285,124 @@ def _drawable(loop: np.ndarray) -> np.ndarray | None:
       `KeyError: (0, 0)`.
 
     Every point dropped is within MIN_EDGE_UM of one kept. A loop left with
-    fewer than three points, too small to see, is dropped with them.
+    fewer than three points, too small to see, is dropped with them. Every
+    rule that looks back to an earlier point stops at a loop's first point,
+    which is always kept, so all loops are cleaned at once.
     """
-    closed = len(loop) > 1 and np.array_equal(loop[0], loop[-1])
-    ring = loop[:-1] if closed else loop
-    if len(ring) < 3:
-        return None
-    keep = np.ones(len(ring), dtype=bool)
-    keep[1:] = np.linalg.norm(np.diff(ring, axis=0), axis=1) >= MIN_EDGE_UM
+    if not len(lengths):
+        return []
+    starts = np.concatenate(([0], np.cumsum(lengths)[:-1])).astype(int)
+    which = np.repeat(np.arange(len(lengths)), lengths)
+    first = np.zeros(len(rings), dtype=bool)
+    first[starts[lengths > 0]] = True
+
+    keep = first.copy()
+    keep[1:] |= np.linalg.norm(np.diff(rings, axis=0), axis=1) >= MIN_EDGE_UM
     if not keep.all():
         # A run of short edges can wander; keep whatever strays from the
         # point that heads the run.
-        head = np.maximum.accumulate(np.where(keep, np.arange(len(ring)), 0))
-        keep |= np.linalg.norm(ring - ring[head], axis=1) >= MIN_EDGE_UM
+        head = np.maximum.accumulate(np.where(keep, np.arange(len(rings)), 0))
+        keep |= np.linalg.norm(rings - rings[head], axis=1) >= MIN_EDGE_UM
     kept = np.flatnonzero(keep)
-    f32 = ring[kept].astype(np.float32)
-    distinct = np.ones(len(kept), dtype=bool)
-    distinct[1:] = np.any(f32[1:] != f32[:-1], axis=1)
+    f32 = rings[kept].astype(np.float32)
+    distinct = first[kept]
+    distinct[1:] |= np.any(f32[1:] != f32[:-1], axis=1)
     kept, f32 = kept[distinct], f32[distinct]
-    while closed and len(kept) > 1 and (
-        np.array_equal(f32[-1], f32[0])
-        or np.linalg.norm(ring[kept[-1]] - ring[0]) < MIN_EDGE_UM
-    ):
-        kept, f32 = kept[:-1], f32[:-1]
-    if len(kept) < 3:
-        return None
-    if len(kept) == len(ring):
-        return loop
-    out = ring[kept]
-    return np.vstack((out, out[:1])) if closed else out
+    # A closed loop also loses the points at its end that come back to its
+    # first, but never the first itself.
+    of = which[kept]
+    # Each loop's kept points are one run, headed by its first point, so
+    # the end is trimmed a point at a time, every loop at once.
+    begin = np.searchsorted(kept, starts)
+    count = np.bincount(of, minlength=len(lengths))
+    while True:
+        end = begin + count - 1
+        trim = closed & (count > 1)
+        at = end[trim]
+        trim[trim] = np.all(f32[at] == f32[begin[trim]], axis=1) | (
+            np.linalg.norm(rings[kept[at]] - rings[kept[begin[trim]]], axis=1) < MIN_EDGE_UM)
+        if not trim.any():
+            break
+        count[trim] -= 1
+    kept = kept[np.arange(len(kept)) - begin[of] < count[of]]
+    shown = (lengths >= 3) & (count >= 3)
+
+    # Every loop kept, in compartment order, each closed one ending on its
+    # first point again: one gather, cut into loops.
+    order = np.flatnonzero(shown)
+    order = order[np.argsort(owners[order], kind="stable")]
+    size = count[order] + closed[order]
+    begin = np.concatenate(([0], np.cumsum(count)[:-1]))[order]
+    at = np.concatenate(([0], np.cumsum(size)))
+    index = np.empty(at[-1], dtype=int)
+    step = np.arange(at[-1]) - np.repeat(at[:-1], size)
+    index[:] = kept[np.repeat(begin, size) + np.minimum(step, np.repeat(count[order], size) - 1)]
+    end = at[1:] - 1
+    index[end[closed[order]]] = kept[begin[closed[order]]]
+    loops = np.split(rings[index], at[1:-1])
+    return list(zip(owners[order].tolist(), loops, strict=True))
 
 
-def _loops(segments: np.ndarray, points: np.ndarray) -> list[np.ndarray] | None:
-    """Closed polylines from segments that form simple loops, else None.
+def _loops(segments: np.ndarray, owners: np.ndarray, k: int):
+    """Every simple loop the segments form, all compartments at once.
 
-    Simple loops means every point ends exactly two distinct segments. Each
-    polyline repeats its first point at the end, as trimesh's closed ones do.
+    `segments` join points 0..k-1; `owners` is each segment's compartment.
+    Returns (the points of every loop end to end, how many each has, the
+    compartment of each, the compartments whose segments are not simple
+    loops). Simple loops means every point ends exactly two distinct
+    segments.
+
+    Compartments share no mesh vertex or edge, so no point is shared
+    between two of them either, and every loop is walked in one graph. Each
+    point's two neighbors are its segments' other ends, in segment order; a
+    loop starts at its point that comes first in key order and goes to that
+    point's first neighbor. The walk is a depth-first search from one extra
+    node joined to each loop's start, which on a loop visits its points in
+    order.
     """
-    ids, local = np.unique(segments.ravel(), return_inverse=True)
-    local = local.reshape(-1, 2)
-    k = len(ids)
-    if np.any(local[:, 0] == local[:, 1]):
-        return None
-    if np.any(np.bincount(local.ravel(), minlength=k) != 2):
-        return None
-    ordered = np.sort(local, axis=1)
-    if len(np.unique(ordered[:, 0] * k + ordered[:, 1])) != len(ordered):
-        return None
-    # Each point's two neighbors, found by sorting the segment ends.
-    flat = local.ravel()
-    neighbor = local[:, ::-1].ravel()[np.argsort(flat, kind="stable")].reshape(k, 2)
-    first, second = neighbor[:, 0].tolist(), neighbor[:, 1].tolist()
-    seen = bytearray(k)
-    loops = []
-    for start in range(k):
-        if seen[start]:
-            continue
-        walk = [start]
-        seen[start] = 1
-        prev, cur = start, first[start]
-        while cur != start:
-            walk.append(cur)
-            seen[cur] = 1
-            nxt = first[cur]
-            if nxt == prev:
-                nxt = second[cur]
-            prev, cur = cur, nxt
-        walk.append(start)
-        loops.append(points[ids[walk]])
-    return loops
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import connected_components, depth_first_order
+
+    ends = segments.ravel()
+    bad = (segments[:, 0] == segments[:, 1]) | np.any(
+        np.bincount(ends, minlength=k)[segments] != 2, axis=1)
+    handed_back = np.unique(owners[bad])
+    if len(handed_back):
+        return _without(segments, owners, handed_back)
+    if not k:
+        return np.empty(0, int), np.empty(0, int), np.empty(0, int), handed_back
+    neighbor = segments[:, ::-1].ravel()[np.argsort(ends, kind="stable")]
+    node_owner = np.empty(k, dtype=int)
+    node_owner[segments] = owners[:, None]
+    # Two segments joining the same two points: that point's neighbors are
+    # one point twice. Not a simple loop either.
+    twice = neighbor[0::2] == neighbor[1::2]
+    if twice.any():
+        return _without(segments, owners, np.unique(node_owner[twice]))
+
+    ring_graph = csr_matrix((np.ones(2 * k), neighbor, np.arange(0, 2 * k + 1, 2)),
+                            shape=(k, k))
+    _n, label = connected_components(ring_graph, directed=False)
+    _labels, head = np.unique(label, return_index=True)
+    head = head[np.lexsort((head, node_owner[head]))]
+    graph = csr_matrix(
+        (np.ones(2 * k + len(head)), np.concatenate((neighbor, head)),
+         np.concatenate((np.arange(0, 2 * k + 1, 2), [2 * k + len(head)]))),
+        shape=(k + 1, k + 1))
+    walk = depth_first_order(graph, k, directed=True, return_predecessors=False)[1:]
+    is_head = np.zeros(k, dtype=bool)
+    is_head[head] = True
+    starts = np.flatnonzero(is_head[walk])
+    lengths = np.diff(np.append(starts, len(walk)))
+    return walk, lengths, node_owner[walk[starts]], handed_back
+
+
+def _without(segments: np.ndarray, owners: np.ndarray, dropped: np.ndarray):
+    """`_loops` of every compartment but `dropped`, which it hands back."""
+    keep = ~np.isin(owners, dropped)
+    ids, local = np.unique(segments[keep].ravel(), return_inverse=True)
+    walk, lengths, loop_owners, more = _loops(local.reshape(-1, 2), owners[keep], len(ids))
+    return ids[walk], lengths, loop_owners, np.union1d(dropped, more)
 
 
 __all__ = ["MIN_EDGE_UM", "ON_PLANE_TOL", "SECTION_CACHE_PLANES", "MeshSections"]

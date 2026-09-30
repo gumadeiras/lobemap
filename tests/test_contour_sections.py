@@ -236,6 +236,39 @@ def test_a_mesh_with_loose_ends_is_left_to_trimesh():
     np.testing.assert_array_equal(got[0][0], want[0][0])
 
 
+def test_a_doubled_face_is_left_to_trimesh(monkeypatch):
+    """A face listed twice cuts one segment twice: two points joined twice.
+
+    Every point still ends two segments, so only the pairing shows it is
+    not a simple loop, and the compartment goes to trimesh like any other
+    that is not. Its sphere, and the separate box, are still drawn.
+    """
+    import trimesh
+
+    from lobemap.viewer import sections
+
+    sphere = trimesh.creation.icosphere(subdivisions=2, radius=1.0)
+    sheet = trimesh.Trimesh([[5, 0, -1], [6, 0, 1], [5, 1, 1]], [[0, 1, 2], [0, 2, 1]],
+                            process=False)
+    box = trimesh.creation.box(extents=(2.0, 2.0, 2.0))
+    box.apply_translation((0.0, 10.0, 0.0))
+    meshset = MeshSet.from_parts(_parts(("sheeted", trimesh.util.concatenate([sphere, sheet])),
+                                        ("box", box)))
+    handed = []
+    real = sections.MeshSections._trimesh_section
+
+    def spy(self, index, axis, p):
+        handed.append(index)
+        return real(self, index, axis, p)
+
+    monkeypatch.setattr(sections.MeshSections, "_trimesh_section", spy)
+    got = MeshSections(meshset).at(2, 0.25)
+    assert handed == [0]
+    assert_same_sections(meshset, 2, 0.25, got, trimesh_sections(meshset, 2, 0.25),
+                         TOL_UM, "doubled face")
+    assert set(got) == {0, 1}
+
+
 @pytest.mark.parametrize("asset", [
     pytest.param(a, marks=pytest.mark.requires_data(a)) for a in MESH_ASSETS])
 def test_sections_match_trimesh_on_every_shipped_mesh(registry, asset):
