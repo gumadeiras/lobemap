@@ -202,11 +202,6 @@ def test_home_faces_the_mirrored_anatomy(monkeypatch):
         assert float(np.dot(up, frame["D"] * reflect)) > 0.999, up
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "needs stream D: ContourOverlay.slice_position must map the slider's "
-    "world point through the layer's affine; under the mirror a slice along "
-    "x cuts the meshes at the world x while the image shows 2c - x"
-))
 def test_mirrored_contours_follow_a_slice_along_the_mirror_axis(monkeypatch):
     with launched(monkeypatch, "view", "GRABE", "--ndisplay", "2") as (code, viewer):
         menu = switcher(viewer).slice

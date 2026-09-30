@@ -75,11 +75,20 @@ def launched(monkeypatch, *argv):
 
 
 def dead_network(monkeypatch) -> None:
-    """Route every download to a closed port, so nothing leaves the host."""
-    for name in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"):
-        monkeypatch.setenv(name, "http://127.0.0.1:9")
-    for name in ("no_proxy", "NO_PROXY"):
-        monkeypatch.delenv(name, raising=False)
+    """Make every download fail as a refused connection, so nothing leaves the host.
+
+    Patched at `urlopen` rather than through proxy variables: urllib builds
+    its default opener once per process, from the environment at the first
+    download, so a proxy set here had no effect after any earlier test had
+    downloaded.
+    """
+    import urllib.error
+    import urllib.request
+
+    def refuse(url, *args, **kwargs):
+        raise urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
 
 
 def switcher(viewer):
