@@ -6,6 +6,9 @@ the display defaults each role needs and the pyramid level 3D pins.
 
 from __future__ import annotations
 
+import warnings
+import weakref
+
 import numpy as np
 
 #: Per-role display defaults for image layers.
@@ -74,6 +77,183 @@ def level_for_3d(levels, max_voxels=VIEW3D_MAX_VOXELS, max_axis=VIEW3D_MAX_AXIS)
     return len(levels) - 1
 
 
+#: A pinned 3D level larger than this is read in the background, and the
+#: finest level within it is shown until it arrives. The pinned levels of
+#: the EM stains hold 254-612 M voxels and take 0.4-1.0 s to read -- most of
+#: what opening one of them in 3D cost -- while their next levels, 32-76 M,
+#: take about 0.1 s.
+VIEW3D_WAIT_VOXELS = 100_000_000
+
+
+def coarse_level_for_3d(levels, level: int, max_voxels=VIEW3D_WAIT_VOXELS) -> int:
+    """The level 3D shows while `level` is read: the finest within `max_voxels`.
+
+    `level` itself when it is that small already.
+    """
+    for i in range(level, len(levels)):
+        if np.prod(tuple(levels[i].shape), dtype=np.int64) <= max_voxels:
+            return i
+    return len(levels) - 1
+
+
+class FineLevel:
+    """The pyramid level an image is pinned to in 3D, read off the UI thread.
+
+    napari reads a pinned level whole, on the UI thread, through dask: the
+    finest one that fits a texture is a 0.4-1.0 s stall in the EM spaces,
+    on every entry into 3D. So 3D is first pinned to a coarser level, the
+    fine one is read in a thread straight from the store -- half the time
+    of the chunk-by-chunk dask read -- and swapped in when it arrives.
+    Both are kept for the layer's life, so the next entry into 3D pins the
+    fine one at once; the price is their memory, 0.3-0.7 GB, which 3D held
+    anyway. While the fine one is read, the UI thread shares the store's
+    event loop and the interpreter with it, so it runs slower, not stalled.
+
+    A daemon thread, polled from the UI thread, rather than a Qt worker:
+    the thread only stores its result, so no Qt object is touched off the
+    UI thread, and a read still running when the process exits is dropped.
+    A Qt pool worker is waited for when the application object is
+    destroyed, which happens with the interpreter lock held, and a worker
+    needing that lock to finish hung the process at exit.
+    """
+
+    #: How often the UI thread looks for the result, in milliseconds.
+    POLL_MS = 30
+
+    def __init__(self, layer, level: int, coarse: int, sources) -> None:
+        self._layer = weakref.ref(layer)
+        self.level = level
+        self.coarse = coarse
+        #: The store's own arrays, one per level.
+        self._sources = sources
+        #: The level's voxels, once read and swapped in.
+        self.array = None
+        self._coarse_in = False
+        self._thread = None
+        self._result = None
+        self._timer = None
+        self._three_d = False
+        self._stopped = False
+
+    def pin(self, three_d: bool) -> None:
+        """Pin the level 3D renders, reading the fine one if it is not in yet."""
+        layer = self._layer()
+        if layer is None:
+            return
+        self._three_d = three_d
+        if not three_d:
+            layer.locked_data_level = None
+            return
+        if self.array is not None or self._stopped:
+            layer.locked_data_level = self.level
+            return
+        if not self._coarse_in:
+            # The coarse level is read now, and also straight from the
+            # store: 0.1 s, against 0.3 s through dask.
+            self._coarse_in = True
+            self._swap_in(layer, self.coarse, np.asarray(self._sources[self.coarse][...]))
+        layer.locked_data_level = self.coarse
+        if self._thread is None:
+            self._start()
+
+    @staticmethod
+    def _swap_in(layer, level: int, array) -> None:
+        """Hand napari the voxels of one level from memory. Releases the lock.
+
+        As the numpy array itself, not wrapped in dask: napari slices it as
+        views, while dask hashed all of it for a name and then copied it
+        twice, 0.5 s of the UI thread for the male CNS level. Unlike a store
+        read eagerly, an array already in memory costs nothing to slice.
+        """
+        levels = list(layer.data)
+        levels[level] = array
+        layer.data = levels
+
+    def _start(self) -> None:
+        import threading
+
+        from qtpy.QtCore import QTimer
+
+        source = self._sources[self.level]
+
+        def read() -> None:
+            try:
+                self._result = ("ok", np.asarray(source[...]))
+            except Exception as exc:              # noqa: BLE001 - reported below
+                self._result = ("failed", exc)
+
+        self._thread = threading.Thread(target=read, name="lobemap-3d-level",
+                                        daemon=True)
+        self._timer = QTimer()
+        self._timer.setInterval(self.POLL_MS)
+        self._timer.timeout.connect(self._poll)
+        self._thread.start()
+        self._timer.start()
+
+    def stop(self) -> None:
+        """Drop a read still running, for a scene being torn down."""
+        self._stopped = True
+        if self._timer is not None:
+            self._timer.stop()
+
+    def _poll(self) -> None:
+        result = self._result
+        if result is None:
+            return
+        self._timer.stop()
+        self._result = None
+        layer = self._layer()
+        if layer is None or self._stopped:
+            return
+        status, value = result
+        if status != "ok":
+            # Pin the fine level after all, the way it always was pinned.
+            self._stopped = True
+            if self._three_d:
+                layer.locked_data_level = self.level
+            return
+        try:
+            self._swap_in(layer, self.level, value)
+            if self._three_d:
+                layer.locked_data_level = self.level
+        except Exception as exc:                  # noqa: BLE001 - a timer slot
+            # A layer whose viewer has gone; never worth a crash.
+            self._stopped = True
+            warnings.warn(f"3D level not swapped in: {exc!r}", RuntimeWarning,
+                          stacklevel=1)
+            return
+        self.array = value
+
+
+#: Each multiscale image layer's `FineLevel`, if its 3D level is read late.
+_FINE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def pin_level(layer, three_d: bool) -> None:
+    """Pin an image's pyramid in 3D, or release it for zoom-driven 2D.
+
+    napari's own choice in 3D is the coarsest level; `level_for_3d` picks
+    the finest one that fits a texture, and a large one is read in the
+    background (`FineLevel`). Labels carry no pyramid and are left alone.
+    """
+    info = layer.metadata.get("lobemap", {})
+    if "level_3d" not in info:
+        return
+    fine = _FINE.get(layer)
+    if fine is not None:
+        fine.pin(three_d)
+    else:
+        layer.locked_data_level = info["level_3d"] if three_d else None
+
+
+def stop_levels(layers) -> None:
+    """Drop any background level read of these layers."""
+    for layer in layers:
+        fine = _FINE.get(layer)
+        if fine is not None:
+            fine.stop()
+
+
 def default_colormap(role: str) -> str:
     return ROLE_COLORMAP.get(role, DEFAULT_COLORMAP)
 
@@ -136,11 +316,16 @@ def add_images(viewer, registry, space: str) -> list:
             **display_for(asset.role, asset.colormap, asset.display),
             **volume.napari_kwargs(),
         )
+        level = level_for_3d(data) if volume.is_multiscale else 0
+        if volume.is_multiscale:
+            coarse = coarse_level_for_3d(data, level)
+            if coarse != level:
+                _FINE[layer] = FineLevel(layer, level, coarse, volume.levels)
         layer.metadata["lobemap"] = {
             "kind": "image",
             "asset": asset.id,
             "role": asset.role,
-            "level_3d": level_for_3d(data) if volume.is_multiscale else 0,
+            "level_3d": level,
             # Visible if it is here at all. These are backdrops -- the
             # confocal channel, the synapse-density stain -- and a scene
             # reads as incomplete without one. They used to be created
@@ -172,9 +357,14 @@ __all__ = [
     "ROLE_DISPLAY",
     "VIEW3D_MAX_AXIS",
     "VIEW3D_MAX_VOXELS",
+    "VIEW3D_WAIT_VOXELS",
+    "FineLevel",
     "add_images",
+    "coarse_level_for_3d",
     "default_colormap",
     "display_for",
     "level_for_3d",
+    "pin_level",
     "show_images",
+    "stop_levels",
 ]

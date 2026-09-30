@@ -16,7 +16,7 @@ from ..core.registry import Registry
 from .axes import apply_axis_mode
 from .contours import ContourOverlay
 from .contours import install as install_contours
-from .images import add_images, show_images
+from .images import add_images, show_images, stop_levels
 from .layers import AtlasSurface, canonical_colors, match_label_colors
 from .request import (
     REFERENCE_ROLES,
@@ -655,6 +655,7 @@ class SceneSession:
         self.callbacks = []
         for surface in self.surfaces.values():
             surface.stop()
+        stop_levels(self.images)
         # LAYERS FIRST, then the dock. The other order crashes the process.
         #
         # Removing a dock widget relays out the window, which resizes the

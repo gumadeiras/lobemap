@@ -20,6 +20,7 @@ from .images import (
     default_colormap,
     display_for,
     level_for_3d,
+    pin_level,
     show_images,
 )
 from .request import (
@@ -79,7 +80,8 @@ def install_display_mode(viewer, surfaces, contours, images=(),
       the next scene switch in 2D faulted in `glDrawArrays` on it.
     - **Images pin a pyramid level in 3D.** napari's automatic choice there is
       the coarsest level; `level_for_3d` picks the finest one that fits in a
-      texture. In 2D the lock is released so zoom-driven selection works.
+      texture, read in the background when it is large (`images.FineLevel`).
+      In 2D the lock is released so zoom-driven selection works.
     - **`dims.order` is permuted only in 2D**, to put the slider on the
       chosen slice axis. In 3D it must stay the identity, because napari
       permutes an Image by it and a Surface not at all (see `DIMS_ORDER_XYZ`).
@@ -108,10 +110,7 @@ def install_display_mode(viewer, surfaces, contours, images=(),
             if space is not None:
                 apply_axis_mode(viewer, space, mirror_axis=session.reflect_axis())
         for layer in images:
-            info = layer.metadata.get("lobemap", {})
-            if "level_3d" not in info:
-                continue            # labels carry no pyramid to pin
-            layer.locked_data_level = info["level_3d"] if three_d else None
+            pin_level(layer, three_d)
         if not three_d and session is not None:
             # Before the contours turn on, so they draw once, on this plane.
             session.populate_plane()

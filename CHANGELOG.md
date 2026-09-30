@@ -44,6 +44,7 @@
 - Slice labels are off until you check a row's `label` box or press `Label all`. The 0.1 viewer labeled every glomerulus in the slice.
 - 2D contours are cut for a whole atlas at once and kept for up to 128 planes per layer, so a plane you return to redraws faster than on its first visit. Filled contours use napari's compiled triangulation, bermuda.
 - A space opens with only its primary atlas built. Every other atlas and neuropil set is built, and its layers added to napari's layer list, the first time its tab opens.
+- In 3D a virtual stain opens at a coarser pyramid level and switches to the finest level that fits one texture once that level has been read in the background, instead of blocking the window for up to a second on every entry into 3D.
 - The reference table is `registry/reference/glomerulus_ground_truth.csv`, unchanged from 0.1.4, and `registry/reference/README.md` records how it was built. The source data moved from `datasets/` to `registry/sources/`.
 - Removed the atlas selector and the viewers it opened: FlyWire glomeruli, Bates Schlegel 2020, the hemibrain surfaces from the hemibrainr export, DoOR 2D, Potter Task 2022, the JRC2018 Unisex ROI viewer, and the BANC and Virtual Fly Brain browsers. Benton 2025 revises Bates 2020 in the same FAFB volume, and Schlegel 2021 S12 has the same hemibrain geometry as the hemibrainr export.
 - Removed the rotation spinboxes and the separate vertical and horizontal mirrors. Slices follow the voxel grid, and the Slice along menu and the one left-right Mirror replace the View menu and the two mirrors.

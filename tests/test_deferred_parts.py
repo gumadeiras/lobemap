@@ -1,11 +1,15 @@
 """What a space builds late behaves as it did when everything was built at open.
 
 A space opens with its primary atlas built; its other atlases and its
-neuropil sets are built the first time their tab opens. Each test drives the real controls, and compares what is drawn with a scene
+neuropil sets are built the first time their tab opens, and in 3D a large
+stain shows a coarser pyramid level until the finer one has been read.
+Each test drives the real controls, and compares what is drawn with a scene
 built whole by `build_scene`, the way every scene used to open.
 """
 
 from __future__ import annotations
+
+import time
 
 import numpy as np
 import pytest
@@ -18,6 +22,7 @@ from viewer_harness import (
     layer_names,
     pump,
     session,
+    switch_to,
 )
 
 pytestmark = pytest.mark.requires_data
@@ -184,3 +189,68 @@ def test_a_deferred_part_that_cannot_be_read_says_so_in_its_tab(monkeypatch):
         sess.set_mirror(True)
         pump()
         assert_rows_match_drawing(sess)
+
+
+# -- the 3D pyramid level ---------------------------------------------------
+
+
+def _wait(predicate, seconds: float = 30.0) -> bool:
+    end = time.perf_counter() + seconds
+    while time.perf_counter() < end:
+        pump(20)
+        if predicate():
+            return True
+    return False
+
+
+def _rendered(layer) -> np.ndarray:
+    """The voxels the layer hands to its visual."""
+    return np.asarray(layer._slice.image.raw)
+
+
+@pytest.mark.parametrize("space", STAINED)
+def test_3d_renders_the_same_pyramid_level_once_it_is_read(monkeypatch, space):
+    from lobemap.viewer.images import coarse_level_for_3d, level_for_3d
+
+    with launched(monkeypatch, "view", space) as (code, viewer):
+        assert code == 0
+        image = session(viewer).images[0]
+        levels = list(image.data)
+        fine = level_for_3d(levels)
+        coarse = coarse_level_for_3d(levels, fine)
+        assert coarse > fine
+        # At once: a coarser level of the same image, drawn.
+        assert image.visible and image.data_level == coarse
+        assert _rendered(image).shape == tuple(levels[coarse].shape)
+
+        assert _wait(lambda: image.data_level == fine), "the fine level never came"
+        assert image.locked_data_level == fine
+        store = session(viewer).registry.volume(image.metadata["lobemap"]["asset"])
+        got = _rendered(image)
+        assert got.shape == tuple(levels[fine].shape)
+        # The same voxels, spot-checked on a grid of planes.
+        np.testing.assert_array_equal(got[::97], np.asarray(store.levels[fine][::97]))
+
+        # 2D releases it; 3D pins it again at once, with no second read.
+        viewer.dims.ndisplay = 2
+        pump()
+        assert image.locked_data_level is None
+        viewer.dims.ndisplay = 3
+        pump()
+        assert image.data_level == fine
+        assert _rendered(image).shape == tuple(levels[fine].shape)
+
+
+def test_a_switch_before_the_fine_level_arrives_leaves_nothing(monkeypatch):
+    from lobemap.viewer import images
+
+    with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
+        old = session(viewer).images[0]
+        fine = images._FINE[old]
+        switch_to(viewer, "GRABE")
+        assert session(viewer).space == "GRABE"
+        # Long enough for the read to finish; its result is dropped.
+        pump(3000)
+        assert fine.array is None
+        assert all(name.startswith(("grabe", "Grabe")) for name in layer_names(viewer))
+        assert_rows_match_drawing(session(viewer))
