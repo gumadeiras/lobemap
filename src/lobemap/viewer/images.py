@@ -10,9 +10,8 @@ import numpy as np
 
 #: Per-role display defaults for image layers.
 #:
-#: Magenta for the stain because it reads as a fluorescence channel against
-#: the gray template and the colored surfaces, and because additive blending
-#: composites it cleanly over them.
+#: Gray for the stains and the Grabe stack: they are reference imagery under
+#: colored glomeruli, and additive blending composites gray over them cleanly.
 #:
 #: `gamma` below 1 lifts the dim end, which a synapse-density map needs: the
 #: distribution is long-tailed, so a linear ramp leaves most of the neuropil

@@ -747,9 +747,9 @@ def cmd_nomenclature(args) -> int:
     This used to re-derive the whole table and save it, which was destructive
     in a way nothing reported. A mechanical derivation can only emit identity
     relations, so every curated merge, split and rename was replaced by an
-    identity and the information was gone. Grabe's `VP1(L)` is recorded as a
-    merge onto VP1d;VP1l;VP1m; a regeneration flattened it to an exact match
-    on `VP1`, across eight rows, and printed a cheerful summary.
+    identity and the information was gone. The hemibrain's `VC5(R)` is
+    recorded as a rename onto VM6; a regeneration would flatten it to an
+    exact match on `VC5`, a different glomerulus, and print a cheerful summary.
 
     So: report differences and change nothing unless asked. `--add-missing`
     adds rows for published names that have none, the one case a machine can

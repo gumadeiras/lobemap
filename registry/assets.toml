@@ -138,7 +138,7 @@ license_url = "https://elifesciences.org/articles/66018"
 # not assumed. Shares its grid with the label volume the glomeruli are
 # surfaced from, so index * voxel_size with a zero origin is exact rather than
 # fitted -- verified at 0.0001 um mean offset over 108 glomeruli.
-# Displayed like the virtual stains -- magenta, lifted gamma, depth-attenuated
+# Displayed like the virtual stains -- gray, lifted gamma, depth-attenuated
 # MIP -- although its role stays `template_image`, because it is a real
 # confocal channel rather than a synthesised one.
 # The publication's own voxel-wise masks, unmodified -- the thing the meshes

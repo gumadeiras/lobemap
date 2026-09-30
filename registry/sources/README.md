@@ -21,4 +21,4 @@ These folders were `datasets/` at the repository root, each holding a `data/sour
 
 ## Terms
 
-The files here keep the terms of their sources, not the code's MIT License; "Data licenses" in the top-level README lists them. In short: Benton 2025's Dataset EV1 and EV2 are CC0 1.0 and its figure panels CC BY 4.0; the Grabe 2015 files are reproduced from the paper and its in vivo atlas, with no published terms, so the rights stay with the authors and the publisher; the Bates 2020 atlas figure is CC BY 4.0; and the JRC2018 Unisex files from Virtual Fly Brain are CC BY-NC-SA 4.0.
+The files here keep the terms of their sources, not the code's MIT License; "Data licenses" in the top-level README lists them. In short: Benton 2025's Dataset EV1 and EV2 are CC0 1.0 and its figure panels CC BY 4.0; the Grabe 2015 files are reproduced from the paper and its in vivo atlas, with no published terms, so the rights stay with the authors and the publisher, while the Grabe 2016 supplemental tables (`grabe-2015/s1.png`, `s1_cont.png`, `s2.png`) are CC BY-NC-ND 4.0; the Bates 2020 atlas figure is CC BY 4.0; and the JRC2018 Unisex files from Virtual Fly Brain are CC BY-NC-SA 4.0.

@@ -2,7 +2,7 @@
 
 An in vivo light-microscopy atlas of the antennal lobe:
 
-Grabe V, Strutz A, Baschwitz A, Hansson BS, Sachse S. A digital in vivo 3D atlas
+Grabe V, Strutz A, Baschwitz A, Hansson BS, Sachse S. Digital in vivo 3D atlas
 of the antennal lobe of Drosophila melanogaster. *Journal of Comparative
 Neurology*, 2015;523(3):530-544. doi:10.1002/cne.23697
 
@@ -17,11 +17,11 @@ Builds all three GRABE assets: `grabe2015_glomeruli`, `grabe2015_labels` and
 
 - `Merged_2-101221a-labels_only_sure_ones_Sensillarcolors.tif` — the label
   volume. The glomerulus meshes are surfaced from this rather than from the
-  OBJ export; `registry/assets.toml` says why.
+  OBJ export; the `lobemap.ingest.label_volume` docstring says why.
 - `Merged_2-101221a-labels_only_sure_ones_Sensillarcolors.am` — the Amira
   material table, which supplies the names.
 - `invivoALstack.tif` — the confocal stack, this space's reference image.
-- `220118-glomerular-OBJs.7z` — the published OBJ export. Not used.
+- `220118-glomerular-OBJs.7z` — the author-provided OBJ export. Not used.
 - `invivoALatlas.pdf` — the atlas document.
 - `grabe_2015_pn_expression.csv`, `grabe_2015_sensory_line_expression.csv` —
   supplemental expression tables.

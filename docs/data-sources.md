@@ -8,7 +8,7 @@ Paper PDFs are not tracked, with one exception: Grabe 2015's atlas PDF, which is
 
 ## What the viewer opens
 
-Four coordinate spaces, six atlases. A space also carries its brain neuropils and one reference image.
+Four coordinate spaces, six atlases. A space also carries one reference image, and each EM space its brain neuropils.
 
 | space | atlas | glomeruli | source |
 |---|---|---|---|
@@ -53,14 +53,14 @@ The dataset version is pinned in `registry/recipes.toml` for every query, not le
 
 Two defects in these sets are in the published data, not introduced here:
 
-- hemibrain `VM2(R)` is a 14 µm³ fragment, where VM2 is 1,342–3,259 µm³ in every other atlas. `registry/checks.toml` records it, so `lobemap check` lists it without failing.
+- hemibrain `VM2(R)` is a 14 µm³ fragment, where VM2 is 1,342–3,259 µm³ in every other atlas that has one. `registry/checks.toml` records it, so `lobemap check` lists it without failing.
 - In the male CNS neuropil set, `AME(L)` is 4,172 µm³ after the watertight repair against 16,608 µm³ for `AME(R)`. The repair log in the asset's metadata cannot say which lost it: its volume changes for open meshes were measured from the world origin, which is meaningless for a mesh with holes (it logged AB(L) and AB(R) as shrinking 85–89% while the repaired AB(R) matches the hemibrain's to 2%). The repair now measures from each mesh's own center.
 
 ## Grabe 2015 — GRABE
 
 Folder: [`grabe-2015/`](../registry/sources/grabe-2015/)
 
-A light-microscopy template rather than EM, and an island: no bridging registration connects it to any other space. Three assets come from it — the glomerular meshes, the label volume they were surfaced from, and the confocal stack that serves as its reference image. The meshes are surfaced from the Amira label volume rather than the published OBJ export.
+A light-microscopy template rather than EM, and an island: no bridging registration connects it to any other space. Three assets come from it — the glomerular meshes, the label volume they were surfaced from, and the confocal stack that serves as its reference image. The meshes are surfaced from the Amira label volume rather than the author-provided OBJ export.
 
 The files are reproduced from the paper and its in vivo atlas. The atlas page at the Max Planck Institute for Chemical Ecology (https://www.ice.mpg.de/232714/vivo-3d-atlas) publishes the atlas PDF and the confocal stack; the article is not open access. Neither states terms for the files, and lobemap grants none: the rights stay with the authors and the publisher.
 
@@ -89,4 +89,4 @@ Not an atlas: a synthetic reference image, one per EM space. Presynapse density 
 
 No confidence threshold is applied to any of them. The male CNS file is already filtered to confidence 0.5, as its name says; the hemibrain shards carry no confidence field; and the Princeton table has no confidence or score column. The published FAFB stain's metadata records `confidence_threshold: 0.5`, which the build wrote without applying.
 
-The Princeton coordinates are used as they come, without a FlyWire-to-FAFB14 bridge. Fitting the stain to the Benton meshes by a rigid shift gives a best offset of 0.8 µm, within the 0.6–1.0 µm the same fit gives in the hemibrain and the male CNS, where no bridge is involved. So any FAFB14.1-to-FAFB14 offset here is below what the stain resolves; the transform itself was not run.
+The Princeton coordinates are used as they come, without a FlyWire-to-FAFB14 bridge. Fitting the stain to the Benton meshes by a rigid shift gives a best offset under 1 µm, about the stain's resolution; the fit is shallow, so it bounds the offset rather than measuring it. The FlyWire-to-FAFB14 transform itself was not run.

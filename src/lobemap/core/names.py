@@ -84,7 +84,7 @@ class AtlasAudit:
     stale: tuple[str, ...] = ()
     #: Rows whose relation is not a plain identity. These are the hand-made
     #: part of the table and cannot be re-derived from the atlases: the
-    #: Schlegel rename chain and Grabe's VP1 merge live here.
+    #: Schlegel rename chain and the S11 VM6 split live here.
     curated: tuple[Correspondence, ...] = ()
 
     @property

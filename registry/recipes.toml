@@ -127,8 +127,8 @@ bridge_to = "FAFB14"
 # 40 GB free.
 #
 # The bounds are passed explicitly rather than derived, so a rebuild
-# reproduces the same physical box: they are the held neuropil geometry plus
-# a 5 um margin. The male CNS bounds also crop the VNC away.
+# reproduces the same physical box; the grid adds a 5 um margin around them
+# for the tail of the blur. The male CNS bounds also crop the VNC away.
 
 [hemibrain_stain]
 pipeline = "virtual_stain"
