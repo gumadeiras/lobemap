@@ -1713,7 +1713,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.13" },
     { name = "tifffile", specifier = ">=2024.8" },
     { name = "trimesh", specifier = ">=4.4" },
-    { name = "zarr", specifier = ">=2.18" },
+    { name = "zarr", specifier = ">=3" },
 ]
 provides-extras = ["ingest"]
 
