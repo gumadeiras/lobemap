@@ -291,8 +291,11 @@ def build_scene(
     # overlay. No layer of our own: see `viewer/axes.py`. It shows the
     # anatomy in 3D and the voxel grid in 2D, and is kept up to date by
     # `install_display_mode`, whose handlers a scene switch disconnects
-    # -- connecting here instead leaked one per switch.
-    apply_axis_mode(viewer, registry.spaces[space])
+    # -- connecting here instead leaked one per switch. `load_space`, which
+    # defers, installs that display mode next, and it applies the triads
+    # with the mirror: once is enough.
+    if not defer:
+        apply_axis_mode(viewer, registry.spaces[space])
 
     return surfaces, contours
 
