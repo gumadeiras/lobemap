@@ -39,6 +39,14 @@ def cache_root() -> Path:
     return Path(user_cache_dir("lobemap")) / "bridged"
 
 
+class CannotBridge(ValueError):
+    """A request to move geometry between spaces that cannot be honored.
+
+    Raised for an island space and for a biological alignment with no
+    mirror registration; the message says why and what to do instead.
+    """
+
+
 @dataclass(frozen=True)
 class ResolveKey:
     source_hash: str
@@ -230,7 +238,7 @@ def resolve(
     if align_biology and src.lateral_convention != dst.lateral_convention:
         mirror = not mirror
     if src.is_island or dst.is_island:
-        raise ValueError(
+        raise CannotBridge(
             f"cannot bridge {asset.space} -> {target_space}: "
             f"{'source' if src.is_island else 'target'} is an island"
         )

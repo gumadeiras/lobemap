@@ -14,6 +14,7 @@ import numpy as np
 
 from ..core.meshfmt import MeshSet
 from ..core.model import anatomical_axes
+from ..core.resolve import CannotBridge
 from . import geometry as g
 from . import images as gi
 from . import laterality as gl
@@ -73,7 +74,7 @@ def atlas_in_space(reg, atlas_id: str, space: str) -> MeshSet:
         src.lateral_convention != dst.lateral_convention
         and not sp.has_mirror_registration(src.flybrains_template)
     ):
-        raise ValueError(
+        raise CannotBridge(
             f"{atlas_id} cannot be aligned biologically into {space}: "
             f"{src.flybrains_template} has no mirror registration, so the "
             f"mirror would be a bounding-box reflection. Compare in "

@@ -43,12 +43,26 @@ def _refused(capsys, argv, expect: str, code: int = 2) -> None:
 @pytest.mark.parametrize("command", [
     ["spaces"], ["nomenclature"], ["build", "--all"], ["repair", "--dry-run"],
     ["manifest"], ["bridge", "benton2025_glomeruli", "--to", "JRCFIB2018F"],
+    ["fetch"], ["fetch", "--check"], ["pack", "--all"],
+    ["ingest", "neuprint", "--asset-id", "x", "--token", "t"],
 ])
-def test_a_missing_registry_is_refused(capsys, tmp_path, command):
-    """It used to load as an empty registry, and each of these exited 0."""
+def test_a_missing_registry_is_refused(capsys, tmp_path, monkeypatch, command):
+    """It used to load as an empty registry, and each of these exited 0.
+
+    `fetch` and `pack` said to run `manifest`, which refuses the same
+    registry; `ingest neuprint` did its neuPrint work first and then wrote
+    into a registry directory it created.
+    """
+    from lobemap.ingest import neuprint_rois
+
+    def not_reached(**_):
+        raise AssertionError("neuPrint was queried for a missing registry")
+
+    monkeypatch.setattr(neuprint_rois, "ingest", not_reached)
     missing = tmp_path / "no-registry"
     _refused(capsys, ["--registry", str(missing), *command],
              f"no registry at {missing}")
+    assert not missing.exists()
 
 
 def test_validate_reports_a_missing_registry(capsys, tmp_path):
@@ -77,9 +91,22 @@ def test_the_installed_command_prints_one_line(tmp_path):
      "unknown space NOPE"),
     (["stain", "--space", "FAFB14", "--asset-id", "x", "--token", "t",
       "--bounds-from", "nope"], "unknown asset nope"),
+    (["check", "--compare", "neuprint_hemibrain", "schlegel2021_s12", "NOPE"],
+     "unknown space NOPE"),
+    (["check", "--compare", "nope", "schlegel2021_s12", "JRCFIB2018F"],
+     "unknown atlas nope"),
+    (["reconcile", "nope", "neuprint_cns"], "unknown atlas nope"),
+    (["reconcile", "grabe2015", "benton2025", "--space", "NOPE"], "unknown space NOPE"),
 ])
-def test_an_unknown_name_is_refused_before_any_work(capsys, tmp_path, command, expect):
+def test_an_unknown_name_is_refused_before_any_work(capsys, tmp_path, monkeypatch,
+                                                    command, expect):
     """No data is needed: every name is checked before anything is read."""
+    from lobemap.validate import harness
+
+    def not_reached(*_, **__):
+        raise AssertionError("the checks ran before the names were checked")
+
+    monkeypatch.setattr(harness, "run_checks", not_reached)
     empty = tmp_path / "data"
     empty.mkdir()
     _refused(capsys, ["--registry", str(REGISTRY), "--data-root", str(empty),
@@ -99,3 +126,43 @@ def test_spaces_points_at_fetch_for_what_is_missing(capsys, tmp_path):
     assert main(["--registry", str(REGISTRY), "--data-root", str(tmp_path),
                  "spaces"]) == 0
     assert "`lobemap fetch` downloads them" in capsys.readouterr().out
+
+
+def test_an_empty_audit_is_not_a_match(capsys, tmp_path):
+    """`nomenclature` over no data said "the table matches" and exited 0."""
+    _refused(capsys, ["--registry", str(REGISTRY), "--data-root", str(tmp_path),
+                      "nomenclature"], "NOTHING WAS AUDITED", code=1)
+
+
+@pytest.mark.parametrize("error, expect", [
+    ("legacy", "pickle"),
+    ("bridge", "cannot bridge GRABE -> FAFB14"),
+    ("ingest", "pip install 'lobemap[ingest]'"),
+])
+def test_known_refusals_print_one_line(capsys, monkeypatch, error, expect):
+    """A legacy mesh file, a refused bridge and a missing ingest dependency
+    each ended in a traceback."""
+    from lobemap import cli
+    from lobemap.core.meshfmt import LegacyContainerError
+    from lobemap.core.resolve import CannotBridge
+
+    def fail(args):
+        if error == "legacy":
+            raise LegacyContainerError("m.npz: names only as pickle; reading them would run pickle")
+        if error == "bridge":
+            raise CannotBridge("cannot bridge GRABE -> FAFB14: source is an island")
+        raise ModuleNotFoundError("No module named 'navis'", name="navis")
+
+    monkeypatch.setattr(cli, "cmd_spaces", fail)
+    _refused(capsys, ["spaces"], expect)
+
+
+def test_an_unrelated_missing_module_is_not_hidden(monkeypatch):
+    from lobemap import cli
+
+    def fail(args):
+        raise ModuleNotFoundError("No module named 'nosuchthing'", name="nosuchthing")
+
+    monkeypatch.setattr(cli, "cmd_spaces", fail)
+    with pytest.raises(ModuleNotFoundError):
+        cli.main(["spaces"])

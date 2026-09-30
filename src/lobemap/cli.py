@@ -16,6 +16,14 @@ from . import __version__
 #: first. `lobemap spaces` lists the others.
 DEFAULT_SPACE = "FAFB14"
 
+#: Import names of the `ingest` extra in pyproject.toml. A viewer-only
+#: install lacks them, and a command that needs one says how to get it.
+INGEST_MODULES = frozenset({
+    "navis", "flybrains", "fafbseg", "neuprint", "pyvista", "h5py", "requests",
+    "pytz", "skimage", "pyarrow", "cloudvolume",
+})
+
+
 class UsageError(Exception):
     """Wrong input. `main` prints it as one line and exits 2, with no traceback."""
 
@@ -184,11 +192,16 @@ def cmd_manifest(args) -> int:
 def cmd_fetch(args) -> int:
     """Download missing data artifacts, or verify what is already here."""
     from .core import manifest as mf
+    from .core.registry import require_registry
 
     root = _registry_root(args)
     data_root = _data_root(args, root)
     path = Path(args.manifest) if args.manifest else root / "manifest.toml"
     if not path.exists():
+        # Only the manifest is needed, but with no registry either the advice
+        # below is wrong: `manifest` refuses a directory that is not one.
+        if not args.manifest:
+            require_registry(root)
         print(f"no manifest at {path}; run `lobemap manifest` first",
               file=sys.stderr)
         return 2
@@ -262,11 +275,16 @@ def cmd_pack(args) -> int:
     import shutil
 
     from .core import manifest as mf
+    from .core.registry import require_registry
 
     root = _registry_root(args)
     data_root = _data_root(args, root)
     path = Path(args.manifest) if args.manifest else root / "manifest.toml"
     if not path.exists():
+        # Only the manifest is needed, but with no registry either the advice
+        # below is wrong: `manifest` refuses a directory that is not one.
+        if not args.manifest:
+            require_registry(root)
         print(f"no manifest at {path}; run `lobemap manifest` first",
               file=sys.stderr)
         return 2
@@ -357,6 +375,10 @@ def cmd_ingest_neuprint(args) -> int:
         )
         return 2
 
+    # Before the neuPrint work: a wrong --registry used to be found only
+    # afterwards, and the new asset's names were written into it.
+    root = _registry_root(args)
+    Registry.load(root, validate=False, data_root=_data_root(args, root))
     result = neuprint_rois.ingest(
         server=args.server,
         dataset=args.dataset,
@@ -365,7 +387,6 @@ def cmd_ingest_neuprint(args) -> int:
         repair=not args.no_repair,
     )
     ms = result.meshset
-    root = _registry_root(args)
     out = _data_root(args, root) / f"{args.asset_id}.npz"
     ms.save(out)
 
@@ -697,6 +718,12 @@ def cmd_check(args) -> int:
 
     root = _registry_root(args)
     reg = Registry.load(root, data_root=_data_root(args, root))
+    if args.compare:
+        # Before the checks, which take minutes: a typo used to be found
+        # only after them, as a KeyError traceback.
+        a_id, b_id, space = args.compare
+        _require_known("atlas", [a_id, b_id], reg.atlases)
+        _require_known("space", [space], reg.spaces)
     checks = run_checks(reg)
 
     if args.roundtrip:
@@ -707,7 +734,6 @@ def cmd_check(args) -> int:
             checks.append(g.check_roundtrip(reg.mesh(atlas.asset), src, via))
 
     if args.compare:
-        a_id, b_id, space = args.compare
         pairs, chk = compare_atlases(reg, a_id, b_id, space)
         checks.append(chk)
         worst = sorted(pairs, key=lambda p: -p.distance_um)[:10]
@@ -814,6 +840,12 @@ def cmd_nomenclature(args) -> int:
     if unreadable:
         print(f"not built, so not audited: {', '.join(sorted(unreadable))}")
         print()
+    if not audits:
+        # Like `check`, nothing audited is not a match: it used to exit 0
+        # with "the table matches" over an empty data root.
+        print("NOTHING WAS AUDITED: no atlas mesh is on disk (lobemap fetch)",
+              file=sys.stderr)
+        return 1
 
     if args.add_missing or args.prune_stale:
         changed = 0
@@ -871,6 +903,9 @@ def cmd_reconcile(args) -> int:
 
     root = _registry_root(args)
     reg = Registry.load(root, data_root=_data_root(args, root))
+    _require_known("atlas", [args.a, args.b], reg.atlases)
+    if args.space:
+        _require_known("space", [args.space], reg.spaces)
     space = args.space or reg.atlases[args.a].native_space
     matches, ua, ub = reconcile(
         atlas_in_space(reg, args.a, space),
@@ -1322,12 +1357,21 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     args = p.parse_args(argv)
 
+    from .core.meshfmt import LegacyContainerError
     from .core.registry import RegistryError
+    from .core.resolve import CannotBridge
 
     try:
         return args.func(args)
-    except (UsageError, RegistryError) as exc:
+    except (UsageError, RegistryError, LegacyContainerError, CannotBridge) as exc:
         print(f"lobemap: {exc}", file=sys.stderr)
+        return 2
+    except ModuleNotFoundError as exc:
+        if (exc.name or "").split(".")[0] not in INGEST_MODULES:
+            raise
+        print(f"lobemap: this command needs {exc.name}, one of the ingest "
+              f"dependencies: pip install 'lobemap[ingest]', or `uv sync` in "
+              f"a checkout", file=sys.stderr)
         return 2
 
 

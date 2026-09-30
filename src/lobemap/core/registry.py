@@ -45,6 +45,12 @@ def default_registry_root() -> Path:
     return Path(__file__).resolve().parents[3] / "registry"
 
 
+def require_registry(root: Path) -> None:
+    """Raise `RegistryError` unless `root` holds a registry (a spaces table)."""
+    if not (Path(root) / "spaces.toml").is_file():
+        raise RegistryError(f"no registry at {root}: it has no spaces.toml")
+
+
 def default_data_root(root: Path) -> Path:
     """Where asset files live.
 
@@ -128,8 +134,7 @@ class Registry:
         # Every table is optional on its own, so a wrong path used to load
         # as an empty registry and each command reported on nothing:
         # `validate` said "ok: 0 spaces" and exited 0.
-        if not (r.root / "spaces.toml").is_file():
-            raise RegistryError(f"no registry at {r.root}: it has no spaces.toml")
+        require_registry(r.root)
         r._load_spaces()
         r._load_assets()
         r.names = Nomenclature.load(r.root / "nomenclature.csv")

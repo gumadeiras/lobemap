@@ -35,8 +35,8 @@ def _registry() -> Any:
         from navis.transforms import registry
     except ImportError as exc:  # pragma: no cover - depends on env
         raise TransformsUnavailable(
-            "navis/flybrains are ingest-time dependencies; install the "
-            "'ingest' dependency group"
+            "navis/flybrains are ingest-time dependencies: "
+            "pip install 'lobemap[ingest]', or `uv sync` in a checkout"
         ) from exc
     return registry
 
