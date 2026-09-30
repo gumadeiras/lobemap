@@ -12,6 +12,7 @@ import weakref
 import numpy as np
 
 from .chunkcache import cached_levels
+from .napari_private import keep_extent_while_slicing
 
 #: Per-role display defaults for image layers.
 #:
@@ -291,6 +292,7 @@ def add_images(viewer, registry, space: str) -> list:
                 opacity=0.6,
                 **volume.napari_kwargs(),
             )
+            keep_extent_while_slicing(layer)
             layer.metadata["lobemap"] = {
                 "kind": "labels",
                 "asset": asset.id,
@@ -320,6 +322,7 @@ def add_images(viewer, registry, space: str) -> list:
             **display_for(asset.role, asset.colormap, asset.display),
             **volume.napari_kwargs(),
         )
+        keep_extent_while_slicing(layer)
         level = level_for_3d(data) if volume.is_multiscale else 0
         if volume.is_multiscale:
             coarse = coarse_level_for_3d(data, level)

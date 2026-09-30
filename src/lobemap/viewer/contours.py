@@ -25,6 +25,7 @@ from collections import OrderedDict
 import numpy as np
 
 from ..core.meshfmt import MeshSet
+from . import napari_private
 from .sections import MeshSections
 
 #: Slice-label point size. Was 7, which read as small against the contours.
@@ -49,9 +50,7 @@ def _stroke(ring: np.ndarray, width: float) -> tuple[np.ndarray, np.ndarray]:
         centers, offsets, triangles = bermuda.triangulate_path_edge(
             ring, closed=True, limit=MITER_LIMIT)
     except ImportError:
-        from napari.layers.shapes._shapes_utils import triangulate_edge
-
-        centers, offsets, triangles = triangulate_edge(ring, closed=True)
+        centers, offsets, triangles = napari_private.triangulate_edge(ring)
     return centers + width * offsets, np.asarray(triangles, dtype=np.int64)
 
 
@@ -83,13 +82,7 @@ def _fill(ring: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
         triangles, points = bermuda.triangulate_polygons_face([ring32])
     except ImportError:
-        from napari.layers.shapes._accelerated_triangulate_dispatch import (
-            normalize_vertices_and_edges,
-        )
-        from napari.layers.shapes._shapes_utils import triangulate_face_vispy
-
-        raw, edges = normalize_vertices_and_edges(ring32, close=True)
-        points, triangles = triangulate_face_vispy(raw, edges, ring32)
+        points, triangles = napari_private.triangulate_face(ring32)
     return np.asarray(points, dtype=np.float64), np.asarray(triangles, dtype=np.int64)
 
 
@@ -156,11 +149,6 @@ def _stack(verts: list, faces: list) -> tuple[np.ndarray, np.ndarray]:
             else np.empty((0, 3), np.uint32))
 
 
-def _layer_visual(viewer, layer):
-    """napari's vispy visual for `layer`."""
-    return viewer.window._qt_viewer.canvas.layer_to_visual[layer]
-
-
 class SliceVisual:
     """The vispy visuals one overlay draws its slice with.
 
@@ -175,15 +163,14 @@ class SliceVisual:
     """
 
     def __init__(self, viewer, layer) -> None:
-        from napari._vispy.visuals.text import Text
         from vispy.scene.visuals import Mesh
 
-        visual = _layer_visual(viewer, layer)
+        visual = napari_private.layer_visual(viewer, layer)
         self.layer = layer
         self.mesh = Mesh(parent=visual.node)
         self.mesh.order = 0
         # The font napari gives the layer's own text.
-        self.text = Text(parent=visual.node, font_info=visual.font_info)
+        self.text = napari_private.text_visual(visual.node, visual.font_info)
         self.text.order = 1
         self.text.anchors = ("center", "center")
         self.text.font_size = TEXT_SIZE
@@ -197,10 +184,8 @@ class SliceVisual:
         layer.events.opacity.connect(self._on_opacity)
 
     def _on_blending(self, event=None) -> None:
-        from napari._vispy.utils.gl import BLENDING_MODES
-
-        self.mesh.set_gl_state(**BLENDING_MODES[self.layer.blending])
-        self.text.set_gl_state(**BLENDING_MODES["translucent"])
+        self.mesh.set_gl_state(**napari_private.gl_state(self.layer.blending))
+        self.text.set_gl_state(**napari_private.gl_state("translucent"))
 
     def _on_opacity(self, event=None) -> None:
         self.mesh.opacity = self.text.opacity = self.layer.opacity
@@ -297,6 +282,8 @@ class ContourOverlay:
         )
         self.layer.metadata["lobemap"] = {"kind": "contours", "atlas": name}
         self.visual = SliceVisual(viewer, self.layer)
+        # The layer holds no shapes, so no step can change its extent.
+        napari_private.keep_extent_while_slicing(self.layer)
 
         # Redraw when the layer is switched on. `refresh` returns early while
         # hidden -- it would otherwise recompute intersections for every
