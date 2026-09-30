@@ -493,9 +493,10 @@ class SceneSession:
         if self.viewer.dims.ndisplay == 3:
             return
         order = order_for(self.slice_axis)
-        if tuple(self.viewer.dims.order) == order:
-            return
-        self.viewer.dims.order = order
+        # Not a reason to stop: napari's roll button sets the order first,
+        # and the new plane still has to be found.
+        if tuple(self.viewer.dims.order) != order:
+            self.viewer.dims.order = order
         space = self.registry.spaces.get(self.space)
         if space is not None:
             apply_axis_mode(self.viewer, space, mirror_axis=self.reflect_axis())

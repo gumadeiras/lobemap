@@ -84,6 +84,7 @@ class SpaceSwitcher(QWidget):
         self._fill_slices()
         # The switcher outlives every scene, so it is connected once.
         viewer.dims.events.ndisplay.connect(self._on_mode)
+        viewer.dims.events.order.connect(self._on_order)
         self._on_mode()
 
         self.status = QLabel("")
@@ -177,6 +178,26 @@ class SpaceSwitcher(QWidget):
 
     def _on_mode(self, event=None) -> None:
         self.slice.setEnabled(self.viewer.dims.ndisplay == 2)
+
+    def _on_order(self, event=None) -> None:
+        """Keep napari's own roll-dims button in step with the menu.
+
+        In 2D a roll picks another slice axis behind the menu's back: the
+        menu kept its old name and the contours showed an empty plane. It is
+        taken as a choice made in the menu. In 3D the order must stay the
+        identity (see `app.install_display_mode`), so a roll there is undone.
+        """
+        if self._busy:
+            return
+        order = tuple(self.viewer.dims.order)
+        if self.viewer.dims.ndisplay == 3:
+            identity = tuple(range(len(order)))
+            if order != identity:
+                self.viewer.dims.order = identity
+            return
+        index = self.slice.findData(order[0])
+        if index >= 0 and order[0] != self.session.slice_axis:
+            self.slice.setCurrentIndex(index)
 
     def _on_mirror(self, on: bool) -> None:
         """Reflect the loaded scene, or put it back."""

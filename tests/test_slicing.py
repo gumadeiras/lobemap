@@ -213,3 +213,27 @@ def test_mirrored_contours_follow_a_slice_along_the_mirror_axis(monkeypatch):
         assert len(overlay.layer.data) > 0
         for path in overlay.layer.data:
             assert np.allclose(np.asarray(path)[:, 0], plane)
+
+
+def test_napari_roll_button_is_a_slice_axis_choice(monkeypatch):
+    """napari's own roll-dims button changed the slice axis behind the menu:
+    the menu kept its old name and the new plane showed no contour. In 3D a
+    roll broke the identity order that keeps the image and meshes aligned."""
+    with launched(monkeypatch, "view", "GRABE", "--ndisplay", "2") as (code, viewer):
+        menu = switcher(viewer).slice
+        sess = session(viewer)
+        overlay = _primary(viewer)
+        before = menu.currentText()
+        viewer.window._qt_viewer.viewerButtons.rollDimsButton.click()
+        pump()
+        axis = viewer.dims.order[0]
+        assert sess.slice_axis == axis
+        assert menu.currentData() == axis and menu.currentText() != before
+        assert len(overlay.layer.data) > 0
+        _on_plane(viewer, overlay)
+
+        viewer.dims.ndisplay = 3
+        pump()
+        viewer.window._qt_viewer.viewerButtons.rollDimsButton.click()
+        pump()
+        assert tuple(viewer.dims.order) == (0, 1, 2)
