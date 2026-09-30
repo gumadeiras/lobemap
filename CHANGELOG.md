@@ -8,7 +8,7 @@
 - Six atlases: Benton 2025 in FAFB14; the neuPrint hemibrain atlas and Schlegel 2021 supplementary files 11 and 12 in JRCFIB2018F; the neuPrint male CNS atlas in JRCFIB2022M; and Grabe 2015, both lobes, in GRABE.
 - 3D draws the glomerulus meshes, and 2D draws exact mesh-plane contours that stay sharp at any zoom. 2D opens on a plane that cuts the shown atlas, and a plane you chose is kept when you go to 3D and back.
 - The three EM spaces show a virtual neuropil stain, built from predicted presynapse density, as their reference image; GRABE shows its confocal stack. Both are drawn in grayscale whenever they are on disk.
-- The space picker switches spaces without restarting the viewer.
+- The space picker switches spaces without restarting the viewer. A switch that fails leaves the open space as it was, with its checked rows, labels, fills, filters, driver lines, open tab, slice axis and plane, mode, mirror and camera.
 - The compartment panel has one tab per atlas, then one per neuropil set. A checked row is a drawn glomerulus, in 3D and in 2D: a space opens with its primary atlas checked and the other atlases and neuropil sets unchecked, and hiding a layer with napari's eye unchecks its rows.
 - Each row has `label` and `fill` checkboxes that write the glomerulus's name on the slice and fill its 2D contour. They and their buttons work in 2D only, so they are disabled in 3D.
 - The panel buttons `Filtered`, `Invert`, `Show all`, `Show none`, `Label all`, `Label none`, `Fill all` and `Fill none` act on a tab's rows, and each tooltip says which rows. The filter searches every text column, and clicking a column header sorts by it.

@@ -421,9 +421,11 @@ class SceneSession:
     out of the window rather than dropped on the floor.
 
     So a session records exactly what it created, and `teardown` undoes it in
-    reverse. Rebuilding in place is what makes the switch cheap: the process,
-    the Qt window and the GPU context all survive, and only the data is
-    swapped.
+    reverse, touching nothing else: a switch builds the next session beside
+    this one and only then tears this one down, so a failed build is undone
+    without disturbing the scene the user is looking at. Rebuilding in place
+    is what makes the switch cheap: the process, the Qt window and the GPU
+    context all survive, and only the data is swapped.
     """
 
     def __init__(self, viewer, registry, space):
@@ -570,6 +572,36 @@ class SceneSession:
             if layer.metadata.get("lobemap", {}).get("asset") in wanted:
                 layer.visible = True
 
+    def reassert(self) -> None:
+        """Take the viewer back after a scene built beside this one was dropped.
+
+        Building a scene points two things that belong to the viewer at it:
+        the axis triads and the home button. The dims, the camera and the
+        layer selection are the switcher's to restore (`restore_view`); these
+        are this session's, because they depend on its space and its mirror.
+        """
+        space = self.registry.spaces.get(self.space)
+        if space is None:
+            return
+        apply_axis_mode(self.viewer, space, mirror_axis=self.reflect_axis())
+        install_home_orientation(self.viewer, space, reflect_axis=self.reflect_axis)
+
+    def settle_view(self) -> None:
+        """Frame this scene once it is the only one loaded.
+
+        It was built beside the scene it replaces, so the plane and the fit
+        it got then were computed over both. In 2D the plane is put on this
+        scene's own slider grid and onto its atlases; in either mode the
+        view is fitted to what is left.
+        """
+        dims = self.viewer.dims
+        # Onto the grid: napari snaps an off-grid point a moment later, and
+        # the contours would be drawn a second time on the neighbor plane.
+        dims.current_step = tuple(dims.current_step)
+        self.set_slice_axis(self.slice_axis)
+        if dims.ndisplay == 3:
+            fit_view(self.viewer)
+
     def teardown(self) -> None:
         for event, handler in self.handlers:
             with contextlib.suppress(Exception):
@@ -605,8 +637,14 @@ class SceneSession:
         # at the time, and it has no Python frame of its own to point at.
         # Confirmed by bisection -- dock-then-clear faults every run,
         # clear-then-dock survives, in both spaces tested.
-        with contextlib.suppress(Exception):
-            self.viewer.layers.clear()
+        #
+        # Only this session's layers. A switch builds the next scene before
+        # tearing this one down, and a failed build tears down only itself,
+        # so clearing the whole list would take the other scene with it.
+        for layer in self.all_layers():
+            with contextlib.suppress(Exception):
+                if layer in self.viewer.layers:
+                    self.viewer.layers.remove(layer)
         if self.dock is not None:
             with contextlib.suppress(Exception):
                 self.viewer.window.remove_dock_widget(self.dock)
@@ -630,7 +668,9 @@ def load_space(
     All or nothing: anything that fails part-way -- a corrupt asset, a
     `--show` naming nothing -- tears down what was already built before the
     error propagates, so no layer, dock or handler of a failed scene stays
-    behind to be driven by the next one.
+    behind to be driven by the next one. A scene already in the viewer is
+    left in place: the switcher builds the next scene beside it and tears it
+    down only once that build has succeeded.
     """
     session = SceneSession(viewer, registry, space)
     try:
@@ -693,7 +733,10 @@ def run(
     viewer = napari.Viewer(title=f"lobemap - {space}", ndisplay=ndisplay)
     try:
         def _load(target: str, show: tuple[str, ...] = ()):
-            session = load_space(viewer, registry, target, show=show)
+            # Unfitted: a switch builds beside the open scene, and a fit
+            # now would frame both. The switcher fits once the old one is
+            # gone, and the first scene is fitted below.
+            session = load_space(viewer, registry, target, show=show, fit=False)
             viewer.title = f"lobemap - {session.space}"
             return session
 

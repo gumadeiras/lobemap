@@ -3,7 +3,8 @@
 None of this changes the data. The camera is turned onto each space's
 measured anatomy, the view is fitted to the canvas as the window settles,
 the home button restores the anatomical view rather than napari's array
-view, and the mirror reflects every layer by a world transform.
+view, and the mirror reflects every layer by a world transform. A failed
+space switch gives the view back through `capture_view` and `restore_view`.
 """
 
 from __future__ import annotations
@@ -247,6 +248,55 @@ def install_initial_fit(viewer, margin: float = 0.02) -> bool:
     return connected
 
 
+def capture_view(viewer) -> dict:
+    """The viewer's own state that building a scene can move.
+
+    A scene switch builds the new scene beside the open one, and building
+    it moves things that belong to the viewer rather than to either scene:
+    the slice axis and plane (`dims`), the camera, which layer is selected,
+    and the window title. `restore_view` puts them back when that build
+    fails, so the scene the user had is looked at exactly as before.
+    """
+    camera = getattr(viewer, "scene", viewer).camera
+    selection = viewer.layers.selection
+    return {
+        "order": tuple(viewer.dims.order),
+        "point": tuple(viewer.dims.point),
+        "center": tuple(camera.center),
+        "zoom": float(camera.zoom),
+        "angles": tuple(camera.angles),
+        "perspective": float(camera.perspective),
+        "selected": list(selection),
+        "active": selection.active,
+        "title": viewer.title,
+    }
+
+
+def restore_view(viewer, state: dict) -> None:
+    """Put back what `capture_view` recorded, the dims before the camera.
+
+    The order first, because the camera and the plane are read through
+    it; the camera last, because a change of order moves it.
+    """
+    dims = viewer.dims
+    if tuple(dims.order) != state["order"] and len(dims.order) == len(state["order"]):
+        dims.order = state["order"]
+    if len(dims.point) == len(state["point"]):
+        dims.point = state["point"]
+    camera = getattr(viewer, "scene", viewer).camera
+    camera.center = state["center"]
+    camera.zoom = state["zoom"]
+    camera.angles = state["angles"]
+    camera.perspective = state["perspective"]
+    kept = [layer for layer in state["selected"] if layer in viewer.layers]
+    selection = viewer.layers.selection
+    selection.clear()
+    selection.update(kept)
+    if state["active"] in kept:
+        selection.active = state["active"]
+    viewer.title = state["title"]
+
+
 def mirror_center(layers, axis: int = MIRROR_AXIS) -> float:
     """Mid-point of `layers` along one axis, in world micrometers.
 
@@ -304,6 +354,7 @@ __all__ = [
     "GIMBAL_NUDGE_DEG",
     "MIRROR_AXIS",
     "apply_mirror",
+    "capture_view",
     "fit_view",
     "install_home_orientation",
     "install_initial_fit",
@@ -311,4 +362,5 @@ __all__ = [
     "mirror_center",
     "mirror_matrix",
     "orient_anterior",
+    "restore_view",
 ]

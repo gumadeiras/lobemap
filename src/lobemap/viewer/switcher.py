@@ -7,7 +7,9 @@ maximized geometry and put a fresh window wherever the window manager felt
 like, which for a viewer whose default view is carefully fitted is a
 regression, not a neutral implementation detail.
 
-`SceneSession.teardown` does the unloading; this is only the control.
+The next scene is built beside the open one, which is torn down only once
+that build has succeeded, so a failed switch leaves the user's scene as it
+was. `SceneSession.teardown` does the unloading; this is only the control.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from qtpy.QtWidgets import (
 
 from .request import loadable_spaces
 from .slicing import slice_axes
+from .view import capture_view, restore_view
 
 #: What the slice-axis menu is for, and why its angles are shown.
 SLICE_TIP = (
@@ -213,36 +216,62 @@ class SpaceSwitcher(QWidget):
         # Reentrancy guard: restoring the combo on failure re-emits the
         # signal, which would try to load the failed space a second time.
         self._busy = True
-        previous = self.session.space
-        anatomy = self._anatomy.get(self.session.slice_axis)
         try:
-            self.status.setText(f"loading {want}...")
-            self.session.teardown()
-            self.session = self._load(want)
+            self._switch(want)
+        finally:
+            self._busy = False
+
+    def _switch(self, want: str) -> None:
+        """Build `want` beside the open scene, and only then drop the open one.
+
+        A failed build is undone and the open scene was never touched, so the
+        user gets back exactly what they had: every tab's checked rows,
+        labels, fills, filter and driver line, the open tab, the mirror.
+        What the build did move belongs to the viewer -- the slice axis and
+        plane, the camera, the selected layer, the title, the axis triads
+        and the home button -- and is put back from what was captured before
+        it started. Rebuilding the previous space instead, as this used to,
+        gave its defaults back rather than the user's scene.
+        """
+        old = self.session
+        anatomy = self._anatomy.get(old.slice_axis)
+        before = capture_view(self.viewer)
+        self.status.setText(f"loading {want}...")
+        new = None
+        try:
+            new = self._load(want)
             # A scene is built unmirrored, so the control has to re-assert
             # itself onto the new one rather than the state being implicit.
             if self.mirror.isChecked():
-                self.session.set_mirror(True)
+                new.set_mirror(True)
+            self.session = new
             self._fill_slices(keep=anatomy)
-            self.session.set_slice_axis(self.session.slice_axis)
+        except Exception as exc:                      # noqa: BLE001
+            self.session = old
+            steps = [self._fill_slices, lambda: restore_view(self.viewer, before),
+                     old.reassert]
+            if new is not None:
+                steps.insert(0, new.teardown)
+            # Each step on its own: this runs inside a Qt slot, where an
+            # exception aborts the process, and every step that can still
+            # run gives back more of the user's scene.
+            for step in steps:
+                with contextlib.suppress(Exception):
+                    step()
+            self.status.setText(f"{want} failed: {exc}")
+            index = self.combo.findData(old.space)
+            if index >= 0:
+                self.combo.setCurrentIndex(index)
+            return
+        old.teardown()
+        try:
+            new.settle_view()
             self.settle()
             self.status.setText("")
         except Exception as exc:                      # noqa: BLE001
-            # A failed switch must not leave an empty viewer, so fall back to
-            # what was loaded before and say why.
-            self.status.setText(f"{want} failed: {exc}")
-            with contextlib.suppress(Exception):
-                self.session = self._load(previous)
-                if self.mirror.isChecked():
-                    self.session.set_mirror(True)
-                self._fill_slices(keep=anatomy)
-                self.session.set_slice_axis(self.session.slice_axis)
-                self.settle()
-            index = self.combo.findData(self.session.space)
-            if index >= 0:
-                self.combo.setCurrentIndex(index)
-        finally:
-            self._busy = False
+            # The new scene is complete and the old one gone; only framing
+            # it failed, which is worth saying but not undoing.
+            self.status.setText(f"{want}: {exc}")
 
 
 __all__ = ["SpaceSwitcher"]
