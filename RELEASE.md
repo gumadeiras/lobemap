@@ -16,7 +16,7 @@ lobemap publishes to PyPI through GitHub Actions Trusted Publishing. No PyPI API
 4. Add a fresh empty `Unreleased` section at the top of `CHANGELOG.md` for future changes.
 5. Run `uv build --out-dir /tmp/lobemap-dist-<version> --clear`.
 6. Run `uvx twine check --strict /tmp/lobemap-dist-<version>/*`.
-7. Install the wheel into a fresh environment outside the checkout and run `lobemap --version` and `lobemap spaces` from a directory outside the checkout. A source checkout hides missing package data, so this is the only check that sees what a PyPI user gets.
+7. Install the wheel into a fresh environment outside the checkout and run `lobemap --version`, `lobemap spaces` and `lobemap validate` from a directory outside the checkout. A source checkout hides missing package data, so this is the only check that sees what a PyPI user gets. `--version` must print the version in `pyproject.toml`, `spaces` must list all four spaces, and `validate` must report `ok`; its compartment counts are 0 until `LOBEMAP_DATA` points at fetched data.
 8. Commit the version and changelog changes.
 9. Create a GitHub release whose tag is the same version, with or without a leading `v`.
 10. Publish the release.
@@ -24,12 +24,12 @@ lobemap publishes to PyPI through GitHub Actions Trusted Publishing. No PyPI API
 
 ## Data Releases
 
-The data artifacts are neither tracked in git nor shipped in the wheel. They are assets of a GitHub release tagged `data-v<N>`, and `registry/manifest.toml` records that release as `base_url`, plus the sha256 and size of each artifact. `lobemap fetch` downloads from `base_url` and discards anything that does not match.
+The data artifacts are neither tracked in git nor shipped in the wheel. They are assets of a GitHub release tagged `data-v<N>`, and `registry/manifest.toml` records that release as `base_url`, plus the sha256 and size of each uploaded file; a `.zarr` store is uploaded as a zip, so its sha256 is of the zip. Each store also has a `tree_sha256`, a digest of its content on disk. `lobemap fetch` downloads from `base_url`, checks the file and then the unpacked store, and discards anything that does not match. `lobemap fetch --check` checks a store by its `tree_sha256`, so the result does not depend on the platform or the zlib build, and it writes nothing.
 
 1. Rebuild the changed assets with `lobemap build <asset>`; `registry/data/README.md` describes each pipeline.
 2. Choose a new tag, `data-v<N+1>`. Never replace the assets of an existing data release: every earlier commit verifies against the hashes it recorded.
-3. Run `lobemap manifest --base-url https://github.com/gumadeiras/lobemap/releases/download/data-v<N+1>` to record the new hashes and location.
-4. Run `lobemap pack --all`. It writes the upload files to `registry/data/.pack` under the names `fetch` requests, and fails if any file does not match the manifest.
+3. Run `lobemap manifest --base-url https://github.com/gumadeiras/lobemap/releases/download/data-v<N+1>` to record the new hashes and location. A store whose `tree_sha256` matches the previous manifest keeps its published sha256 and size, because zipping it again on another machine can give different bytes; a changed store is zipped and hashed again.
+4. Run `lobemap pack --all`. It writes the upload files to `registry/data/.pack` under the names `fetch` requests, and fails if any file does not match the manifest. If it reports `MISMATCH` for a store the manifest kept, this machine does not reproduce the published zip: download that zip from the previous data release into `registry/data/.pack` (`gh release download data-v<N> --repo gumadeiras/lobemap --pattern '<asset>.zarr.zip' --dir registry/data/.pack`) and run `pack` again, which keeps a file that matches.
 5. Create the release with the packed files: `gh release create data-v<N+1> --repo gumadeiras/lobemap --target <commit> --title data-v<N+1> --latest=false registry/data/.pack/*`. `--latest=false` keeps the package release marked as latest. The PyPI workflow skips tags that start with `data-`, but a release runs the workflow file of its tagged commit, so target a commit that has that guard.
 6. Verify from an empty data directory: `LOBEMAP_DATA="$(mktemp -d)" lobemap fetch`, then `lobemap fetch --check` with the same directory.
 7. Commit `registry/manifest.toml`.
