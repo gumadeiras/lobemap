@@ -28,6 +28,30 @@ atlas's extent along the slider axis, snapped to slider steps. Each worker
 sweeps them twice: the first sweep visits each plane for the first time, the
 second repeats the same planes in the same order.
 
+Parts of a step:
+
+- `--hide contours`, `--hide image` or both hides every contour layer, the
+  reference images, or both, before the sweeps, which isolates the other
+  part (both hidden is napari's own floor for a step). Hiding
+  a layer makes napari re-pick each image's pyramid level for the canvas, so
+  the level the full scene had is put back afterwards: both runs slice the
+  same level.
+- Every step also records `loaded`: the time from the call until every
+  visible layer reports its new slice loaded, processing Qt events meanwhile.
+  With synchronous slicing, which is what the viewer does, that is the call
+  itself. `--async` switches on napari's asynchronous slicing for the
+  benchmark's viewer (the viewer itself does not), for measuring a route
+  that moves slicing off the main thread: `loaded` is then when the new
+  plane is actually in the layer, and `ui` adds the main-thread time napari
+  spends applying the result, which the call does not include.
+- Each worker reports the pyramid levels its images were sliced at, and its
+  resident memory at the end. A hidden canvas never draws, and drawing is
+  when napari picks a multiscale image's level for the canvas, so the level
+  is whatever the last draw before the sweeps picked -- in JRCFIB2018F one
+  from before the camera's last fit. `--draw` runs napari's draw hook once
+  the scene is open, as a shown window does on its next frame, so each level
+  follows napari's rule for the benchmark's canvas.
+
 The machine is rarely quiet, so use `--repeat` and read the spread, not one
 number. `--no-bermuda` hides napari's compiled triangulation backend, which
 reproduces an environment without it.
@@ -87,23 +111,102 @@ def _step_indices(viewer, axis: int, lo: float, hi: float, n: int) -> list[int]:
     return [k for k in ks if 0 <= k < nsteps]
 
 
+#: Main-thread milliseconds napari has spent applying asynchronous slice
+#: results; see `_count_ready`.
+_READY_MS = [0.0]
+
+
+def _count_ready() -> None:
+    """Time `QtViewer._on_slice_ready` on the main thread, where it runs.
+
+    It is wrapped to hop to the main thread, so the timer goes inside that
+    wrapper. Must run before the viewer exists: the viewer connects the
+    wrapped method when it is built.
+    """
+    from napari._qt.qt_viewer import QtViewer
+    from superqt.utils import ensure_main_thread
+
+    inner = QtViewer._on_slice_ready.__wrapped__
+
+    def timed(self, event):
+        t0 = time.perf_counter()
+        try:
+            return inner(self, event)
+        finally:
+            _READY_MS[0] += (time.perf_counter() - t0) * 1e3
+
+    QtViewer._on_slice_ready = ensure_main_thread(timed)
+
+
+def _images(viewer) -> list:
+    return [layer for layer in viewer.layers
+            if layer.metadata.get("lobemap", {}).get("kind") == "image"]
+
+
+def _wait_loaded(viewer, app, timeout_s: float = 10.0) -> None:
+    deadline = time.perf_counter() + timeout_s
+    while not all(layer.loaded for layer in viewer.layers if layer.visible):
+        if time.perf_counter() > deadline:
+            raise TimeoutError("a layer never finished slicing")
+        app.processEvents()
+
+
 def _sweeps(viewer, axis, ks, app, shapes_of=None) -> dict:
     """Two timed passes over the same planes."""
     out = {}
+    images = _images(viewer)
     for name in ("first", "repeat"):
-        times, shapes = [], []
+        times, loaded, ui, shapes, levels = [], [], [], [], set()
         for k in ks:
+            ready0 = _READY_MS[0]
             t0 = time.perf_counter()
             viewer.dims.set_current_step(axis, k)
-            times.append((time.perf_counter() - t0) * 1e3)
+            t1 = time.perf_counter()
+            _wait_loaded(viewer, app)
+            t2 = time.perf_counter()
+            times.append((t1 - t0) * 1e3)
+            loaded.append((t2 - t0) * 1e3)
             _settle(app, 1)
+            ui.append(times[-1] + _READY_MS[0] - ready0)
+            levels.update((layer.name, int(layer.data_level)) for layer in images
+                          if layer.visible)
             if shapes_of is not None:
                 shapes.append(shapes_of())
         out[name] = _stats(times)
         out[name]["raw"] = times
+        out[name]["loaded"] = {**_stats(loaded), "raw": loaded}
+        out[name]["ui"] = {**_stats(ui), "raw": ui}
+        out[name]["levels"] = sorted(levels)
         if shapes:
             out[name]["shapes"] = shapes
     return out
+
+
+def _hide(viewer, session, parts, app) -> None:
+    """Hide the contours and/or the images, keeping each image's level."""
+    if not parts:
+        return
+    images = _images(viewer)
+    kept = [(layer, layer._data_level, layer.corner_pixels.copy()) for layer in images
+            if layer.multiscale]
+    if "contours" in parts:
+        for overlay in session.contours.values():
+            overlay.layer.visible = False
+    if "image" in parts:
+        for layer in images:
+            layer.visible = False
+    for layer, level, corners in kept:
+        if layer.visible and layer._data_level != level:
+            layer._data_level = level
+            layer.corner_pixels = corners
+            layer.refresh(extent=False, thumbnail=False)
+    _settle(app)
+
+
+def _rss_mb() -> float:
+    import psutil
+
+    return psutil.Process().memory_info().rss / 2**20
 
 
 def _backend() -> dict:
@@ -120,7 +223,7 @@ def _backend() -> dict:
 # -- workers -------------------------------------------------------------
 
 
-def _open(space: str, ndisplay: int, registry_root, data_root):
+def _open(space: str, ndisplay: int, registry_root, data_root, asynchronous=False):
     import napari
 
     from lobemap.core.registry import Registry
@@ -129,7 +232,12 @@ def _open(space: str, ndisplay: int, registry_root, data_root):
     t0 = time.perf_counter()
     registry = Registry.load(registry_root, data_root=data_root)
     registry_s = time.perf_counter() - t0
+    _count_ready()
     viewer = napari.Viewer(show=False, ndisplay=ndisplay)
+    if asynchronous:
+        # napari's own switch, `settings.experimental.async_`, is saved to
+        # the user's settings; this is the same switch on one viewer.
+        viewer._layer_slicer._force_sync = False
     app = _app()
     _settle(app)
     t0 = time.perf_counter()
@@ -168,8 +276,10 @@ def _row_toggles(session, primary, app, count: int = 10) -> dict:
     return out
 
 
-def work_steps(space, mode, planes, registry_root, data_root) -> dict:
-    viewer, registry, session, app, load = _open(space, 2, registry_root, data_root)
+def work_steps(space, mode, planes, registry_root, data_root, hide=None,
+               asynchronous=False, draw=False) -> dict:
+    viewer, registry, session, app, load = _open(space, 2, registry_root, data_root,
+                                                 asynchronous)
     try:
         primary, axis, ks = _primary_planes(viewer, registry, session, space, planes)
         overlay = session.contours[primary]
@@ -177,14 +287,20 @@ def work_steps(space, mode, planes, registry_root, data_root) -> dict:
             overlay.set_labels(set(overlay.selection))
             overlay.set_fills(set(overlay.selection))
             _settle(app)
+        if draw:
+            viewer.window._qt_viewer.canvas.on_draw()
+            _settle(app)
+        _hide(viewer, session, hide, app)
         result = {
             "space": space, "mode": mode, "axis": axis, "planes": len(ks),
+            "hide": hide, "async": asynchronous, "draw": draw,
             **load, **_backend(),
             "sweeps": _sweeps(viewer, axis, ks, app,
                               shapes_of=lambda: len(overlay.paths)),
         }
-        if mode == "primary":
+        if mode == "primary" and not hide:
             result["toggle"] = _row_toggles(session, primary, app)
+        result["rss_mb"] = _rss_mb()
         return result
     finally:
         viewer.close()
@@ -220,7 +336,7 @@ def work_switch(space, cycles, registry_root, data_root) -> dict:
                     _settle(app)
                     switches.append({"to": target, "ms": dt, **counts})
             return {"space": space, "mode": "switch", **load, **_backend(),
-                    "switches": switches}
+                    "switches": switches, "rss_mb": _rss_mb()}
         finally:
             viewer.close()
     finally:
@@ -279,7 +395,8 @@ def _worker_main(args) -> int:
         result = work_switch(args.space, args.cycles, registry_root, args.data_root)
     else:
         result = work_steps(args.space, args.mode, args.planes,
-                            registry_root, args.data_root)
+                            registry_root, args.data_root, args.hide, args.asynchronous,
+                            args.draw)
     print("RESULT " + json.dumps(result), flush=True)
     return 0
 
@@ -304,8 +421,9 @@ def _fmt(s: dict) -> str:
 def _summary(results: list[dict]) -> str:
     lines = [
         ("| space | mode | planes | first sweep ms (median / p95) | repeat sweep ms "
-         "(median / p95) | shapes/plane | cold load s | row toggle ms (median / p95) |"),
-        "|---|---|---|---|---|---|---|---|",
+         "(median / p95) | shapes/plane | cold load s | row toggle ms (median / p95) "
+         "| first ui / loaded ms | repeat ui / loaded ms | levels | RSS MB |"),
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         if r["mode"] == "switch":
@@ -313,10 +431,16 @@ def _summary(results: list[dict]) -> str:
         sweeps = r["sweeps"]
         shapes = sweeps["first"].get("shapes")
         shape_txt = f"{sorted(shapes)[len(shapes) // 2]}" if shapes else "-"
+        mode = r["mode"] + "".join(f" -{part}" for part in r.get("hide") or ()) + (
+            " async" if r.get("async") else "") + (" draw" if r.get("draw") else "")
+        levels = ",".join(f"{lvl}" for _, lvl in sweeps["first"].get("levels", []))
         lines.append(
-            f"| {r['space']} | {r['mode']} | {r['planes']} | {_fmt(sweeps['first'])} | "
+            f"| {r['space']} | {mode} | {r['planes']} | {_fmt(sweeps['first'])} | "
             f"{_fmt(sweeps['repeat'])} | {shape_txt} | {r['load_s']:.2f} | "
-            f"{_fmt(r.get('toggle', {}))} |"
+            f"{_fmt(r.get('toggle', {}))} | "
+            f"{_fmt(sweeps['first'].get('ui', {}))} ; {_fmt(sweeps['first'].get('loaded', {}))} | "
+            f"{_fmt(sweeps['repeat'].get('ui', {}))} ; {_fmt(sweeps['repeat'].get('loaded', {}))} | "
+            f"{levels or '-'} | {r.get('rss_mb', 0):.0f} |"
         )
     switch = [r for r in results if r["mode"] == "switch"]
     if switch:
@@ -347,6 +471,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="an export of main, for the benton mode")
     p.add_argument("--no-bermuda", action="store_true",
                    help="hide napari's compiled triangulation backend")
+    p.add_argument("--hide", nargs="+", choices=("contours", "image"), default=None,
+                   help="hide the contours and/or the reference images before the sweeps")
+    p.add_argument("--async", dest="asynchronous", action="store_true",
+                   help="slice with napari's asynchronous slicing (the viewer does not)")
+    p.add_argument("--draw", action="store_true",
+                   help="let napari pick image levels for the canvas before the sweeps")
     p.add_argument("--json", default=None, help="write every result here")
     p.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--mode", default=None, help=argparse.SUPPRESS)
@@ -362,6 +492,12 @@ def main(argv: list[str] | None = None) -> int:
         common += ["--data-root", args.data_root]
     if args.no_bermuda:
         common.append("--no-bermuda")
+    if args.hide:
+        common += ["--hide", *args.hide]
+    if args.asynchronous:
+        common.append("--async")
+    if args.draw:
+        common.append("--draw")
     jobs = []
     for mode in args.modes:
         if mode == "benton":
