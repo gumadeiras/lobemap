@@ -190,3 +190,16 @@ def test_any_other_layout_is_read_by_zarr(tmp_path, layout):
 def test_the_shipped_layout_is_read_directly(store):
     _, levels = store
     assert all(chunkcache._ChunkFiles.of(arr) is not None for arr in levels)
+
+
+def test_a_whole_level_for_3d_is_read_but_not_kept(store):
+    """3D keeps its levels itself (`images.FineLevel`); the cache stays 2D's."""
+    from lobemap.viewer.chunkcache import read_whole
+
+    _, levels = store
+    cache = ChunkCache()
+    level = cached_levels(levels, cache)[0]
+    assert np.array_equal(read_whole(level), np.asarray(levels[0][:]))
+    assert len(cache) == 0
+    plain = np.arange(24).reshape(2, 3, 4)
+    assert np.array_equal(read_whole(plain), plain)

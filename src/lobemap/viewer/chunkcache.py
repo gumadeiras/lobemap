@@ -19,10 +19,12 @@ is the whole of what zarr would do for them; zarr's own reader serializes
 through its event loop and is two to three times slower here. Any other
 store is read through zarr.
 
-The budget holds the level 3D renders, so a return to 3D is served from
-memory too, as it was from dask's cache. A read larger than half the budget
-is assembled from the chunk files without being kept, so no single read can
-flush everything else out.
+3D reads its levels whole, through `read_whole`, which assembles them from
+the chunk files without keeping any: `images.FineLevel` holds each such
+level as an array for the layer's life, so a return to 3D is served from
+memory, and the cache holds 2D's chunks only. Any other read larger than
+half the budget is assembled the same way, so no single read can flush
+everything else out.
 """
 
 from __future__ import annotations
@@ -37,12 +39,11 @@ from pathlib import Path
 
 import numpy as np
 
-#: Decoded bytes kept per stain. The level 3D pins is up to 700 M voxels
-#: (`images.VIEW3D_MAX_VOXELS`), 545 and 705 MB in whole chunks for the FAFB
-#: and male CNS stains, and must fit in half of this to be kept. In 2D a
-#: maximized window shows the FAFB stain's second level, 60 MB a chunk
-#: layer; zoomed into its full-resolution level, a chunk layer is 100 MB.
-CACHE_BYTES = 1536 * 2**20
+#: Decoded bytes kept per stain, for 2D. A maximized window shows the FAFB
+#: stain's second level, 60 MB a chunk layer; zoomed into its full-resolution
+#: level, a chunk layer is 100 MB. So this holds a few chunk layers, and a
+#: plane only needs the one it lies in.
+CACHE_BYTES = 512 * 2**20
 
 _POOL: ThreadPoolExecutor | None = None
 _POOL_LOCK = threading.Lock()
@@ -211,8 +212,12 @@ class CachedLevel:
         block = self._read(lo, hi)
         return block[tuple(0 if b[3] else slice(None, None, b[2]) for b in box)]
 
-    def _read(self, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
-        """The box [lo, hi) of the level, from cached chunks where it can."""
+    def _read(self, lo: np.ndarray, hi: np.ndarray, keep: bool = True) -> np.ndarray:
+        """The box [lo, hi) of the level, from cached chunks where it can.
+
+        With `keep` false, or a box too big to cache, the chunks it reads are
+        not kept.
+        """
         if np.any(hi <= lo):
             return np.empty(tuple(np.maximum(hi - lo, 0)), dtype=self.dtype)
         # Per axis: each chunk index the box crosses, where its part lands in
@@ -230,7 +235,7 @@ class CachedLevel:
         cells = list(product(*index))
         out = np.empty(tuple(hi - lo), dtype=self.dtype)
         spanned = len(cells) * int(np.prod(self.chunks)) * self.dtype.itemsize
-        if spanned > self._cache.max_bytes // 2:
+        if not keep or spanned > self._cache.max_bytes // 2:
             return self._read_through(cells, product(*dst), product(*src), out, lo, hi)
         arrays = self._cache.get_many([(self._key, idx) for idx in cells])
         missing = [idx for idx, arr in zip(cells, arrays, strict=True) if arr is None]
@@ -309,6 +314,18 @@ def _box(key, shape):
     return out
 
 
+def read_whole(level) -> np.ndarray:
+    """A whole pyramid level as an array, read without filling the cache.
+
+    For a `CachedLevel`, straight from its chunk files by the thread pool;
+    for anything else, whatever reading it whole does.
+    """
+    if isinstance(level, CachedLevel):
+        lo, hi = (np.array(v) for v in zip(*level._box, strict=True))
+        return level._read(lo, hi, keep=False)
+    return np.asarray(level[...])
+
+
 def cached_levels(levels, cache: ChunkCache | None = None) -> list:
     """Each chunked level wrapped over one shared cache; others unchanged."""
     cache = ChunkCache() if cache is None else cache
@@ -322,4 +339,4 @@ def cached_levels(levels, cache: ChunkCache | None = None) -> list:
     return out
 
 
-__all__ = ["CACHE_BYTES", "CachedLevel", "ChunkCache", "cached_levels"]
+__all__ = ["CACHE_BYTES", "CachedLevel", "ChunkCache", "cached_levels", "read_whole"]

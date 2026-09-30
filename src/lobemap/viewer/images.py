@@ -11,7 +11,7 @@ import weakref
 
 import numpy as np
 
-from .chunkcache import cached_levels
+from .chunkcache import cached_levels, read_whole
 from .napari_private import keep_extent_while_slicing
 
 #: Per-role display defaults for image layers.
@@ -105,16 +105,18 @@ class FineLevel:
     napari reads a pinned level whole, on the UI thread, through dask: the
     finest one that fits a texture is a 0.4-1.0 s stall in the EM spaces,
     on every entry into 3D. So 3D is first pinned to a coarser level, the
-    fine one is read in a thread straight from the store -- half the time
-    of the chunk-by-chunk dask read -- and swapped in when it arrives.
+    fine one is read in a thread straight from its chunk files, by the
+    reader 2D uses (`chunkcache`), and swapped in when it arrives.
     Both are kept for the layer's life, so the next entry into 3D pins the
     fine one at once; the price is their memory, 0.3-0.7 GB, which 3D held
-    anyway. While the fine one is read, the UI thread shares the store's
-    event loop and the interpreter with it, so it runs slower, not stalled.
+    anyway. While the fine one is read, the UI thread shares the chunk
+    reader's threads and the interpreter with it, so it runs slower, not
+    stalled.
 
     A daemon thread, polled from the UI thread, rather than a Qt worker:
     the thread only stores its result, so no Qt object is touched off the
-    UI thread, and a read still running when the process exits is dropped.
+    UI thread. A read still running when the process exits decodes the
+    chunks it has queued, well under a second, and is then dropped.
     A Qt pool worker is waited for when the application object is
     destroyed, which happens with the interpreter lock held, and a worker
     needing that lock to finish hung the process at exit.
@@ -127,7 +129,8 @@ class FineLevel:
         self._layer = weakref.ref(layer)
         self.level = level
         self.coarse = coarse
-        #: The store's own arrays, one per level.
+        #: The layer's levels as it was given them, read whole by the chunk
+        #: reader 2D uses (`chunkcache.read_whole`), which keeps none of it.
         self._sources = sources
         #: The level's voxels, once read and swapped in.
         self.array = None
@@ -151,10 +154,9 @@ class FineLevel:
             layer.locked_data_level = self.level
             return
         if not self._coarse_in:
-            # The coarse level is read now, and also straight from the
-            # store: 0.1 s, against 0.3 s through dask.
+            # The coarse level is read now, and also by the chunk reader.
             self._coarse_in = True
-            self._swap_in(layer, self.coarse, np.asarray(self._sources[self.coarse][...]))
+            self._swap_in(layer, self.coarse, read_whole(self._sources[self.coarse]))
         layer.locked_data_level = self.coarse
         if self._thread is None:
             self._start()
@@ -181,7 +183,7 @@ class FineLevel:
 
         def read() -> None:
             try:
-                self._result = ("ok", np.asarray(source[...]))
+                self._result = ("ok", read_whole(source))
             except Exception as exc:              # noqa: BLE001 - reported below
                 self._result = ("failed", exc)
 
@@ -327,7 +329,9 @@ def add_images(viewer, registry, space: str) -> list:
         if volume.is_multiscale:
             coarse = coarse_level_for_3d(data, level)
             if coarse != level:
-                _FINE[layer] = FineLevel(layer, level, coarse, volume.levels)
+                # Read by the same chunk reader as 2D, without caching:
+                # FineLevel keeps both levels itself.
+                _FINE[layer] = FineLevel(layer, level, coarse, data)
         layer.metadata["lobemap"] = {
             "kind": "image",
             "asset": asset.id,

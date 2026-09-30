@@ -1,8 +1,8 @@
-"""Which pyramid level of the stain is drawn, and that it is the store's.
+"""In 2D, the stain level napari picks by zoom is drawn from the store's voxels.
 
-3D pins the finest level that fits a texture; 2D lets napari pick by zoom.
 Checked on the arrays napari hands to vispy, against the store read
 directly, so a cache that served the wrong chunk or the wrong level fails.
+3D's levels are checked in `test_deferred_parts.py`.
 """
 
 from __future__ import annotations
@@ -32,19 +32,6 @@ def _draw(viewer) -> None:
     """What a visible canvas does on every frame: napari re-picks the level."""
     viewer.window._qt_viewer.canvas.on_draw()
     pump()
-
-
-def test_3d_draws_the_pinned_level_whole(monkeypatch):
-    with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
-        assert code == 0
-        layer = _stain(viewer)
-        pinned = layer.metadata["lobemap"]["level_3d"]
-        assert layer.locked_data_level == pinned == 1
-        shown = np.asarray(layer._slice.image.raw)
-        level = _store()[pinned]
-        assert shown.shape == tuple(level.shape)
-        k = level.shape[2] // 2
-        assert np.array_equal(shown[:, :, k], np.asarray(level[:, :, k]))
 
 
 def test_2d_zoom_picks_a_finer_level_and_draws_its_tile(monkeypatch):
