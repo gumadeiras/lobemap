@@ -12,7 +12,7 @@ requires-python = ">=3.11,<3.13"
 # Gustavo Madeira Santana originated lobemap and holds the copyright in
 # LICENSE. The viewer here is a rewrite, but the project, its name, the
 # curated nomenclature tables and the source data under registry/sources/
-# are his work, so he stays on the package metadata -- see README Lineage.
+# are his work, so he stays on the package metadata -- see README Authors.
 authors = [
   { name = "David Zimmerman" },
   { name = "Gustavo Madeira Santana", email = "fromweb1@gumadeiras.com" },
