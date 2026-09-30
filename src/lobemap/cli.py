@@ -409,13 +409,13 @@ def cmd_ingest_neuprint(args) -> int:
 def cmd_stain(args) -> int:
     """Build a virtual neuropil stain from predicted presynapse locations."""
     import shutil
+    import tempfile
     import time
 
     import numpy as np
 
     from .core.registry import Registry
     from .ingest.synapse_sources import neuprint_client, neuprint_presynapses
-    from .ingest.virtual_stain import build_stain, effective_sigma_um
     from .validate import images as gi
 
     token = args.token or os.environ.get("NEUPRINT_APPLICATION_CREDENTIALS")
@@ -478,7 +478,9 @@ def cmd_stain(args) -> int:
         }[args.bucket]
         batches = loader(args.path, progress=progress)
         source = f"{args.bucket} bulk release: {Path(args.path).name}"
-        confidence = args.confidence if args.bucket != "hemibrain" else None
+        # hemibrain and FAFB are read unfiltered: the hemibrain shards are
+        # taken whole, and the Princeton FAFB table has no score column.
+        confidence = None if args.bucket in ("hemibrain", "fafb") else args.confidence
     else:
         client = neuprint_client(args.server, args.dataset, token)
         batches = neuprint_presynapses(
@@ -499,7 +501,35 @@ def cmd_stain(args) -> int:
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
-    workdir = Path(args.workdir) if args.workdir else data_root / ".stainwork"
+    # Scratch goes in a directory of its own inside the chosen one, and only
+    # that directory is removed: `--workdir` may name a directory that holds
+    # other files, and removing it whole deleted them.
+    base = Path(args.workdir) if args.workdir else data_root / ".stainwork"
+    base.mkdir(parents=True, exist_ok=True)
+    workdir = Path(tempfile.mkdtemp(prefix=f"{args.asset_id}-", dir=base))
+    try:
+        return _finish_stain(args, reg, gi, data_root, batches, lo, hi, source,
+                             confidence, workdir, on_stage, start)
+    finally:
+        if args.keep_workdir:
+            print(f"  scratch      : kept in {workdir}")
+        else:
+            shutil.rmtree(workdir, ignore_errors=True)
+            if workdir.exists():
+                print(f"  note         : {workdir} still holds scratch files")
+            if not args.workdir and base.exists() and not any(base.iterdir()):
+                base.rmdir()
+
+
+def _finish_stain(args, reg, gi, data_root, batches, lo, hi, source, confidence,
+                  workdir, on_stage, start) -> int:
+    """Build, save and check one stain; `cmd_stain` owns the scratch directory."""
+    import time
+
+    import numpy as np
+
+    from .ingest.virtual_stain import build_stain, effective_sigma_um
+
     volume, stats = build_stain(
         batches, lo, hi, space=args.space, source=source,
         voxel_um=args.voxel, sigma_um=args.sigma, confidence=confidence,
@@ -537,13 +567,9 @@ def cmd_stain(args) -> int:
     if shells:
         print(gi.check_image_inside_shell(volume, reg.mesh(shells[0].id), args.asset_id))
 
-    # Tens of GB of scratch: a cache, not a result. Dropped only once nothing
-    # maps it any more.
+    # Tens of GB of scratch: a cache, not a result. `cmd_stain` drops it once
+    # nothing maps it any more.
     del volume
-    if workdir.exists() and not args.keep_workdir:
-        shutil.rmtree(workdir, ignore_errors=True)
-        if workdir.exists():
-            print(f"  note         : {workdir} still holds scratch files")
     return 0
 
 

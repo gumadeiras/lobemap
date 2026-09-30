@@ -102,6 +102,28 @@ def test_stain_writes_into_the_data_root(split, tmp_path):
     _untouched(reg)
 
 
+def test_stain_removes_only_its_own_scratch(split, tmp_path):
+    """`--workdir` may name a directory with other files in it; they stay."""
+    pytest.importorskip("pyarrow")
+    pytest.importorskip("flybrains")
+    from lobemap.core.imagefmt import Volume
+
+    reg, data = split
+    table = tmp_path / "synapses.csv"
+    table.write_text("pre_x,pre_y,pre_z\n1000,1000,1000\n2000,1500,1000\n"
+                     "661486,322979,269198\n")
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "keep.txt").write_text("not scratch")
+    assert _run(split, "stain", "--space", "S1", "--asset-id", "tiny_stain",
+                "--bucket", "fafb", "--path", str(table), "--workdir", str(work),
+                "--bounds", "0", "0", "0", "4", "4", "4", "--voxel", "1") == 0
+    assert sorted(p.name for p in work.iterdir()) == ["keep.txt"]
+    # The Princeton FAFB table has no score column, so no filter was applied.
+    meta = Volume.load(data / "tiny_stain.npz").meta
+    assert meta.get("confidence_threshold") is None, meta
+
+
 def test_ingest_neuprint_writes_into_the_data_root(split, monkeypatch):
     """neuPrint itself is replaced: this is about where the result goes."""
     from lobemap.ingest import neuprint_rois
