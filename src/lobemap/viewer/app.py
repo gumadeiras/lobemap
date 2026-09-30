@@ -537,7 +537,10 @@ class SceneSession:
         target = busiest_plane(spans[0])
         if target is None:
             return False
-        self.viewer.dims.set_point(axis, target)
+        # On the slider's own grid: napari snaps an off-grid point a moment
+        # later, which drew every contour a second time on a neighbor plane.
+        start, _stop, step = self.viewer.dims.range[axis]
+        self.viewer.dims.set_current_step(axis, round((target - start) / step))
         return True
 
     def show(self, names) -> None:
