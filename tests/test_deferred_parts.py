@@ -14,6 +14,7 @@ import time
 import numpy as np
 import pytest
 from viewer_harness import (
+    assert_renders_loops,
     assert_rows_match_drawing,
     checked,
     drawn,
@@ -23,6 +24,7 @@ from viewer_harness import (
     pump,
     session,
     switch_to,
+    switcher,
 )
 
 pytestmark = pytest.mark.requires_data
@@ -89,6 +91,38 @@ def test_a_deferred_part_is_built_when_its_tab_opens(monkeypatch, space, name, n
             viewer.dims.ndisplay = mode
             pump(300)
             assert_rows_match_drawing(sess)
+
+
+@pytest.mark.parametrize(("space", "name"), DEFERRED)
+def test_a_part_built_under_the_mirror_is_drawn_mirrored(monkeypatch, space, name):
+    """Built after the mirror was turned on, it is reflected like the rest."""
+    from lobemap.viewer.view import MIRROR_AXIS, mirror_matrix
+
+    with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        sess = session(viewer)
+        switcher(viewer).mirror.click()
+        pump()
+        assert sess.mirrored
+        center = sess.mirror_center
+
+        tab = _open_tab(sess.panel, name)
+        surface, contour = tab.surface, sess.contours[name]
+        for layer in (surface.layer, contour.layer):
+            np.testing.assert_allclose(layer.affine.affine_matrix,
+                                       mirror_matrix(3, center), atol=1e-9)
+        # The whole mesh, reflected about the scene's mirror plane.
+        x = surface.meshset.vertices[:, MIRROR_AXIS]
+        lo, hi = surface.layer.extent.world[:, MIRROR_AXIS]
+        assert lo == pytest.approx(2 * center - x.max(), abs=1e-4)
+        assert hi == pytest.approx(2 * center - x.min(), abs=1e-4)
+
+        # And its outlines are drawn where that reflection puts them.
+        _buttons(tab)["Show all"].click()
+        pump(300)
+        assert drawn(surface, contour), "no outline on the plane"
+        assert_renders_loops(contour)
+        assert_rows_match_drawing(sess)
 
 
 @pytest.mark.parametrize("space", STAINED)
