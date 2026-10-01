@@ -297,10 +297,8 @@ def restore_view(viewer, state: dict) -> None:
     viewer.title = state["title"]
 
 
-def mirror_center(layers, axis: int = MIRROR_AXIS, bounds=()) -> float:
-    """Mid-point of `layers`, and of any (low, high) `bounds`, along one axis.
-
-    In world micrometers. `bounds` stands in for what has no layer yet.
+def mirror_center(layers, axis: int = MIRROR_AXIS) -> float:
+    """Mid-point of `layers` along one axis, in world micrometers.
 
     Reflecting about zero would be a reflection too: it would also throw
     the scene to the far side of the origin, which for spaces published
@@ -312,8 +310,7 @@ def mirror_center(layers, axis: int = MIRROR_AXIS, bounds=()) -> float:
     would give back the same number only by luck, and any error in it
     doubles on the next toggle.
     """
-    lo = [float(b[0]) for b in bounds]
-    hi = [float(b[1]) for b in bounds]
+    lo, hi = [], []
     for layer in layers:
         with contextlib.suppress(Exception):
             extent = layer.extent.world

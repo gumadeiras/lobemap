@@ -27,6 +27,8 @@ from viewer_harness import (
     switcher,
 )
 
+from lobemap.viewer.deferred import STANDIN_NAME
+
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
 
@@ -67,8 +69,12 @@ def test_a_deferred_part_is_built_when_its_tab_opens(monkeypatch, space, name, n
         tab = _open_tab(sess.panel, name)
         assert tab is sess.panel.tabs[name]
         assert name in sess.surfaces and name not in sess.pending
-        # Two layers more, and nothing of them drawn: it opens unchecked.
-        assert len(layer_names(viewer)) == len(before) + 2
+        # Its mesh and its contours, in place of its stand-in if it had
+        # one, and nothing of them drawn: it opens unchecked.
+        after = layer_names(viewer)
+        assert set(after) - set(before) == {tab.surface.layer.name,
+                                            sess.contours[name].layer.name}
+        assert set(before) - set(after) <= {STANDIN_NAME.format(name=name)}
         n = tab.table.rowCount()
         assert checked(tab) == set()
         assert tab.count.text() == f"0 / {n} shown"
@@ -91,6 +97,77 @@ def test_a_deferred_part_is_built_when_its_tab_opens(monkeypatch, space, name, n
             viewer.dims.ndisplay = mode
             pump(300)
             assert_rows_match_drawing(sess)
+
+
+@pytest.mark.parametrize("ndisplay", [2, 3])
+@pytest.mark.parametrize("space", STAINED)
+def test_a_space_opens_with_the_sliders_and_view_of_its_whole_scene(registry, space,
+                                                                   ndisplay):
+    """As when every part was built at open: the same slider grid, the same fit."""
+    import napari
+
+    from lobemap.viewer.app import build_scene, load_space
+    from lobemap.viewer.view import fit_view, orient_anterior
+
+    late = napari.Viewer(show=False, ndisplay=ndisplay)
+    whole = napari.Viewer(show=False, ndisplay=ndisplay)
+    try:
+        sess = load_space(late, registry, space)
+        assert sess.pending
+        build_scene(whole, registry, space)
+        whole.dims.order = late.dims.order
+        orient_anterior(whole, registry.spaces[space])      # as the load does, in 3D
+        fit_view(whole)
+        pump()
+        assert late.dims.range == whole.dims.range
+        np.testing.assert_array_equal(late.layers.extent.world, whole.layers.extent.world)
+        assert late.camera.zoom == pytest.approx(whole.camera.zoom, rel=1e-9)
+        np.testing.assert_allclose(late.camera.center, whole.camera.center, atol=1e-9)
+    finally:
+        late.close()
+        whole.close()
+
+
+@pytest.mark.parametrize("mirror", [False, True])
+@pytest.mark.parametrize(("space", "name"), DEFERRED)
+def test_building_a_deferred_part_moves_neither_the_sliders_nor_the_plane(
+        monkeypatch, space, name, mirror):
+    with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        sess = session(viewer)
+        if mirror:
+            switcher(viewer).mirror.click()
+            pump()
+        axis = int(viewer.dims.order[0])
+        viewer.dims.set_current_step(axis, viewer.dims.current_step[axis] + 3)
+        pump()
+        sliders, plane = viewer.dims.range, viewer.dims.point
+        camera = (viewer.camera.zoom, viewer.camera.center)
+
+        tab = _open_tab(sess.panel, name)
+        _buttons(tab)["Show all"].click()
+        pump(300)
+        assert name in sess.surfaces
+        assert viewer.dims.range == sliders
+        assert viewer.dims.point == plane
+        assert (viewer.camera.zoom, viewer.camera.center) == camera
+        assert_rows_match_drawing(sess)
+
+
+def test_switching_a_stand_in_on_builds_its_part_and_shows_it(monkeypatch):
+    """Its eye in the layer list does what the part's own layer's eye did."""
+    with launched(monkeypatch, "view", "FAFB14", "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        sess = session(viewer)
+        stand_in = viewer.layers[STANDIN_NAME.format(name="fafb_neuropil")]
+        assert not stand_in.visible
+        stand_in.visible = True
+        pump(300)
+        assert stand_in not in viewer.layers
+        tab = sess.panel.tabs["fafb_neuropil"]
+        assert checked(tab) == set(range(tab.table.rowCount()))
+        assert drawn(tab.surface, sess.contours["fafb_neuropil"])
+        assert_rows_match_drawing(sess)
 
 
 @pytest.mark.parametrize(("space", "name"), DEFERRED)

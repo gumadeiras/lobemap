@@ -14,7 +14,6 @@ from viewer_harness import (
     dead_network,
     drawn,
     launched,
-    layer_names,
     pump,
     session,
     switch_to,
@@ -97,8 +96,13 @@ def test_show_applies_to_the_first_scene_only(monkeypatch):
         sess = session(viewer)
         assert sess.space == "FAFB14"
         # FAFB14 again, but chosen in the menu: its own defaults, shell off.
-        # Not even built until its tab opens, and unchecked when it is.
-        assert not any(name.startswith("fafb_neuropil") for name in layer_names(viewer))
+        # Not even built until its tab opens -- only its hidden stand-in is
+        # in the layer list -- and unchecked when it is.
+        from lobemap.viewer.deferred import STANDIN_NAME
+
+        shell = [layer for layer in viewer.layers if layer.name.startswith("fafb_neuropil")]
+        assert [layer.name for layer in shell] == [STANDIN_NAME.format(name="fafb_neuropil")]
+        assert not shell[0].visible
         tab = sess.panel.tabs["fafb_neuropil"]
         assert checked(tab) == set()
         assert not tab.surface.layer.visible

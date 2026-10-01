@@ -10,12 +10,11 @@ from __future__ import annotations
 import contextlib
 from dataclasses import dataclass
 
-import numpy as np
-
 from ..core.registry import Registry
 from .axes import apply_axis_mode
 from .contours import ContourOverlay
 from .contours import install as install_contours
+from .deferred import Deferred
 from .images import add_images, show_images, stop_levels
 from .layers import AtlasSurface, canonical_colors, match_label_colors
 from .request import (
@@ -212,9 +211,11 @@ def build_scene(
     them is drawn, and building their meshes, layers and tables was most of
     what opening a space cost -- about 0.6 s of the hemibrain's. They are
     left in `into.pending` for `SceneSession.realize`, which builds each the
-    first time it is needed, and the surfaces and images are left hidden for
-    `load_space` to show once the mode, the plane and the pyramid level are
-    set, so each is read once. Without it, everything is built and shown.
+    first time it is needed, and in `into.deferred`, which gives each one
+    reaching outside the rest a stand-in, so the sliders and the view span
+    the whole scene from the start. The surfaces and images are left hidden
+    for `load_space` to show once the mode, the plane and the pyramid level
+    are set, so each is read once. Without it, everything is built and shown.
     """
     if space not in registry.spaces:
         raise ViewRequestError(
@@ -229,12 +230,18 @@ def build_scene(
     primary = registry.primary_atlas(space)
     surfaces: dict[str, AtlasSurface] = {}
     pending: dict[str, ScenePart] = {}
+    later = {part.name: part for part in parts
+             if defer and (primary is None or part.name != primary.id)}
     if into is not None:
         into.surfaces, into.pending = surfaces, pending
         into.parts, into.styles = by_name, styles
+        if later:
+            # Made first: it reads their bounds while the rest is built.
+            into.deferred = Deferred(viewer, registry, later,
+                                     show=lambda name: into.show([name]))
 
     def _add(part: ScenePart) -> None:
-        if defer and (primary is None or part.name != primary.id):
+        if part.name in later:
             pending[part.name] = part
             return
         try:
@@ -286,6 +293,8 @@ def build_scene(
         for surface in surfaces.values():
             surface.sync()
         show_images(images)
+    elif into.deferred is not None:
+        into.deferred.hold(into.all_layers())
 
     # Anatomical names for the dimension sliders and napari's own axis
     # overlay. No layer of our own: see `viewer/axes.py`. It shows the
@@ -356,6 +365,8 @@ class SceneSession:
         self.parts: dict[str, ScenePart] = {}
         #: The parts not built yet; see `realize`.
         self.pending: dict[str, ScenePart] = {}
+        #: Their stand-ins; see `deferred`.
+        self.deferred: Deferred | None = None
         #: Each part's contour color and width.
         self.styles: dict[str, tuple] = {}
         #: The contour handlers every overlay shares; see `build_scene`.
@@ -377,6 +388,8 @@ class SceneSession:
         out = [s.layer for s in self.surfaces.values()]
         out += [c.layer for c in self.contours.values()]
         out += [layer for layer in self.images if layer not in out]
+        if self.deferred is not None:
+            out += self.deferred.layers()
         return out
 
     def reflect_axis(self) -> int | None:
@@ -388,44 +401,16 @@ class SceneSession:
         """The plane the mirror reflects about: the mid-plane of the scene.
 
         Every part counts, built or not, so the plane is the same whichever
-        tabs have been opened, and it is where it always was: the meshes by
-        their whole extent -- their vertices, since a Surface carries no
-        transform -- and the images by their layers. Measured while nothing
-        is mirrored, because `extent.world` includes the reflection, and
-        held while the mirror is on.
-
-        Then moved, by less than half a slider step, onto the slider's own
-        half-step lattice. The sliders span only the layers there are, which
-        a deferred part is not yet one of, so they are not symmetric about
-        the plane and reflecting them would shift their grid: napari snaps
-        the plane onto the shifted grid, a fraction of a step off the one
-        the user was on. On the lattice the reflected grid is the same grid.
+        tabs have been opened: a part not built yet lies within the layers
+        there are, or has a stand-in that spans it (`deferred`). It is also
+        the mid-plane of the sliders, which span the same layers, so the
+        reflected slider grid is the same grid and the plane stays on it.
+        Measured while nothing is mirrored, because `extent.world` includes
+        the reflection, and held while the mirror is on.
         """
         if self.mirrored and self._mirror_center is not None:
             return self._mirror_center
-        bounds = []
-        for name, part in self.parts.items():
-            surface = self.surfaces.get(name)
-            if surface is None and name not in self.pending:
-                continue                    # could not be read
-            meshset = surface.meshset if surface is not None else None
-            if meshset is None:
-                # Unreadable leaves it out; its tab says why when opened.
-                with contextlib.suppress(Exception):
-                    meshset = self.registry.mesh(part.asset.id)
-            if meshset is None:
-                continue
-            coord = meshset.vertices[:, MIRROR_AXIS]
-            if len(coord):
-                bounds.append((float(coord.min()), float(coord.max())))
-        center = mirror_center(self.images, bounds=bounds)
-        dims = self.viewer.dims
-        if dims.ndim > MIRROR_AXIS:
-            start, stop, step = dims.range[MIRROR_AXIS]
-            if step > 0 and np.isfinite(start) and np.isfinite(stop):
-                middle, half = (start + stop) / 2.0, step / 2.0
-                center = middle + round((center - middle) / half) * half
-        return center
+        return mirror_center(self.all_layers())
 
     def realize(self, name: str):
         """Build a part `build_scene` deferred; return its surface and contours.
@@ -436,8 +421,9 @@ class SceneSession:
         cheap alpha change it always was, and its extent is what it was. It
         gets its contours and their color, the pairing that draws it in the
         right layer for the mode, the mirror, and its place in the layer
-        stack. The layer selection is left as the user had it. All or
-        nothing: a failure removes whatever was added.
+        stack, and its stand-in, if it had one, goes once it is in. The
+        layer selection is left as the user had it. All or nothing: a
+        failure removes whatever was added.
         """
         if name in self.surfaces:
             return self.surfaces[name], self.contours.get(name)
@@ -472,6 +458,8 @@ class SceneSession:
         self.surfaces[name] = surface
         if contour is not None:
             self.contours[name] = contour
+        if self.deferred is not None:
+            self.deferred.release(name)
         with contextlib.suppress(Exception):
             layers.selection.clear()
             layers.selection.update(selected)
@@ -696,7 +684,7 @@ class SceneSession:
                 self.dock.deleteLater()
         self.dock = self.panel = None
         self.surfaces, self.contours, self.images = {}, {}, []
-        self.pending = {}
+        self.pending, self.deferred = {}, None
 
 
 __all__ = [
