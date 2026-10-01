@@ -18,7 +18,8 @@ by the same calls, so a checkout without data still checks it.
 
 `CHECKED` names the test that checks each private name, and
 `test_every_private_name_src_reaches_is_checked` scans `src/` so that a new
-one cannot go unchecked.
+one cannot go unchecked. An attribute name the scan cannot read from the
+source must be listed in `DYNAMIC`, so it cannot hide one either.
 """
 
 from __future__ import annotations
@@ -61,6 +62,21 @@ CHECKED = {
 #: lobemap's own private names, reached from another of its modules.
 OWN = {"_load_spaces", "_load_assets", "_load_atlases", "_read", "_box", "_obj"}
 
+#: Attribute names `src/` computes at run time, by module and expression.
+#: Each names data -- a flybrains template, a bermuda function, a layer
+#: setting -- and never a private internal. A new one fails the scan until
+#: it is read and listed here.
+DYNAMIC = {
+    ("cli.py", "reg.spaces[args.space].flybrains_template"),
+    ("core/resolve.py", "template"),
+    ("core/spaces.py", "name"),
+    ("ingest/synapse_buckets.py", "template_name"),
+    ("viewer/contours.py", "name"),
+    ("viewer/layers.py", "key"),
+}
+
+_ATTR_CALLS = ("getattr", "hasattr", "setattr", "delattr")
+
 
 def need(ok, what: str, used_by: str) -> None:
     assert ok, f"{what} is missing or has changed shape; {used_by} relies on it"
@@ -81,35 +97,116 @@ def _private(name: str) -> bool:
     return name.startswith("_") and not name.startswith(("__", "_lobemap"))
 
 
-def _private_names() -> dict[str, list[str]]:
-    """Every private name `src/` reaches outside `self`, and where."""
+def _strings(node) -> list[str] | None:
+    """The strings a literal str constant, tuple or list holds, else None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, (ast.Tuple, ast.List)) and all(
+            isinstance(e, ast.Constant) and isinstance(e.value, str) for e in node.elts):
+        return [e.value for e in node.elts]
+    return None
+
+
+def _scan(source: str) -> tuple[list[tuple[str, int]], list[str]]:
+    """The private names one module reaches outside `self`, with their lines,
+    and the attribute names it computes at run time.
+
+    A name given to `getattr` and the like is read from a literal, from a
+    module-level string constant, or from the target of a loop over literal
+    strings; any other is returned as computed.
+    """
+    tree = ast.parse(source)
+    known = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and _strings(node.value) is not None:
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    known[target.id] = _strings(node.value)
+    looped = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.For) and isinstance(node.target, ast.Name)
+                and _strings(node.iter) is not None):
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Name) and inner.id == node.target.id:
+                    looped[id(inner)] = _strings(node.iter)
+
+    def own(value) -> bool:
+        return isinstance(value, ast.Name) and value.id in ("self", "cls")
+
+    found, computed = [], []
+    for node in ast.walk(tree):
+        names = []
+        if isinstance(node, ast.Attribute) and _private(node.attr):
+            if not own(node.value):
+                names.append(node.attr)
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+              and node.func.id in _ATTR_CALLS and len(node.args) >= 2
+              and not own(node.args[0])):
+            arg = node.args[1]
+            values = (_strings(arg) if not isinstance(arg, ast.Name)
+                      else looped.get(id(arg), known.get(arg.id)))
+            if values is None:
+                computed.append(ast.unparse(arg))
+            else:
+                names += [value for value in values if _private(value)]
+        elif isinstance(node, ast.Import):
+            names += [alias.name for alias in node.names
+                      if any(part.startswith("_") for part in alias.name.split("."))]
+        elif (isinstance(node, ast.ImportFrom) and node.module
+              and node.module != "__future__"):
+            if any(part.startswith("_") for part in node.module.split(".")):
+                names.append(node.module)
+            names += [alias.name for alias in node.names if _private(alias.name)]
+        found += [(name, node.lineno) for name in names]
+    return found, computed
+
+
+def _private_names() -> tuple[dict[str, list[str]], set[tuple[str, str]]]:
+    """Every private name `src/` reaches outside `self`, and where; and every
+    attribute name it computes, by module."""
     found: dict[str, list[str]] = {}
+    computed: set[tuple[str, str]] = set()
     for path in sorted(SRC.rglob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text())):
-            names = []
-            if isinstance(node, ast.Attribute) and _private(node.attr):
-                if not (isinstance(node.value, ast.Name) and node.value.id in ("self", "cls")):
-                    names.append(node.attr)
-            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                  and node.func.id in ("getattr", "hasattr", "setattr")
-                  and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)
-                  and isinstance(node.args[1].value, str) and _private(node.args[1].value)
-                  and not (isinstance(node.args[0], ast.Name)
-                           and node.args[0].id in ("self", "cls"))):
-                names.append(node.args[1].value)
-            elif (isinstance(node, ast.ImportFrom) and node.module
-                  and node.module != "__future__"):
-                if any(part.startswith("_") for part in node.module.split(".")):
-                    names.append(node.module)
-                names += [alias.name for alias in node.names if _private(alias.name)]
-            for name in names:
-                found.setdefault(name, []).append(
-                    f"{path.relative_to(SRC.parent)}:{node.lineno}")
-    return found
+        names, dynamic = _scan(path.read_text())
+        for name, line in names:
+            found.setdefault(name, []).append(f"{path.relative_to(SRC.parent)}:{line}")
+        computed |= {(path.relative_to(SRC).as_posix(), expr) for expr in dynamic}
+    return found, computed
+
+
+def test_the_scan_sees_every_way_of_reaching_a_name():
+    source = """
+import napari._vispy.visuals
+import numpy, napari._qt.qt_main_window as w
+from napari._vispy import utils
+from napari.layers import _shapes_utils
+ATTR = "_from_a_constant"
+other._attribute
+getattr(other, "_got")
+hasattr(other, "_has")
+setattr(other, "_set", 1)
+delattr(other, "_deleted")
+getattr(other, ATTR)
+for name in ("_looped", "public"):
+    getattr(other, name)
+getattr(other, computed_at_run_time)
+self._own
+getattr(self, "_own_too")
+"""
+    found, computed = _scan(source)
+    assert sorted(name for name, _ in found) == sorted([
+        "napari._vispy.visuals", "napari._qt.qt_main_window", "napari._vispy",
+        "_shapes_utils", "_attribute", "_got", "_has", "_set", "_deleted",
+        "_from_a_constant", "_looped"])
+    assert computed == ["computed_at_run_time"]
 
 
 def test_every_private_name_src_reaches_is_checked():
-    found = _private_names()
+    found, computed = _private_names()
+    unread = sorted(computed - DYNAMIC)
+    assert not unread, f"attribute names src/ computes, not read here: {unread}"
+    gone = sorted(DYNAMIC - computed)
+    assert not gone, f"DYNAMIC lists names src/ no longer computes: {gone}"
     unchecked = {name: where for name, where in found.items()
                  if name not in CHECKED and name not in OWN}
     assert not unchecked, f"private names no test here checks: {unchecked}"
