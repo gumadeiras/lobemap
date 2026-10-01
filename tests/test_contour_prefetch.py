@@ -147,6 +147,103 @@ def test_a_plane_cut_ahead_draws_exactly_as_one_cut_on_the_spot(monkeypatch, spa
             np.testing.assert_array_equal(a, b)
 
 
+@pytest.fixture
+def ui_fills(monkeypatch):
+    """Every fill triangulated from now on: True for each on the UI thread."""
+    from lobemap.viewer import contours
+
+    calls = []
+    real = contours._fill
+
+    def spy(ring):
+        calls.append(threading.current_thread() is threading.main_thread())
+        return real(ring)
+
+    monkeypatch.setattr(contours, "_fill", spy)
+    return calls
+
+
+def _assert_filled_ahead(viewer, overlay) -> None:
+    """Every slider plane holds the fills of every filled compartment it cuts,
+    and the cache counts each plane's bytes once."""
+    _assert_all_cut_ahead(viewer, overlay)
+    axis = overlay.axis
+    for p in _slider_positions(viewer, overlay):
+        geometry = overlay._geometry.get((axis, p))
+        lacking = (geometry.present & overlay.filled) - set(geometry._fills)
+        assert not lacking, f"plane {p}: no fill built ahead for {sorted(lacking)}"
+    sizes = list(overlay._geometry._items.values())
+    assert all(size == geometry.nbytes for geometry, size in sizes)
+    assert overlay._geometry.nbytes == sum(size for _g, size in sizes)
+
+
+def _first_visits(viewer, overlay, steps) -> None:
+    axis = overlay.axis
+    for step in steps:
+        viewer.dims.set_current_step(axis, viewer.dims.current_step[axis] + step)
+        pump()
+        _assert_drawn_is_fresh(overlay)
+
+
+@pytest.mark.requires_data
+@pytest.mark.parametrize("space", ["FAFB14", "GRABE"])
+def test_a_first_visit_to_a_filled_plane_triangulates_nothing(monkeypatch, ui_fills, space):
+    with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
+        overlay = _primary(viewer)
+        some = set(sorted(overlay.selection)[::2])
+        overlay.set_fills(some)
+        _assert_filled_ahead(viewer, overlay)
+        ui_fills.clear()
+        _first_visits(viewer, overlay, (5, -11, 3))
+        assert ui_fills.count(True) == 0, "a step triangulated a fill on the UI thread"
+
+        # More fills: the prefetch builds the ones each plane lacks.
+        overlay.set_fills(set(overlay.selection))
+        _assert_filled_ahead(viewer, overlay)
+        ui_fills.clear()
+        _first_visits(viewer, overlay, (7, -16, 2))
+        assert ui_fills.count(True) == 0, "a step triangulated a fill on the UI thread"
+        assert ui_fills.count(False) == 0, "fills were built again"
+
+
+@pytest.mark.requires_data
+def test_every_plane_of_the_largest_atlas_fits_filled(monkeypatch):
+    """The male CNS atlas cut along y holds the most geometry of any shipped
+    atlas: with every glomerulus filled, every slider plane still fits."""
+    with launched(monkeypatch, "view", "JRCFIB2022M", "--ndisplay", "2") as (code, viewer):
+        overlay = _primary(viewer)
+        menu = switcher(viewer).slice
+        menu.setCurrentIndex(menu.findData(1))
+        pump()
+        assert overlay.axis == 1
+        overlay.set_fills(set(range(overlay.meshset.n_compartments)))
+        _assert_filled_ahead(viewer, overlay)
+        held = overlay.sections.planes.nbytes + overlay._geometry.nbytes
+        assert held <= overlay.sections.planes.max_bytes + overlay._geometry.max_bytes
+
+
+def test_fills_built_by_steps_and_by_the_prefetch_are_kept_once(open_box_viewer,
+                                                                ui_fills, held_back):
+    """The UI thread fills the planes a step lands on while the prefetch waits;
+    the prefetch then fills the rest, and each fill is built and counted once."""
+    viewer, overlay = open_box_viewer
+    _step_to(viewer, 2, 2.5)
+    overlay.layer.visible = True
+    pump()
+    overlay.set_fills({1})
+    for z in (2.0, 0.25, -1.5):
+        _step_to(viewer, 2, z)
+        _assert_drawn_is_fresh(overlay)
+    on_ui = ui_fills.count(True)
+    assert on_ui >= 3
+    held_back()
+    _assert_filled_ahead(viewer, overlay)
+    planes = [p for p in _slider_positions(viewer, overlay)
+              if 1 in overlay._geometry.get((2, p)).present]
+    assert ui_fills.count(True) == on_ui
+    assert len(ui_fills) == len(planes), "a fill was built twice"
+
+
 @pytest.mark.requires_data
 def test_a_switch_during_the_prefetch_stops_it(monkeypatch, held_back):
     with launched(monkeypatch, "view", "FAFB14", "--ndisplay", "2") as (code, viewer):

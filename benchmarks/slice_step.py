@@ -44,7 +44,8 @@ Parts of a step:
   that moves slicing off the main thread: `loaded` is then when the new
   plane is actually in the layer, and `ui` adds the main-thread time napari
   spends applying the result, which the call does not include.
-- Each worker reports the pyramid levels its images were sliced at, and its
+- Each worker reports the pyramid levels its images were sliced at, what
+  the primary atlas's contour caches hold at the end (`held MB`), and its
   resident memory at the end. A hidden canvas never draws, and drawing is
   when napari picks a multiscale image's level for the canvas, so the level
   is whatever the last draw before the sweeps picked -- in JRCFIB2018F one
@@ -53,10 +54,12 @@ Parts of a step:
   follows napari's rule for the benchmark's canvas.
 
 The viewer cuts every slider plane of a shown atlas ahead of time, in a
-worker thread (`viewer.prefetch`), from the moment a space opens in 2D. By
-default the first sweep starts right after the load, while that runs, and
-each result says whether it still was; `--wait-prefetch` starts the sweeps
-once it has finished and reports how long it took.
+worker thread (`viewer.prefetch`), from the moment a space opens in 2D, and
+builds the fills of its filled compartments with it; `labelfill` fills
+every compartment, which starts it again for the fills. By default the
+first sweep starts right after that, while it runs, and each result says
+whether it still was; `--wait-prefetch` starts the sweeps once it has
+finished and reports how long it took.
 
 The machine is rarely quiet, so use `--repeat` and read the spread, not one
 number. `--no-bermuda` hides napari's compiled triangulation backend, which
@@ -302,6 +305,14 @@ def _prefetch_state(overlay, wait: bool) -> dict:
     }}
 
 
+def _held_mb(overlay) -> float | None:
+    """MB the primary atlas's contour caches hold: sections, outlines and fills."""
+    try:
+        return (overlay.sections.planes.nbytes + overlay._geometry.nbytes) / 2**20
+    except AttributeError:           # a viewer from before the caches
+        return None
+
+
 def work_steps(space, mode, planes, registry_root, data_root, hide=None,
                asynchronous=False, draw=False, wait_prefetch=False) -> dict:
     viewer, registry, session, app, load = _open(space, 2, registry_root, data_root,
@@ -325,6 +336,7 @@ def work_steps(space, mode, planes, registry_root, data_root, hide=None,
             "sweeps": _sweeps(viewer, axis, ks, app,
                               shapes_of=lambda: len(overlay.paths)),
         }
+        result["held_mb"] = _held_mb(overlay)
         if mode == "primary" and not hide:
             result["toggle"] = _row_toggles(session, primary, app)
         result["rss_mb"] = _rss_mb()
@@ -449,8 +461,8 @@ def _summary(results: list[dict]) -> str:
     lines = [
         ("| space | mode | planes | first sweep ms (median / p95) | repeat sweep ms "
          "(median / p95) | shapes/plane | cold load s | row toggle ms (median / p95) "
-         "| first ui / loaded ms | repeat ui / loaded ms | levels | RSS MB |"),
-        "|---|---|---|---|---|---|---|---|---|---|---|---|",
+         "| first ui / loaded ms | repeat ui / loaded ms | levels | held MB | RSS MB |"),
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         if r["mode"] == "switch":
@@ -461,13 +473,14 @@ def _summary(results: list[dict]) -> str:
         mode = r["mode"] + "".join(f" -{part}" for part in r.get("hide") or ()) + (
             " async" if r.get("async") else "") + (" draw" if r.get("draw") else "")
         levels = ",".join(f"{lvl}" for _, lvl in sweeps["first"].get("levels", []))
+        held = "-" if r.get("held_mb") is None else f"{r['held_mb']:.0f}"
         lines.append(
             f"| {r['space']} | {mode} | {r['planes']} | {_fmt(sweeps['first'])} | "
             f"{_fmt(sweeps['repeat'])} | {shape_txt} | {r['load_s']:.2f} | "
             f"{_fmt(r.get('toggle', {}))} | "
             f"{_fmt(sweeps['first'].get('ui', {}))} ; {_fmt(sweeps['first'].get('loaded', {}))} | "
             f"{_fmt(sweeps['repeat'].get('ui', {}))} ; {_fmt(sweeps['repeat'].get('loaded', {}))} | "
-            f"{levels or '-'} | {r.get('rss_mb', 0):.0f} |"
+            f"{levels or '-'} | {held} | {r.get('rss_mb', 0):.0f} |"
         )
     switch = [r for r in results if r["mode"] == "switch"]
     if switch:

@@ -36,9 +36,10 @@ class PlaneCache:
     """Per-plane results, least recently used out first, within a byte budget.
 
     Thread-safe: the UI thread reads and fills it on a slice step while the
-    prefetch (`viewer.prefetch`) fills it from its own thread. Only the UI
-    thread changes a value once it is in (a fill built on a plane's
-    outlines), so a reader holds no lock while it uses one.
+    prefetch (`viewer.prefetch`) fills it from its own thread. A value
+    changes once it is in only by gaining fills, which a plane's geometry
+    adds under a lock of its own (`viewer.contours`), so a reader holds no
+    lock of the cache while it uses one.
     """
 
     def __init__(self, max_bytes: int) -> None:
@@ -95,13 +96,26 @@ class PlaneCache:
                 self.nbytes -= size
             return value
 
-    def grew(self, key, nbytes: int) -> None:
-        """A kept value now holds `nbytes` more: a fill built on it later."""
+    def grew(self, key, nbytes: int, keep=None) -> bool:
+        """A kept value now holds `nbytes` more: fills built on it later.
+
+        With `keep` -- the prefetch's own keys -- entries outside it are
+        evicted, least recently used first, to stay within the budget;
+        returns False if that is not enough.
+        """
         with self._lock:
             hit = self._items.get(key)
-            if hit is not None:
-                self._items[key] = (hit[0], hit[1] + int(nbytes))
-                self.nbytes += int(nbytes)
+            if hit is None:
+                return True
+            self._items[key] = (hit[0], hit[1] + int(nbytes))
+            self.nbytes += int(nbytes)
+            if keep is None or self.nbytes <= self.max_bytes:
+                return True
+            for old in [k for k in self._items if k not in keep and k != key]:
+                self.nbytes -= self._items.pop(old)[1]
+                if self.nbytes <= self.max_bytes:
+                    return True
+            return False
 
 
 class MeshSections:

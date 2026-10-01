@@ -1,11 +1,13 @@
 """Cut every slider plane of a shown atlas ahead of time, off the UI thread.
 
 A first visit to a plane cost its exact sections and its outline geometry
-on the UI thread, 2-5 ms. Both are pure functions of the meshes and the
-plane, so once a space is open in 2D -- and again after the slice axis or
-the mirror changes -- a worker thread computes them for every slider plane
-inside each shown atlas, nearest the current plane first, into the
-overlay's own caches. A step then finds its plane there and only draws.
+on the UI thread, 2-5 ms, and with every compartment filled 1-2 ms more for
+the fills. All are pure functions of the meshes and the plane, so once a
+space is open in 2D -- and again after the slice axis, the mirror or the
+filled compartments change -- a worker thread computes them for every
+slider plane inside each shown atlas, nearest the current plane first, into
+the overlay's own caches. A step to a plane it has reached only draws; one
+it has not reached yet cuts, or fills, that plane itself.
 
 Threading model, after route (c) of the slice-step search:
 
@@ -22,9 +24,11 @@ Threading model, after route (c) of the slice-step search:
   a slice in the last `QUIET_S`, it waits at its next pause -- between
   planes, and between the stages of a cut.
 - A plan is cancelled when its overlay asks for another (a new axis, a
-  mirror), is hidden, or is torn down; it stops at its next pause. Nothing
-  it has made is ever wrong: a cache entry is keyed by the plane it was cut
-  at.
+  mirror, other fills), is hidden, or is torn down; it stops at its next
+  pause. Nothing it has made is ever wrong: a cache entry is keyed by the
+  plane it was cut at, and a fill by its compartment. A plan for other
+  fills finds the sections and outlines already cut and builds only the
+  fills they lack.
 - To make room it evicts only planes that are not its own, the ones an
   earlier axis or mirror left, and stops when that is not enough.
 - A plane whose cut raises anything -- a Rust panic in bermuda is a
@@ -67,12 +71,17 @@ class Plan:
     `to_data` is the layer's world-to-data transform as it is now, called
     exactly as `Layer.world_to_data` calls it, so each position is the one
     `ContourOverlay.slice_position` gives on that step, to the last bit.
+
+    `build(cut, axis, position, pause, fills)` makes a plane's geometry,
+    with the fills of the compartments in `fills`; a geometry already in the
+    cache gets the fills it lacks from its own `add_fills(fills, pause)`.
     """
 
     def __init__(self, sections, geometry, build, axis: int, to_data, point,
                  grid: tuple[float, float, int], bounds: tuple[float, float],
-                 current: float) -> None:
+                 current: float, fills=frozenset()) -> None:
         self.sections, self.geometry, self.build = sections, geometry, build
+        self.fills = frozenset(fills)
         self.axis = int(axis)
         self.to_data = to_data
         self.point = tuple(float(v) for v in point)
@@ -151,11 +160,12 @@ class Plan:
         if cut is None:
             return False
         self._pause()
-        if self.geometry.get(key) is None:
-            made = self.build(cut, self.axis, position, self._pause)
-            if self.geometry.put(key, made, made.nbytes, keep=mine) is None:
-                return False
-        return True
+        kept = self.geometry.get(key)
+        if kept is None:
+            made = self.build(cut, self.axis, position, self._pause, self.fills)
+            return self.geometry.put(key, made, made.nbytes, keep=mine) is not None
+        added = kept.add_fills(self.fills, self._pause)
+        return not added or self.geometry.grew(key, added, keep=mine)
 
 
 def _work() -> None:

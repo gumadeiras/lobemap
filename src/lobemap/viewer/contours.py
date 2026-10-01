@@ -17,14 +17,16 @@ visuals of its own under that layer (`SliceVisual`): one mesh of outline
 and fill triangles, and one text. napari's Shapes rebuilt every shape on
 every slider step; see `ContourOverlay`.
 
-The sections and outlines of every slider plane inside a shown atlas are
-cut ahead of time off the UI thread (`viewer.prefetch`), so a step to a new
-plane only draws.
+The sections, outlines and fills of every slider plane inside a shown
+atlas are made ahead of time off the UI thread (`viewer.prefetch`): a step
+to a plane the prefetch has reached only draws, and a step to one it has
+not reached yet cuts, or fills, that plane itself.
 """
 
 from __future__ import annotations
 
 import contextlib
+import threading
 
 import numpy as np
 
@@ -36,8 +38,9 @@ from .sections import MeshSections, PlaneCache
 TEXT_SIZE = 10.5
 
 #: Bytes of outline geometry, and of the fills built on it, an overlay keeps.
-#: The outlines of every slider plane inside a shipped atlas along any axis
-#: fit: at most 55 MB, the male CNS atlas along y. With
+#: The outlines and fills of every slider plane inside a shipped atlas, with
+#: every compartment filled, fit along any axis: at most 52 MB, the male CNS
+#: atlas along y (36 MB of outlines, 16 of fills). With
 #: `sections.SECTION_CACHE_BYTES`, at most 96 MB an atlas.
 GEOMETRY_CACHE_BYTES = 64 * 2**20
 
@@ -166,13 +169,18 @@ class _PlaneGeometry:
 
     Outlines are built for every compartment on the plane, as the sections
     are, so a change of selection picks triangles out of these arrays rather
-    than building any. Fills are built the first time a compartment is
-    filled on this plane. Points are kept in the plane's own two axes, as
-    float32, which is what vispy is handed.
+    than building any. Fills are built for the compartments `fills` names,
+    and for any other the first time it is filled on this plane. Points are
+    kept in the plane's own two axes, as float32, which is what vispy is
+    handed.
+
+    The prefetch adds fills from its thread while a step may draw this plane
+    on the UI thread, so a fill is added under a lock, once: whoever adds it
+    first keeps it and is the one told how many bytes it added.
     """
 
     def __init__(self, sections: dict[int, list[np.ndarray]], axis: int,
-                 position: float, width: float, pause=None) -> None:
+                 position: float, width: float, pause=None, fills=()) -> None:
         self.axis, self.position = axis, position
         #: The two in-plane array axes, in increasing order.
         self.plane = [d for d in range(3) if d != axis]
@@ -180,6 +188,7 @@ class _PlaneGeometry:
         self.present = frozenset(sections)
         verts, faces, owners = [], [], []
         count = 0
+        small = np.int16 if max(sections, default=0) < 2**15 else np.int32
         for n, owner in enumerate(sorted(sections)):
             if pause is not None and n % 8 == 7:
                 pause()
@@ -187,30 +196,63 @@ class _PlaneGeometry:
                 v, f = _stroke(loop[:-1][:, self.plane], width)
                 verts.append(v)
                 faces.append(f + count)
-                owners.append(np.full(len(v), owner, np.int32))
+                owners.append(np.full(len(v), owner, small))
                 count += len(v)
         self.vertices, self.faces = _stack(verts, faces)
         #: The compartment each outline point belongs to.
-        self.owner = np.concatenate(owners) if owners else np.empty(0, np.int32)
+        self.owner = np.concatenate(owners) if owners else np.empty(0, small)
         self._fills: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+        self._fill_bytes = 0
+        self._lock = threading.Lock()
+        self.add_fills(fills, pause)
 
-    def fill(self, owner: int) -> tuple[np.ndarray, np.ndarray]:
-        """Triangles filling every loop of one compartment on this plane."""
-        if owner not in self._fills:
-            verts, faces, count = [], [], 0
-            for loop in self._sections.get(owner, ()):
-                v, f = _fill(loop[:-1][:, self.plane])
-                verts.append(v)
-                faces.append(f + count)
-                count += len(v)
-            self._fills[owner] = _stack(verts, faces)
-        return self._fills[owner]
+    def _make_fill(self, owner: int) -> tuple[np.ndarray, np.ndarray]:
+        verts, faces, count = [], [], 0
+        for loop in self._sections.get(owner, ()):
+            v, f = _fill(loop[:-1][:, self.plane])
+            verts.append(v)
+            faces.append(f + count)
+            count += len(v)
+        return _stack(verts, faces)
+
+    def _keep_fill(self, owner: int, made) -> tuple[tuple[np.ndarray, np.ndarray], int]:
+        """The fill kept for `owner`, and the bytes keeping `made` added."""
+        with self._lock:
+            hit = self._fills.get(owner)
+            if hit is not None:
+                return hit, 0
+            self._fills[owner] = made
+            size = int(made[0].nbytes + made[1].nbytes)
+            self._fill_bytes += size
+            return made, size
+
+    def fills(self, owners) -> tuple[list[tuple[np.ndarray, np.ndarray]], int]:
+        """Triangles filling every loop of each of `owners` on this plane, and
+        the bytes the ones built just now added."""
+        out, added = [], 0
+        for owner in owners:
+            hit = self._fills.get(owner)
+            if hit is None:
+                hit, size = self._keep_fill(owner, self._make_fill(owner))
+                added += size
+            out.append(hit)
+        return out, added
+
+    def add_fills(self, owners, pause=None) -> int:
+        """Build the fills of `owners` on this plane not built yet; the bytes added."""
+        added = 0
+        missing = sorted(o for o in self.present.intersection(owners) if o not in self._fills)
+        for n, owner in enumerate(missing):
+            if pause is not None and n % 4 == 3:
+                pause()
+            added += self._keep_fill(owner, self._make_fill(owner))[1]
+        return added
 
     @property
     def nbytes(self) -> int:
         """What this plane holds: its outlines, and the fills built so far."""
         return int(self.vertices.nbytes + self.faces.nbytes + self.owner.nbytes
-                   + sum(v.nbytes + f.nbytes for v, f in self._fills.values()))
+                   + self._fill_bytes)
 
     def on_screen(self, points: np.ndarray, displayed) -> np.ndarray:
         """In-plane points as vispy's x, y: the last displayed axis, then the other."""
@@ -225,11 +267,18 @@ class _PlaneGeometry:
 
 
 def _stack(verts: list, faces: list) -> tuple[np.ndarray, np.ndarray]:
-    """Points as float32 and triangles as uint32, each in one array."""
-    return (np.vstack(verts).astype(np.float32) if verts
-            else np.empty((0, 2), np.float32),
-            np.vstack(faces).astype(np.uint32) if faces
-            else np.empty((0, 3), np.uint32))
+    """Points as float32 and triangles, each in one array.
+
+    The triangles are uint16 when they index at most 65,536 points, as a
+    plane's outlines and a compartment's fills nearly always do: half the
+    bytes of uint32, which is what lets the outlines and fills of every
+    slider plane inside a shipped atlas fit `GEOMETRY_CACHE_BYTES`.
+    """
+    points = (np.vstack(verts).astype(np.float32) if verts
+              else np.empty((0, 2), np.float32))
+    index = np.uint16 if len(points) <= 2**16 else np.uint32
+    return points, (np.vstack(faces).astype(index) if faces
+                    else np.empty((0, 3), index))
 
 
 class SliceVisual:
@@ -481,21 +530,24 @@ class ContourOverlay:
         made = _PlaneGeometry(self.sections.at(*key), *key, self.width)
         return self._geometry.put(key, made, made.nbytes)
 
-    def _build(self, sections, axis: int, position: float, pause=None) -> _PlaneGeometry:
-        return _PlaneGeometry(sections, axis, position, self.width, pause)
+    def _build(self, sections, axis: int, position: float, pause=None,
+               fills=()) -> _PlaneGeometry:
+        return _PlaneGeometry(sections, axis, position, self.width, pause, fills)
 
     def _prefetch(self, axis: int, position: float) -> None:
         """Have every slider plane inside this atlas cut ahead, if not already asked.
 
         Asked again when the axis, the slider's grid or the layer's
         transform -- the mirror -- changes, since each moves the planes the
-        slider can land on. The positions are worked out by the worker from
+        slider can land on, and when the filled compartments change, whose
+        fills it builds too. The positions are worked out by the worker from
         a copy of the transform, the way `slice_position` works them out.
         """
         dims = self.viewer.dims
         start, _stop, step = dims.range[axis]
         nsteps = int(dims.nsteps[axis])
-        key = (axis, self._moves, float(start), float(step), nsteps)
+        fills = frozenset(self.filled)
+        key = (axis, self._moves, float(start), float(step), nsteps, fills)
         if key == self._prefetch_key or self._prefetch_key == ("stopped",):
             return
         if self._plan is not None:
@@ -506,7 +558,7 @@ class ContourOverlay:
             self.sections, self._geometry, self._build, axis,
             napari_private.data_from_world(self.layer), dims.point,
             (float(start), float(step), nsteps),
-            (float(column.min()), float(column.max())), position,
+            (float(column.min()), float(column.max())), position, fills,
         )
         prefetch.submit(self._plan)
 
@@ -582,9 +634,9 @@ class ContourOverlay:
         displayed = list(self.viewer.dims.displayed)
         shown = geometry.present & self.selection
         verts, faces, colors, count = [], [], [], 0
-        held = geometry.nbytes
-        for owner in sorted(self.filled & shown):
-            v, f = geometry.fill(owner)
+        filled = sorted(self.filled & shown)
+        made, added = geometry.fills(filled)
+        for owner, (v, f) in zip(filled, made, strict=True):
             verts.append(v)
             faces.append(f + np.uint32(count))
             colors.append(np.broadcast_to(fill_rgba[owner], (len(v), 4)))
@@ -597,8 +649,8 @@ class ContourOverlay:
         verts.append(geometry.vertices)
         faces.append(stroke + np.uint32(count) if count else stroke)
         colors.append(edge_rgba[geometry.owner])
-        if geometry.nbytes > held:
-            self._geometry.grew((geometry.axis, geometry.position), geometry.nbytes - held)
+        if added:
+            self._geometry.grew((geometry.axis, geometry.position), added)
         on = self._showing()
         self.visual.draw(
             geometry.on_screen(np.vstack(verts) if count else verts[0], displayed),
