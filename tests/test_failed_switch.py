@@ -66,6 +66,36 @@ def _camera(viewer):
             np.asarray(camera.angles, float))
 
 
+def _home(viewer):
+    """The camera the home button gives; the camera is then put back as it was."""
+    camera = viewer.scene.camera
+    saved = (tuple(camera.center), camera.zoom, tuple(camera.angles), camera.perspective)
+    viewer.window._qt_viewer.viewerButtons.resetViewButton.click()
+    pump()
+    home = _camera(viewer)
+    camera.center, camera.zoom, camera.angles, camera.perspective = saved
+    pump()
+    return home
+
+
+def _triads(viewer) -> dict:
+    """What each corner triad draws: shown or not, its turn, its labels."""
+    from lobemap.viewer.axes import _ANATOMY_ATTR, _vispy_axes_overlay
+
+    overlay = _vispy_axes_overlay(viewer)
+    out = {}
+    for name, node in (("array", overlay.node.axes),
+                       ("anatomy", getattr(overlay, _ANATOMY_ATTR, None))):
+        if node is None:
+            out[name] = None
+            continue
+        matrix = getattr(node.transform, "matrix", None)
+        out[name] = (bool(node.visible),
+                     None if matrix is None else np.round(matrix, 6).tolist(),
+                     list(np.atleast_1d(node.text.text)))
+    return out
+
+
 def _user_scene(viewer) -> None:
     """Change what a user can change, through the controls they would use."""
     from lobemap.viewer.panel import FILL_COL, LABEL_COL, VISIBLE_COL
@@ -139,6 +169,8 @@ def _rendered(viewer) -> dict:
                     for layer in viewer.layers},
         "docks": len(docks(viewer, "Compartments")),
         "handlers": handler_counts(viewer),
+        # Building the next scene turns both triads onto its space.
+        "triads": _triads(viewer),
     }
     for name, tab in sess.panel.tabs.items():
         contour = sess.contours.get(name)
@@ -263,6 +295,7 @@ def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, where, ndisplay
     ):
         assert code == 0
         _user_scene(viewer)
+        home = _home(viewer)
         before = _rendered(viewer)
         camera = _camera(viewer)
         kept = session(viewer)
@@ -289,6 +322,11 @@ def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, where, ndisplay
         assert np.allclose(center, camera[0], atol=1e-6), (center, camera[0])
         assert zoom == pytest.approx(camera[1], rel=1e-9)
         assert np.allclose(angles, camera[2], atol=1e-6), (angles, camera[2])
+        # Home faces this space, mirrored as it is, not the one that failed.
+        center, zoom, angles = _home(viewer)
+        assert np.allclose(center, home[0], atol=1e-6), (center, home[0])
+        assert zoom == pytest.approx(home[1], rel=1e-9)
+        assert np.allclose(angles, home[2], atol=1e-6), (angles, home[2])
 
         # And it is still the scene being driven: the plane moves its
         # outlines, and a row still reaches the drawing.
