@@ -237,6 +237,33 @@ def test_a_mesh_with_loose_ends_is_left_to_trimesh():
     np.testing.assert_array_equal(got[0][0], want[0][0])
 
 
+def open_box_and_sphere() -> MeshSet:
+    """An open box alone in one compartment, a closed sphere in the other.
+
+    A plane through the box cuts it to a path with ends, and trimesh gives
+    no loop for it, so that compartment hands back nothing at all.
+    """
+    import trimesh
+
+    box = trimesh.creation.box(extents=(2.0, 2.0, 2.0))
+    side = np.flatnonzero(np.isclose(box.face_normals[:, 0], 1.0))[0]
+    box = trimesh.Trimesh(box.vertices, np.delete(box.faces, side, axis=0), process=False)
+    sphere = trimesh.creation.icosphere(subdivisions=3, radius=3.0)
+    sphere.apply_translation((6.0, 0.0, 0.0))
+    return MeshSet.from_parts(_parts(("open box", box), ("sphere", sphere)))
+
+
+@pytest.mark.parametrize("position", [0.25, -0.5, 1.0])
+def test_an_open_compartment_with_no_loop_leaves_the_others_drawn(position):
+    """The open box gives no loop, so only the sphere is drawn, as trimesh draws it."""
+    meshset = open_box_and_sphere()
+    got = MeshSections(meshset).at(2, position)
+    want = trimesh_sections(meshset, 2, position)
+    assert 0 not in want and 1 in want
+    assert_same_sections(meshset, 2, position, got, want, TOL_UM, f"open box at {position}")
+    assert set(got) == {1}
+
+
 def test_a_doubled_face_is_left_to_trimesh(monkeypatch):
     """A face listed twice cuts one segment twice: two points joined twice.
 

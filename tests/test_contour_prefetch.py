@@ -208,6 +208,84 @@ def test_a_mirror_during_the_prefetch_cuts_the_mirrored_planes(monkeypatch, held
             _assert_drawn_is_fresh(overlay)
 
 
+@pytest.fixture
+def open_box_viewer():
+    """A 2D viewer slicing along z through an open box and a sphere.
+
+    The box is alone in its compartment, so a plane through it gives that
+    compartment no loop at all; see `open_box_and_sphere`.
+    """
+    from test_contour_sections import open_box_and_sphere
+
+    from lobemap.viewer import contours
+
+    viewer = napari.Viewer(show=False, ndisplay=2)
+    try:
+        viewer.add_image(np.zeros((40, 40, 40), np.uint8), scale=(0.25, 0.25, 0.25),
+                         translate=(-3, -4, -4))
+        overlay = contours.ContourOverlay(viewer, open_box_and_sphere(), "t", color="red")
+        viewer.dims.order = (2, 0, 1)
+        contours.install(viewer, {"t": overlay})   # as a scene does: steps redraw
+        yield viewer, overlay
+    finally:
+        viewer.close()              # removing its layer stops its prefetch
+        assert prefetch.settle(30)
+
+
+def _step_to(viewer, axis: int, position: float) -> None:
+    start, _stop, step = viewer.dims.range[axis]
+    viewer.dims.set_current_step(axis, round((position - start) / step))
+    pump()
+    assert viewer.dims.point[axis] == pytest.approx(position)
+
+
+def test_a_step_onto_an_open_compartment_draws_the_new_plane(open_box_viewer):
+    viewer, overlay = open_box_viewer
+    _step_to(viewer, 2, 2.5)                     # the sphere only
+    overlay.layer.visible = True
+    pump()
+    _assert_drawn_is_fresh(overlay)
+    for z in (0.25, -0.5, 2.5, 0.75):            # through the open box, and out
+        _step_to(viewer, 2, z)
+        assert {i for i, _ in contour_loops(overlay)} == {1}
+        _assert_drawn_is_fresh(overlay)
+        assert all(np.all(loop[:, 2] == overlay.slice_position())
+                   for _i, loop in contour_loops(overlay))
+    assert prefetch.settle(30)
+    plan = overlay._plan
+    assert plan.error is None and plan.skipped == 0 and not plan.full
+    assert plan.planes == len(plan.positions()) == len(_slider_positions(viewer, overlay))
+
+
+def test_a_plane_whose_cut_raises_is_skipped_and_the_rest_are_cut(open_box_viewer,
+                                                                 monkeypatch):
+    viewer, overlay = open_box_viewer
+    _step_to(viewer, 2, 2.5)
+    positions = _slider_positions(viewer, overlay)
+    bad = {positions[3], positions[-2]}
+    real = MeshSections._compute
+
+    def compute(self, axis, p, pause=None):
+        if p in bad:
+            raise RuntimeError(f"cannot cut {p}")
+        return real(self, axis, p, pause)
+
+    monkeypatch.setattr(MeshSections, "_compute", compute)
+    overlay.layer.visible = True
+    pump()
+    assert prefetch.settle(30)
+    plan = overlay._plan
+    assert plan.skipped == 2 and not plan.full
+    assert isinstance(plan.error, RuntimeError), plan.error
+    assert plan.planes == len(positions) - 2
+    cut = {p for p in positions if overlay._geometry.get((2, p)) is not None}
+    assert cut == set(positions) - bad
+    monkeypatch.setattr(MeshSections, "_compute", real)
+    for z in (positions[0], positions[-1], next(iter(bad))):
+        _step_to(viewer, 2, z)
+        _assert_drawn_is_fresh(overlay)
+
+
 def _cached(overlay) -> tuple[int, int]:
     return len(overlay.sections.planes), len(overlay._geometry)
 

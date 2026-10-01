@@ -27,6 +27,9 @@ Threading model, after route (c) of the slice-step search:
   at.
 - To make room it evicts only planes that are not its own, the ones an
   earlier axis or mirror left, and stops when that is not enough.
+- A plane whose cut raises is skipped, and the plan goes on to the next;
+  the plan keeps the first error. A step onto that plane cuts it on the UI
+  thread, where the error is seen.
 """
 
 from __future__ import annotations
@@ -76,8 +79,10 @@ class Plan:
         self.bounds = bounds
         self.current = float(current)
         self.cancelled = False
-        #: Filled in by the worker, for reports and tests.
+        #: Filled in by the worker, for reports and tests: the planes cut,
+        #: the planes whose cut raised, and the first error raised.
         self.planes = 0
+        self.skipped = 0
         self.full = False
         self.error: Exception | None = None
         self.started = self.finished = None
@@ -119,20 +124,36 @@ class Plan:
             mine = {(self.axis, p) for p in positions}
             for position in positions:
                 self._pause()
-                key = (self.axis, position)
-                cut = self.sections.at(self.axis, position, keep=mine, pause=self._pause)
-                if cut is None:
+                try:
+                    kept = self._cut(position, mine)
+                except _Cancelled:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - a step cuts this plane itself
+                    # One bad plane is left to the step that lands on it,
+                    # which raises where it can be seen; the rest are cut.
+                    self.skipped += 1
+                    if self.error is None:
+                        self.error = exc
+                    continue
+                if not kept:
                     self.full = True
                     return
-                self._pause()
-                if self.geometry.get(key) is None:
-                    made = self.build(cut, self.axis, position, self._pause)
-                    if self.geometry.put(key, made, made.nbytes, keep=mine) is None:
-                        self.full = True
-                        return
                 self.planes += 1
         finally:
             self.finished = time.perf_counter()
+
+    def _cut(self, position: float, mine: set) -> bool:
+        """Cut one plane into the caches; False if they have no room for it."""
+        key = (self.axis, position)
+        cut = self.sections.at(self.axis, position, keep=mine, pause=self._pause)
+        if cut is None:
+            return False
+        self._pause()
+        if self.geometry.get(key) is None:
+            made = self.build(cut, self.axis, position, self._pause)
+            if self.geometry.put(key, made, made.nbytes, keep=mine) is None:
+                return False
+        return True
 
 
 def _work() -> None:

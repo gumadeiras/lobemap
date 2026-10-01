@@ -273,11 +273,15 @@ class MeshSections:
                      for loop in self._trimesh_section(index, axis, p)]
             shut = np.array([len(loop) > 1 and np.array_equal(loop[0], loop[-1])
                              for _index, loop in extra], dtype=bool)
+            # Integer arrays even when trimesh finds no loop: an empty list
+            # is float64, which `_drawable` cannot count or index with.
             rings = np.vstack([rings] + [loop[:-1] if c else loop
                                          for (_i, loop), c in zip(extra, shut, strict=True)])
-            lengths = np.concatenate((lengths, [len(loop) - c for (_i, loop), c
-                                                in zip(extra, shut, strict=True)]))
-            loop_owners = np.concatenate((loop_owners, [i for i, _loop in extra]))
+            lengths = np.concatenate((lengths, np.array(
+                [len(loop) - c for (_i, loop), c in zip(extra, shut, strict=True)],
+                dtype=np.int64)))
+            loop_owners = np.concatenate((loop_owners, np.array(
+                [i for i, _loop in extra], dtype=np.int64)))
             closed = np.concatenate((closed, shut))
         out: dict[int, list[np.ndarray]] = {}
         for index, loop in _drawable(rings, lengths, closed, loop_owners, pause):
