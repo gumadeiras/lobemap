@@ -74,7 +74,7 @@ def _optional_assets(root: Path) -> set[str]:
     return {name for name, r in recipes.items() if r.expensive}
 
 
-def _autofetch(root: Path, data_root: Path) -> None:
+def _autofetch(root: Path, data_root: Path) -> bool:
     """Fetch the required artifacts before opening a scene.
 
     Nothing runs on `uv sync`, so a fresh clone reaches the viewer with no
@@ -84,24 +84,25 @@ def _autofetch(root: Path, data_root: Path) -> None:
     nothing to do, and never fatal: a failure here should still let the
     viewer start and report what it is missing in its own terms. Each
     failure is printed with its reason, so a dead proxy or a missing
-    release reads as that rather than as missing data.
+    release reads as that rather than as missing data. True if anything
+    arrived, so the caller knows a registry it loaded before is stale.
     """
     from .core import manifest as mf
 
     path = root / "manifest.toml"
     if not path.exists():
-        return
+        return False
     try:
         arts, base_url = mf.load(path)
     except Exception:                               # noqa: BLE001 - advisory
-        return
+        return False
     if not base_url:
-        return
+        return False
     optional = _optional_assets(root)
     absent = [a for a in arts
               if a.asset not in optional and not (data_root / a.path).exists()]
     if not absent:
-        return
+        return False
     total = sum(a.size for a in absent) / 1e6
     print(f"fetching {len(absent)} missing artifact(s), {total:.0f} MB")
 
@@ -114,11 +115,12 @@ def _autofetch(root: Path, data_root: Path) -> None:
         results = mf.fetch(absent, data_root, base_url, progress=progress)
     except Exception as exc:                        # noqa: BLE001 - advisory
         print(f"  fetch failed: {type(exc).__name__}: {exc}", file=sys.stderr)
-        return
+        return False
     failed = [s for s in results if s.state != "ok"]
     if failed:
         print(f"  {len(failed)} could not be fetched; the viewer will "
               f"say what is missing", file=sys.stderr)
+    return len(failed) < len(results)
 
 
 def cmd_manifest(args) -> int:
@@ -1124,16 +1126,19 @@ def cmd_view(args) -> int:
     show = tuple(args.show or ())
     # A mistyped space or `--show` is a usage error, said in one line before
     # anything is fetched or any window opens.
+    registry = Registry.load(root, data_root=data_root)
     try:
-        check_request(Registry.load(root, data_root=data_root), args.space, show)
+        check_request(registry, args.space, show)
     except ViewRequestError as exc:
         print(f"lobemap view: {exc}", file=sys.stderr)
         return 2
 
     _install_crash_log()
     # A fresh clone has no data: nothing runs on `uv sync`, so this is the
-    # first opportunity to get it.
-    _autofetch(root, data_root)
+    # first opportunity to get it. Only new data makes the registry above
+    # stale; otherwise loading it again read every atlas mesh twice.
+    if _autofetch(root, data_root):
+        registry = None
 
     from .viewer.app import run
 
@@ -1150,6 +1155,7 @@ def cmd_view(args) -> int:
             # root instead, so `--data-root` fetched into one place and
             # opened another.
             data_root=data_root,
+            registry=registry,
         )
     except ViewRequestError as exc:
         print(f"lobemap view: {exc}", file=sys.stderr)

@@ -280,6 +280,7 @@ def run(
     ndisplay: int = 3,
     show: tuple[str, ...] = (),
     data_root=None,
+    registry=None,
 ) -> None:
     """Open `space` in a new window and run the event loop.
 
@@ -287,11 +288,13 @@ def run(
     the space, `--show`, and whether the data is on disk -- so a mistake
     is a one-line error instead of a traceback behind an empty window.
     `show` applies to this first scene only; a space picked later opens
-    with its own defaults.
+    with its own defaults. `registry`, when given, was loaded from the same
+    roots and is used instead of loading them again.
     """
     import napari
 
-    registry = Registry.load(registry_root, data_root=data_root)
+    if registry is None:
+        registry = Registry.load(registry_root, data_root=data_root)
     if space is None:
         raise ViewRequestError("need a space")
     check_request(registry, space, show, on_disk=True)

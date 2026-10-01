@@ -65,3 +65,27 @@ def test_cross_space_flags_are_gone(captured):
     for flag in ("--bridged", "--align-biology"):
         with _pytest.raises(SystemExit):
             cli.main(["view", "FAFB14", flag])
+
+
+@pytest.mark.parametrize("fetched", [False, True])
+def test_the_checked_registry_is_reused_unless_data_arrived(monkeypatch, captured, fetched):
+    """`view` loaded the registry to check the request and `run` loaded it
+    again, reading every atlas mesh twice before the window opened. Only a
+    fetch that brought new data makes the first one stale."""
+    from lobemap.core.registry import Registry
+
+    loads = []
+    real = Registry.load.__func__
+
+    def counted(cls, *args, **kwargs):
+        loads.append(args)
+        return real(cls, *args, **kwargs)
+
+    monkeypatch.setattr(Registry, "load", classmethod(counted))
+    monkeypatch.setattr("lobemap.cli._autofetch", lambda *args, **kwargs: fetched)
+    call = _view(captured, ["GRABE"])
+    assert len(loads) == 1
+    if fetched:
+        assert call["registry"] is None, "a registry loaded before the fetch was reused"
+    else:
+        assert isinstance(call["registry"], Registry)
