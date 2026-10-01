@@ -133,3 +133,63 @@ def test_the_slice_blends_and_fades_as_napari_draws_the_layer():
                 assert visual._opacity_filter.alpha == pytest.approx(opacity)
     finally:
         viewer.close()
+
+
+def _discs(n: int, points: int = 900) -> MeshSet:
+    """`n` closed prisms over circles of `points` points, side by side on x-y,
+    each a different size: every plane between z = 0 and 2 cuts all of them."""
+    t = np.linspace(0.0, 2.0 * np.pi, points, endpoint=False)
+    i = np.arange(points)
+    j = np.roll(i, -1)
+    bottom, top, cb, ct = i, i + points, 2 * points, 2 * points + 1
+    faces = np.vstack([
+        np.column_stack((bottom, bottom[j], top[j])),
+        np.column_stack((bottom, top[j], top)),
+        np.column_stack((np.full(points, cb), bottom[j], bottom)),
+        np.column_stack((np.full(points, ct), top, top[j])),
+    ])
+    verts, tris = [], []
+    side = int(np.ceil(np.sqrt(n)))
+    for k in range(n):
+        r = 1.0 + 0.01 * k
+        x0, y0 = 3.0 * (k % side), 3.0 * (k // side)
+        ring = np.column_stack((x0 + r * np.cos(t), y0 + r * np.sin(t)))
+        v = np.vstack([np.column_stack((ring, np.zeros(points))),
+                       np.column_stack((ring, np.full(points, 2.0))),
+                       [[x0, y0, 0.0], [x0, y0, 2.0]]])
+        tris.append(faces + sum(len(a) for a in verts))
+        verts.append(v)
+    vertex_offsets = np.cumsum([0] + [len(v) for v in verts])
+    face_offsets = np.cumsum([0] + [len(f) for f in tris])
+    return MeshSet(vertices=np.vstack(verts).astype(np.float32),
+                   faces=np.vstack(tris).astype(np.int32),
+                   vertex_offsets=vertex_offsets, face_offsets=face_offsets,
+                   names=[f"d{k}" for k in range(n)], meta={})
+
+
+@pytest.mark.parametrize("n", [18, 40])
+def test_a_plane_drawing_more_than_65536_points_puts_every_triangle_in_place(n):
+    """No triangle index wraps, under NumPy 1 or 2.
+
+    18 discs: outlines indexed in 16 bits, offset past 65,535 by the fills
+    drawn under them. 40: the fills alone pass it.
+    """
+    napari = pytest.importorskip("napari")
+    from lobemap.viewer.layers import categorical_colors
+
+    viewer = napari.Viewer(show=False)
+    try:
+        meshset = _discs(n)
+        overlay = ContourOverlay(viewer, meshset, "t", "#ff0000",
+                                 colors=categorical_colors(n))
+        overlay.layer.visible = True
+        viewer.dims.ndisplay = 2
+        viewer.dims.order = (2, 1, 0)
+        viewer.dims.set_point(2, 1.5)
+        overlay.set_fills(range(n))
+        assert len(contour_loops(overlay)) == n
+        vertices = overlay.visual.mesh.mesh_data.get_vertices()
+        assert len(vertices) > 2**16
+        assert_renders_loops(overlay)
+    finally:
+        viewer.close()

@@ -627,7 +627,10 @@ class ContourOverlay:
         """Hand the plane's triangles and labels to the visuals.
 
         Fills first and outlines over them, in one mesh; the outlines are
-        selected out of the plane's prebuilt ones by compartment.
+        selected out of the plane's prebuilt ones by compartment. Each
+        part's triangles are offset in the type that indexes every point of
+        the mesh, so none wraps: NumPy 1 keeps uint16 + uint32 scalar in 16
+        bits.
         """
         self.paths, self._shape_index = list(paths), list(owners)
         edge_rgba, fill_rgba = self._rgba_tables()
@@ -636,9 +639,11 @@ class ContourOverlay:
         verts, faces, colors, count = [], [], [], 0
         filled = sorted(self.filled & shown)
         made, added = geometry.fills(filled)
+        total = len(geometry.vertices) + sum(len(v) for v, _f in made)
+        index = np.uint16 if total <= 2**16 else np.uint32
         for owner, (v, f) in zip(filled, made, strict=True):
             verts.append(v)
-            faces.append(f + np.uint32(count))
+            faces.append(f.astype(index, copy=False) + index(count))
             colors.append(np.broadcast_to(fill_rgba[owner], (len(v), 4)))
             count += len(v)
         stroke = geometry.faces
@@ -647,7 +652,7 @@ class ContourOverlay:
             keep[list(shown)] = True
             stroke = stroke[keep[geometry.owner[stroke[:, 0]]]]
         verts.append(geometry.vertices)
-        faces.append(stroke + np.uint32(count) if count else stroke)
+        faces.append(stroke.astype(index, copy=False) + index(count) if count else stroke)
         colors.append(edge_rgba[geometry.owner])
         if added:
             self._geometry.grew((geometry.axis, geometry.position), added)
