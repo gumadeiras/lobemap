@@ -71,7 +71,14 @@ def _fill(ring: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     way: the ring is then star-shaped about that point, and the fan tiles
     its inside with no overlap and no gap. Most sections are, and the fan
     is one array operation. Otherwise the triangulation napari's Shapes
-    uses for a polygon.
+    uses for a polygon, bermuda's -- checked, since bermuda overlaps
+    triangles in some rings: about 3% of the glomerulus sections that are
+    not star-shaped, covering up to 2.5% more than the ring, and 6% of the
+    neuropil ones, up to 18%. A fill at `FILL_ALPHA` shows each overlap
+    darker. The ring with its axes swapped, or mirrored, is triangulated
+    instead, which leaves 3 of 12,160 FAFB neuropil sections cut 2 um apart;
+    napari's own pure-Python triangulation, exact but tens of milliseconds a
+    ring, fills those.
     """
     ring = np.asarray(ring, dtype=np.float64)
     nxt = np.roll(ring, -1, axis=0)
@@ -89,11 +96,53 @@ def _fill(ring: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     ring32 = np.ascontiguousarray(ring, dtype=np.float32)
     try:
         import bermuda
-
-        triangles, points = bermuda.triangulate_polygons_face([ring32])
     except ImportError:
         points, triangles = napari_private.triangulate_face(ring32)
-    return np.asarray(points, dtype=np.float64), np.asarray(triangles, dtype=np.int64)
+        return np.asarray(points, dtype=np.float64), np.asarray(triangles, dtype=np.int64)
+    first = None
+    for flip in (_as_is, _swapped, _mirrored):
+        triangles, points = bermuda.triangulate_polygons_face(
+            [np.ascontiguousarray(flip(ring32))])
+        made = flip(np.asarray(points, dtype=np.float64)), np.asarray(triangles, np.int64)
+        if _covers(*made, ring32):
+            return made
+        if first is None:
+            first = made
+    try:
+        points, triangles = napari_private.triangulate_face(ring32)
+        made = np.asarray(points, dtype=np.float64), np.asarray(triangles, dtype=np.int64)
+    except Exception:  # noqa: BLE001 - keep bermuda's, as napari drew it
+        return first
+    return made if _covers(*made, ring32) else first
+
+
+def _as_is(points: np.ndarray) -> np.ndarray:
+    return points
+
+
+def _swapped(points: np.ndarray) -> np.ndarray:
+    return points[:, ::-1]
+
+
+def _mirrored(points: np.ndarray) -> np.ndarray:
+    return points * np.array([1, -1], points.dtype)
+
+
+def _covers(points: np.ndarray, triangles: np.ndarray, ring: np.ndarray) -> bool:
+    """Whether the triangles cover exactly the area inside `ring`: none overlap.
+
+    Areas are taken about the ring's first point, so coordinates far from
+    the origin cancel nothing away.
+    """
+    origin = ring[0].astype(np.float64)
+    r = ring.astype(np.float64) - origin
+    want = abs(float(np.dot(r[:, 0], np.roll(r[:, 1], -1))
+                     - np.dot(r[:, 1], np.roll(r[:, 0], -1)))) / 2.0
+    p = points - origin
+    a, b, c = (p[triangles[:, k]] for k in range(3))
+    got = float(np.abs((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
+                       - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0])).sum()) / 2.0
+    return abs(got - want) <= 1e-6 * want + 1e-12
 
 
 class _PlaneGeometry:

@@ -264,6 +264,64 @@ def test_an_open_compartment_with_no_loop_leaves_the_others_drawn(position):
     assert set(got) == {1}
 
 
+def _triangle_area(points, faces) -> float:
+    a, b, c = (np.asarray(points, float)[np.asarray(faces)[:, k]] for k in range(3))
+    return float(np.abs((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
+                        - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0])).sum()) / 2.0
+
+
+@pytest.mark.parametrize("overlapping", [0, 1, 2, 3])
+def test_a_fill_never_overlaps_itself(monkeypatch, overlapping):
+    """A triangulation from bermuda that covers more than the ring -- it
+    overlaps itself -- gives way to the ring swapped, then mirrored, then to
+    napari's own triangulation; the fill lies on the ring either way."""
+    import sys
+    import types
+
+    from viewer_harness import ring_area
+
+    from lobemap.viewer import contours, napari_private
+
+    calls = []
+
+    def triangulate(polygons):
+        (ring,) = polygons
+        points, faces = napari_private.triangulate_face(np.asarray(ring, np.float32))
+        faces = np.asarray(faces)
+        calls.append(np.array(ring))
+        if len(calls) <= overlapping:
+            faces = np.vstack([faces, faces[:1]])          # one triangle drawn twice
+        return faces, np.asarray(points, np.float32)
+
+    monkeypatch.setitem(sys.modules, "bermuda",
+                        types.SimpleNamespace(triangulate_polygons_face=triangulate))
+    u = np.array([[0, 0], [3, 0], [3, 3], [2, 3], [2, 1], [1, 1], [1, 3], [0, 3]], float)
+    points, faces = contours._fill(u + 100.0)
+    assert len(calls) == min(overlapping + 1, 3)
+    assert _triangle_area(points, faces) == pytest.approx(ring_area(u), rel=1e-12)
+    assert {tuple(p) for p in points[np.unique(faces)]} == {tuple(p) for p in u + 100.0}
+
+
+@pytest.mark.requires_data("benton2025_glomeruli")
+def test_a_fill_covers_its_ring_where_bermuda_overlaps(registry):
+    """Benton's VP4 cut at y = 247 um: bermuda, given the ring in the plane's
+    own order, covers 2.5% more than the ring, so overlapping triangles would
+    draw darker; the fill covers the ring exactly."""
+    import bermuda
+    from viewer_harness import ring_area
+
+    from lobemap.viewer.contours import _fill
+
+    meshset = registry.mesh("benton2025_glomeruli")
+    (loop,) = MeshSections(meshset).at(1, 247.0)[meshset.names.index("VP4")]
+    ring = loop[:-1][:, [0, 2]]
+    faces, points = bermuda.triangulate_polygons_face([np.asarray(ring, np.float32)])
+    assert _triangle_area(points, faces) > 1.02 * ring_area(ring), "the case is gone"
+    points, faces = _fill(ring)
+    assert _triangle_area(points.astype(np.float32), faces) == pytest.approx(
+        ring_area(ring), rel=1e-9)
+
+
 def test_a_doubled_face_is_left_to_trimesh(monkeypatch):
     """A face listed twice cuts one segment twice: two points joined twice.
 

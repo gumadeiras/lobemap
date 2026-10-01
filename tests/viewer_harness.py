@@ -199,6 +199,19 @@ def _napari_fill_area(ring: np.ndarray) -> float:
     return float(_areas(np.asarray(points, float), np.asarray(faces, int)).sum())
 
 
+def ring_area(ring: np.ndarray) -> float:
+    """The exact area inside a simple closed ring of float32 points, as drawn.
+
+    The shoelace formula, about the ring's first point, so coordinates far
+    from the origin cancel nothing away. A fill that covers the ring and no
+    more has exactly this area, however it is triangulated.
+    """
+    r = np.asarray(ring, np.float32).astype(float)
+    r = r - r[0]
+    x, y = r[:, 0], r[:, 1]
+    return abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))) / 2.0
+
+
 def assert_renders_loops(contour, tol: float = 1e-3) -> None:
     """The contour's vispy visuals draw exactly its loops, and nothing else.
 
