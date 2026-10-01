@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from viewer_harness import oriented_volume
 
 from lobemap.core.model import anatomical_axes, anatomical_triad
 from lobemap.viewer.app import MIRROR_AXIS, load_space
@@ -86,23 +87,6 @@ def test_mirrored_arrows_avoid_the_reflected_world_arrows(registry):
         )
 
 
-def _signed_volume(vertices, faces):
-    """Positive when the winding puts the normals outward."""
-    a = vertices[faces[:, 0]]
-    b = vertices[faces[:, 1]]
-    c = vertices[faces[:, 2]]
-    return float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6.0)
-
-
-def _oriented_volume(surface):
-    """Enclosed volume of a surface layer as the GPU sees it."""
-    v = np.asarray(surface.layer.data[0], float)
-    f = np.asarray(surface.layer.data[1])
-    affine = np.asarray(surface.layer.affine.affine_matrix)
-    v = v @ affine[:3, :3].T + affine[:3, -1]
-    return _signed_volume(v, f)
-
-
 @pytest.mark.requires_data
 def test_mirroring_reverses_the_surface_winding(registry):
     """Otherwise every triangle faces inward under the reflection."""
@@ -112,12 +96,12 @@ def test_mirroring_reverses_the_surface_winding(registry):
         session = load_space(viewer, registry, "GRABE", fit=False)
         surface = next(iter(session.surfaces.values()))
 
-        plain = _oriented_volume(surface)
+        plain = oriented_volume(surface)
         assert plain > 0, "unmirrored normals already point inward"
 
         session.set_mirror(True)
         assert surface.mirrored
-        mirrored = _oriented_volume(surface)
+        mirrored = oriented_volume(surface)
         assert mirrored > 0, (
             "the winding was not reversed, so every triangle faces inward "
             "under the reflection"
@@ -125,7 +109,7 @@ def test_mirroring_reverses_the_surface_winding(registry):
         assert mirrored == pytest.approx(plain, rel=1e-6)
 
         session.set_mirror(False)
-        assert _oriented_volume(surface) > 0
+        assert oriented_volume(surface) > 0
     finally:
         viewer.close()
 
@@ -141,7 +125,7 @@ def test_the_winding_survives_a_selection_change(registry):
         session.set_mirror(True)
         surface.set_selection(range(0, surface.meshset.n_compartments, 2))
         surface.compact()
-        assert _oriented_volume(surface) > 0, (
+        assert oriented_volume(surface) > 0, (
             "compaction dropped the mirrored winding"
         )
     finally:

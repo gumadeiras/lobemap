@@ -294,6 +294,21 @@ def assert_renders_loops(contour, tol: float = 1e-3) -> None:
         np.testing.assert_allclose(rgba, wrgba, atol=1e-6)
 
 
+def signed_volume(vertices, faces) -> float:
+    """Positive when the winding puts the normals outward."""
+    a, b, c = (vertices[faces[:, k]] for k in range(3))
+    return float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6.0)
+
+
+def oriented_volume(surface) -> float:
+    """Enclosed volume of a surface layer as the GPU sees it: its data
+    through its affine, the mirror included."""
+    v = np.asarray(surface.layer.data[0], float)
+    f = np.asarray(surface.layer.data[1])
+    affine = np.asarray(surface.layer.affine.affine_matrix)
+    return signed_volume(v @ affine[:3, :3].T + affine[:3, -1], f)
+
+
 def mode_layer(surface, contour=None):
     """The layer that draws this atlas in the current mode."""
     if contour is not None and surface.viewer.dims.ndisplay == 2:

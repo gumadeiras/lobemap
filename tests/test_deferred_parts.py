@@ -21,8 +21,10 @@ from viewer_harness import (
     hover,
     launched,
     layer_names,
+    oriented_volume,
     pump,
     session,
+    signed_volume,
     switch_to,
     switcher,
 )
@@ -225,6 +227,14 @@ def test_a_part_built_under_the_mirror_is_drawn_mirrored(monkeypatch, space, nam
         assert drawn(surface, contour), "no outline on the plane"
         assert_renders_loops(contour)
         assert_rows_match_drawing(sess)
+
+        # Re-wound for the reflection, as a part built before the mirror
+        # is: its triangles face out of the mesh as the GPU draws them.
+        v, f, _ = surface.meshset.select(range(surface.meshset.n_compartments))
+        plain = signed_volume(np.asarray(v, float), np.asarray(f))
+        assert plain > 0, "unmirrored normals already point inward"
+        assert oriented_volume(surface) == pytest.approx(plain, rel=1e-6), (
+            "the winding was not reversed under the mirror")
 
 
 @pytest.mark.parametrize("space", STAINED)
