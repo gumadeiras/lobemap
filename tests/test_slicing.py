@@ -209,8 +209,8 @@ def test_a_scene_opened_in_2d_is_oriented_on_first_entering_3d(monkeypatch, spac
     with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
         viewer.dims.ndisplay = 3
         frame = anatomical_axes(session(viewer).registry.spaces[space])
-        view = np.asarray(viewer.camera.view_direction)
-        up = np.asarray(viewer.camera.up_direction)
+        view = np.asarray(viewer.scene.camera.view_direction)
+        up = np.asarray(viewer.scene.camera.up_direction)
         assert float(np.dot(view, frame["A"])) < -0.99, view
         assert float(np.dot(up, frame["D"])) > 0.99, up
 
@@ -221,12 +221,12 @@ def test_home_faces_the_mirrored_anatomy(monkeypatch):
     with launched(monkeypatch, "view", "GRABE") as (code, viewer):
         switcher(viewer).mirror.setChecked(True)
         pump()
-        viewer.camera.angles = (17, 42, -63)
+        viewer.scene.camera.angles = (17, 42, -63)
         viewer.window._qt_viewer.viewerButtons.resetViewButton.click()
         frame = anatomical_axes(session(viewer).registry.spaces["GRABE"])
         reflect = np.array([-1.0, 1.0, 1.0])
-        view = np.asarray(viewer.camera.view_direction)
-        up = np.asarray(viewer.camera.up_direction)
+        view = np.asarray(viewer.scene.camera.view_direction)
+        up = np.asarray(viewer.scene.camera.up_direction)
         assert float(np.dot(view, frame["A"] * reflect)) < -0.999, view
         assert float(np.dot(up, frame["D"] * reflect)) > 0.999, up
 

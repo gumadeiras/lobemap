@@ -159,7 +159,7 @@ def test_orient_anterior_points_the_camera_down_the_measured_axis(viewer):
                   anatomical_rotation_axis=(0.0, 1.0, 0.0),
                   anatomical_rotation_deg=90.0)
     assert orient_anterior(viewer, space) is True
-    cam = getattr(viewer, "scene", viewer).camera
+    cam = viewer.scene.camera
     # Camera sits anterior and looks posteriorly, i.e. along +z, less the
     # small yaw that keeps it off the gimbal singularity.
     off = np.degrees(np.arccos(np.clip(
@@ -220,7 +220,7 @@ def test_the_nudge_survives_the_round_trip_for_every_space(registry_root):
         for space_id, space in reg.spaces.items():
             dorsal = anatomical_axes(space)["D"]
             assert orient_anterior(viewer, space) is True
-            cam = getattr(viewer, "scene", viewer).camera
+            cam = viewer.scene.camera
             angles = backward(forward(np.array(cam.angles), (False,) * 3),
                               (False,) * 3)
             after = Camera()
@@ -237,10 +237,10 @@ def test_a_space_without_a_rotation_is_left_alone(viewer):
     arbitrary roll, which is worse than not trying."""
     from lobemap.viewer.app import orient_anterior
 
-    before = tuple(getattr(viewer, "scene", viewer).camera.view_direction)
+    before = tuple(viewer.scene.camera.view_direction)
     space = Space(id="S", title="s", units="um")
     assert orient_anterior(viewer, space) is False
-    after = tuple(getattr(viewer, "scene", viewer).camera.view_direction)
+    after = tuple(viewer.scene.camera.view_direction)
     assert before == after
 
 
@@ -264,7 +264,7 @@ def test_fit_view_keeps_the_orientation(viewer):
                   anatomical_rotation_deg=90.0)
     orient_anterior(viewer, space)
     fit_view(viewer)
-    cam = getattr(viewer, "scene", viewer).camera
+    cam = viewer.scene.camera
     assert np.dot(np.asarray(cam.view_direction), (0, 0, 1)) > 0.999
     assert np.dot(np.asarray(cam.up_direction), (0, 1, 0)) > 0.99
     assert cam.zoom > 0
@@ -287,7 +287,7 @@ def test_the_initial_fit_follows_the_canvas(viewer):
 
     viewer.add_image(np.zeros((40, 30, 20), np.uint8))
     assert install_initial_fit(viewer) is True
-    cam = getattr(viewer, "scene", viewer).camera
+    cam = viewer.scene.camera
     assert cam.zoom > 0
 
 
@@ -305,7 +305,7 @@ def test_the_initial_fit_watches_napari_canvas_not_the_widget(viewer):
     viewer.add_image(np.zeros((40, 30, 20), np.uint8))
     assert install_initial_fit(viewer) is True
     canvas = viewer.window._qt_viewer.canvas
-    cam = getattr(viewer, "scene", viewer).camera
+    cam = viewer.scene.camera
     before = cam.zoom
 
     viewer.canvas.size = (400, 1600)
@@ -367,11 +367,11 @@ def test_home_looks_down_a_p_with_dorsal_up(registry_root, space_id):
         frame = anatomical_axes(space)
         anterior, dorsal = frame["A"], frame["D"]
 
-        viewer.camera.angles = (17, 42, -63)        # the user rotates
+        viewer.scene.camera.angles = (17, 42, -63)        # the user rotates
         _home(viewer)
 
-        view = np.asarray(viewer.camera.view_direction)
-        up = np.asarray(viewer.camera.up_direction)
+        view = np.asarray(viewer.scene.camera.view_direction)
+        up = np.asarray(viewer.scene.camera.up_direction)
         # Looking POSTERIORLY means the view runs against anterior.
         assert float(np.dot(view, anterior)) < -0.99, (space_id, view)
         assert float(np.dot(up, dorsal)) > 0.99, (space_id, up)
@@ -398,10 +398,10 @@ def test_home_survives_a_scene_switch(registry_root):
         load_space(viewer, reg, "JRCFIB2018F", fit=False)
         assert viewer.__dict__.get("reset_view") is first, "wrapper stacked"
 
-        viewer.camera.angles = (5, 5, 5)
+        viewer.scene.camera.angles = (5, 5, 5)
         _home(viewer)
         anterior = anatomical_axes(reg.spaces["JRCFIB2018F"])["A"]
-        view = np.asarray(viewer.camera.view_direction)
+        view = np.asarray(viewer.scene.camera.view_direction)
         assert float(np.dot(view, anterior)) < -0.99, (
             "home re-oriented to the previous space"
         )
@@ -424,8 +424,8 @@ def test_a_fit_that_keeps_the_angle_is_not_re_oriented(registry_root):
         pytest.skip(f"no Qt display: {exc}")
     try:
         load_space(viewer, reg, "FAFB14", fit=False)
-        viewer.camera.angles = (17, 42, -63)
+        viewer.scene.camera.angles = (17, 42, -63)
         fit_view(viewer)
-        assert tuple(round(a) for a in viewer.camera.angles) == (17, 42, -63)
+        assert tuple(round(a) for a in viewer.scene.camera.angles) == (17, 42, -63)
     finally:
         viewer.close()

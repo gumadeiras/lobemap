@@ -74,7 +74,7 @@ def orient_anterior(viewer, space, nudge_deg: float = GIMBAL_NUDGE_DEG,
         view /= np.linalg.norm(view)
 
     # napari 0.9 moved the camera; keep working on either.
-    camera = getattr(viewer, "scene", viewer).camera
+    camera = viewer.scene.camera
     camera.set_view_direction(
         view_direction=tuple(view), up_direction=tuple(dorsal)
     )
@@ -257,7 +257,7 @@ def capture_view(viewer) -> dict:
     and the window title. `restore_view` puts them back when that build
     fails, so the scene the user had is looked at exactly as before.
     """
-    camera = getattr(viewer, "scene", viewer).camera
+    camera = viewer.scene.camera
     selection = viewer.layers.selection
     return {
         "order": tuple(viewer.dims.order),
@@ -283,7 +283,7 @@ def restore_view(viewer, state: dict) -> None:
         dims.order = state["order"]
     if len(dims.point) == len(state["point"]):
         dims.point = state["point"]
-    camera = getattr(viewer, "scene", viewer).camera
+    camera = viewer.scene.camera
     camera.center = state["center"]
     camera.zoom = state["zoom"]
     camera.angles = state["angles"]

@@ -40,7 +40,7 @@ def test_2d_zoom_picks_a_finer_level_and_draws_its_tile(monkeypatch):
         assert layer.locked_data_level is None
         _draw(viewer)
         before = layer.data_level
-        viewer.camera.zoom *= 8
+        viewer.scene.camera.zoom *= 8
         _draw(viewer)
         assert layer.data_level < before
         _assert_shows_store_tile(viewer, layer)

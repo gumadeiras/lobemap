@@ -123,8 +123,8 @@ def test_a_space_opens_with_the_sliders_and_view_of_its_whole_scene(registry, sp
         pump()
         assert late.dims.range == whole.dims.range
         np.testing.assert_array_equal(late.layers.extent.world, whole.layers.extent.world)
-        assert late.camera.zoom == pytest.approx(whole.camera.zoom, rel=1e-9)
-        np.testing.assert_allclose(late.camera.center, whole.camera.center, atol=1e-9)
+        assert late.scene.camera.zoom == pytest.approx(whole.scene.camera.zoom, rel=1e-9)
+        np.testing.assert_allclose(late.scene.camera.center, whole.scene.camera.center, atol=1e-9)
     finally:
         late.close()
         whole.close()
@@ -206,7 +206,7 @@ def test_building_a_deferred_part_moves_neither_the_sliders_nor_the_plane(
         viewer.dims.set_current_step(axis, viewer.dims.current_step[axis] + 3)
         pump()
         sliders, plane = viewer.dims.range, viewer.dims.point
-        camera = (viewer.camera.zoom, viewer.camera.center)
+        camera = (viewer.scene.camera.zoom, viewer.scene.camera.center)
 
         tab = _open_tab(sess.panel, name)
         _buttons(tab)["Show all"].click()
@@ -214,7 +214,7 @@ def test_building_a_deferred_part_moves_neither_the_sliders_nor_the_plane(
         assert name in sess.surfaces
         assert viewer.dims.range == sliders
         assert viewer.dims.point == plane
-        assert (viewer.camera.zoom, viewer.camera.center) == camera
+        assert (viewer.scene.camera.zoom, viewer.scene.camera.center) == camera
         assert_rows_match_drawing(sess)
 
 
