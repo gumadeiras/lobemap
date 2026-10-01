@@ -86,6 +86,11 @@ def install_display_mode(viewer, surfaces, contours, images=(),
       chosen slice axis. In 3D it must stay the identity, because napari
       permutes an Image by it and a Surface not at all (see `DIMS_ORDER_XYZ`).
 
+    - **The 2D plane is kept through 3D.** On the way back napari puts the
+      slider of the first axis in the order at the camera's depth, which in
+      3D's identity order is x: a plane chosen on x was lost, the others
+      kept. So the plane 2D left on is put back on its axis.
+
     With a `session`, it also moves an empty 2D slice onto the shown atlases,
     follows the mirror and the slice axis, sets the panel's 2D-only controls,
     and turns the camera onto the anatomy the first time 3D is entered.
@@ -94,10 +99,21 @@ def install_display_mode(viewer, surfaces, contours, images=(),
         if name in contours:
             surface.pair(contours[name])
 
+    #: The slice axis and plane 2D was on when it last left for 3D.
+    left: dict = {}
+
     def _apply(event=None) -> None:
         three_d = viewer.dims.ndisplay == 3
         ndim = viewer.dims.ndim
         axis = session.slice_axis if session is not None else DEFAULT_SLICE_AXIS
+        if event is not None and ndim == 3:
+            # An event is a change of mode. Leaving 2D, the order is still
+            # 2D's and the plane where the user left it.
+            if three_d:
+                slider = int(viewer.dims.order[0])
+                left.update(axis=slider, point=float(viewer.dims.point[slider]))
+            elif left.pop("axis", None) == axis:
+                viewer.dims.set_point(axis, left.pop("point"))
         want_order = (
             tuple(range(ndim)) if three_d or ndim != 3 else order_for(axis)
         )

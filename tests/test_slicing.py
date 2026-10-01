@@ -55,10 +55,20 @@ def test_entering_2d_moves_off_an_empty_plane(monkeypatch, space):
         _on_plane(viewer, _primary(viewer))
 
 
-def test_a_populated_plane_the_user_chose_is_kept(monkeypatch):
-    with launched(monkeypatch, "view", "FAFB14", "--ndisplay", "2") as (code, viewer):
+@pytest.mark.parametrize("axis", [0, 1, 2])
+@pytest.mark.parametrize("space", ["FAFB14", "GRABE"])
+def test_a_populated_plane_the_user_chose_is_kept(monkeypatch, space, axis):
+    """On every slice axis, through 3D and back.
+
+    napari puts the slider of the first axis in the order at the camera's
+    depth on the way back to 2D; in 3D's order that is x, so x lost it.
+    """
+    with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
+        menu = switcher(viewer).slice
+        menu.setCurrentIndex(menu.findData(axis))
+        pump()
+        assert int(viewer.dims.order[0]) == axis
         overlay = _primary(viewer)
-        axis = int(viewer.dims.order[0])
         spans = [overlay.meshset.compartment(i)[0][:, axis] for i in range(5)]
         chosen = float(np.median([s.mean() for s in spans]))
         viewer.dims.set_point(axis, chosen)
@@ -66,8 +76,10 @@ def test_a_populated_plane_the_user_chose_is_kept(monkeypatch):
         kept = float(viewer.dims.point[axis])
         _on_plane(viewer, overlay)
         viewer.dims.ndisplay = 3
+        pump()
         viewer.dims.ndisplay = 2
         pump()
+        assert int(viewer.dims.order[0]) == axis
         assert float(viewer.dims.point[axis]) == kept
         _on_plane(viewer, overlay)
 
