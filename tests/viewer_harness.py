@@ -190,15 +190,6 @@ def _areas(points: np.ndarray, faces: np.ndarray) -> np.ndarray:
                   - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0])) / 2.0
 
 
-def _napari_fill_area(ring: np.ndarray) -> float:
-    """The area napari's Shapes filled for a polygon: bermuda's triangulation of it."""
-    import bermuda
-
-    faces, points = bermuda.triangulate_polygons_face(
-        [np.ascontiguousarray(ring, np.float32)])
-    return float(_areas(np.asarray(points, float), np.asarray(faces, int)).sum())
-
-
 def ring_area(ring: np.ndarray) -> float:
     """The exact area inside a simple closed ring of float32 points, as drawn.
 
@@ -220,8 +211,9 @@ def assert_renders_loops(contour, tol: float = 1e-3) -> None:
       `contour.width` wide (bermuda's `triangulate_path_edge`, the call
       napari makes), in each loop's compartment color.
     - Fills: each filled compartment's fill triangles, drawn before every
-      outline, cover the area napari's Shapes filled for its loops, in its
-      color at `FILL_ALPHA`; nothing else is filled.
+      outline, cover exactly the area inside its loops, in the order napari
+      displays them -- no less, and no more, as overlapping triangles would
+      -- in its color at `FILL_ALPHA`; nothing else is filled.
     - Labels: each labeled compartment's name, once, at the mean of its
       longest loop's points, in its color.
     - Placement: vispy maps the rendered points to where the layer's
@@ -263,21 +255,22 @@ def assert_renders_loops(contour, tol: float = 1e-3) -> None:
         key = tuple(np.round(colors[tri[0]], 4))
         fill_area[key] = fill_area.get(key, 0.0) + float(area)
     want_area: dict[tuple, float] = {}
+    displayed = list(contour.viewer.dims.displayed)
     for owner, loop in loops:
         if owner in contour.filled:
             rgba = _edge_rgba(contour, owner).copy()
             rgba[3] = contour.FILL_ALPHA
             key = tuple(np.round(rgba, 4))
-            want_area[key] = want_area.get(key, 0.0) + _napari_fill_area(loop[:-1][:, xy])
+            want_area[key] = want_area.get(key, 0.0) + ring_area(loop[:-1][:, displayed])
     assert set(fill_area) == set(want_area), "filled colors differ"
     for key, area in want_area.items():
-        assert abs(fill_area[key] - area) <= 1e-4 * max(area, 1.0), (key, fill_area[key], area)
+        # float64 arithmetic on float32 points: far below any visible change.
+        assert abs(fill_area[key] - area) <= 1e-6 * area + 1e-9, (key, fill_area[key], area)
 
     # Where vispy puts the rendered points is where napari's own transform
     # puts those points of the plane: the layer's, the mirror included.
     if len(vertices):
         to_scene = contour.visual.mesh.get_transform("visual", "scene")
-        displayed = list(contour.viewer.dims.displayed)
         for v in vertices[np.linspace(0, len(vertices) - 1, 8).astype(int)]:
             data = np.zeros(3)
             data[xy] = v
@@ -340,15 +333,21 @@ def checked(tab) -> set[int]:
 
 
 def planes_cut(surface) -> set[int]:
-    """Checked compartments the current 2D plane actually crosses."""
-    axis = int(surface.viewer.dims.order[0])
-    point = float(surface.viewer.dims.point[axis])
-    out = set()
-    for i in surface.selection:
-        v, _ = surface.meshset.compartment(i)
-        if len(v) and v[:, axis].min() <= point <= v[:, axis].max():
-            out.add(i)
-    return out
+    """Checked compartments the current 2D plane actually cuts.
+
+    A fresh section of the atlas, sharing no cache with the viewer, at the
+    plane on screen: the slider's world point taken into the layer's data
+    through its own transform, so under the mirror too. A compartment whose
+    bounds hold the plane but whose surface does not reach it -- a tangent
+    plane, a concave side -- is not cut.
+    """
+    from lobemap.viewer.sections import MeshSections
+
+    viewer = surface.viewer
+    axis = int(viewer.dims.order[0])
+    position = float(surface.layer.world_to_data(list(viewer.dims.point))[axis])
+    cut = MeshSections(surface.meshset).at(axis, position)
+    return {i for i in surface.selection if cut.get(i)}
 
 
 def assert_rows_match_drawing(sess) -> None:

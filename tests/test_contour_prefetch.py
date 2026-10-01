@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from viewer_harness import (
     assert_renders_loops,
+    assert_rows_match_drawing,
     contour_loops,
     drawn,
     launched,
@@ -206,6 +207,8 @@ def test_a_mirror_during_the_prefetch_cuts_the_mirrored_planes(monkeypatch, held
             viewer.dims.set_current_step(0, viewer.dims.current_step[0] + step)
             pump()
             _assert_drawn_is_fresh(overlay)
+            pump(300)
+            assert_rows_match_drawing(session(viewer))
 
 
 @pytest.fixture
