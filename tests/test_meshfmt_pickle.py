@@ -8,6 +8,7 @@ caller opts in for a file it trusts.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -48,13 +49,13 @@ def _legacy(path, names):
 
 
 class _TouchOnUnpickle:
-    """Unpickling this opens `marker` for writing, which creates it."""
+    """Unpickling this creates `marker`: code runs, and no file is left open."""
 
     def __init__(self, marker):
-        self.marker = str(marker)
+        self.marker = Path(marker)
 
     def __reduce__(self):
-        return (open, (self.marker, "w"))
+        return (Path.touch, (self.marker,))
 
 
 def test_legacy_object_array_is_refused_by_default(tmp_path):
