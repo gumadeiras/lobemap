@@ -41,10 +41,14 @@ def keep_extent_while_slicing(layer) -> None:
     layer gets this.
 
     Only the slice step is held back: napari slices in `_slice_dims`, and
-    the clear it makes there is skipped. A change of data, scale, translate
-    or affine -- the mirror is one -- clears the extent as before.
+    the clear it makes there is skipped. A change of scale, translate or
+    affine -- the mirror is one -- clears the extent as before. So does a
+    change of data, hidden or not: napari's `refresh` clears the extent
+    only of a layer it slices then, and leaves a hidden one's to its next
+    slice, which no longer clears it, so a refresh asked to update the
+    extent of a hidden layer clears it here.
     """
-    slice_dims, clear = layer._slice_dims, layer._clear_extent
+    slice_dims, clear, refresh = layer._slice_dims, layer._clear_extent, layer.refresh
     slicing = [False]
 
     def _clear_extent() -> None:
@@ -58,8 +62,14 @@ def keep_extent_while_slicing(layer) -> None:
         finally:
             slicing[0] = False
 
+    def _refresh(*args, extent: bool = True, **kwargs):
+        if extent and not layer.visible:
+            clear()
+        return refresh(*args, extent=extent, **kwargs)
+
     layer._clear_extent = _clear_extent
     layer._slice_dims = _slice_dims
+    layer.refresh = _refresh
 
 
 def before_slicing(viewer, callback) -> None:

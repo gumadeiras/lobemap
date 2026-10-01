@@ -58,3 +58,31 @@ def test_stepping_a_scene_recomputes_no_extent_and_the_mirror_still_does(registr
         np.testing.assert_allclose(mirrored[:, 0], expect, atol=1e-6)
     finally:
         viewer.close()
+
+
+@pytest.mark.parametrize("hidden", [False, True])
+def test_new_data_gives_a_layer_its_new_extent_hidden_or_not(hidden):
+    """napari clears the extent a data change asks for when it next slices a
+    hidden layer, which these layers no longer do: it is cleared at once."""
+    from napari.layers import Layer
+
+    viewer = napari.Viewer(show=False)
+    try:
+        other = viewer.add_image(np.zeros((30, 8, 8), np.uint8))     # keeps a slider
+        layer = viewer.add_image(np.zeros((20, 8, 8), np.uint8))
+        for each in (other, layer):
+            keep_extent_while_slicing(each)
+        viewer.dims.set_current_step(0, 2)
+        layer.visible = not hidden
+        layer.data = np.zeros((50, 8, 8), np.uint8)
+        layer.visible = True
+        for k in (3, 4, 5):
+            viewer.dims.set_current_step(0, k)
+        np.testing.assert_array_equal(layer.extent.world, Layer.extent.func(layer).world)
+        assert layer.extent.world[1][0] == pytest.approx(49.0)
+        assert viewer.layers.extent.world[1][0] == pytest.approx(49.0)
+        before = viewer.layers.extent
+        viewer.dims.set_current_step(0, 6)
+        assert viewer.layers.extent is before, "a step recomputed the extent"
+    finally:
+        viewer.close()

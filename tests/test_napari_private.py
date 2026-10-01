@@ -227,6 +227,8 @@ def test_a_slice_step_goes_through_slice_dims_and_clears_the_extent(viewer):
     used = "viewer.napari_private.keep_extent_while_slicing"
     need(callable(getattr(layer, "_slice_dims", None)), "Layer._slice_dims", used)
     need(callable(getattr(layer, "_clear_extent", None)), "Layer._clear_extent", used)
+    need("extent" in inspect.signature(layer.refresh).parameters,
+         "Layer.refresh(extent=)", used)
     calls = []
     slice_dims, clear = layer._slice_dims, layer._clear_extent
     layer._slice_dims = lambda *a, **k: (calls.append("slice"), slice_dims(*a, **k))[1]
