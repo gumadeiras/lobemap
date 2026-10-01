@@ -270,11 +270,12 @@ def _triangle_area(points, faces) -> float:
                         - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0])).sum()) / 2.0
 
 
-@pytest.mark.parametrize("overlapping", [0, 1, 2, 3])
+@pytest.mark.parametrize("overlapping", [0, 1, 2, 3, 8, 17, 18])
 def test_a_fill_never_overlaps_itself(monkeypatch, overlapping):
     """A triangulation from bermuda that covers more than the ring -- it
-    overlaps itself -- gives way to the ring swapped, then mirrored, then to
-    napari's own triangulation; the fill lies on the ring either way."""
+    overlaps itself -- gives way to the ring turned, each of `_TURNS` in
+    turn, then to napari's own triangulation; the fill lies on the ring
+    either way."""
     import sys
     import types
 
@@ -282,22 +283,29 @@ def test_a_fill_never_overlaps_itself(monkeypatch, overlapping):
 
     from lobemap.viewer import contours, napari_private
 
+    assert len(contours._TURNS) == 18
+
     calls = []
 
     def triangulate(polygons):
+        from scipy.spatial import cKDTree
+
         (ring,) = polygons
-        points, faces = napari_private.triangulate_face(np.asarray(ring, np.float32))
-        faces = np.asarray(faces)
+        ring = np.asarray(ring, np.float32)
+        points, faces = napari_private.triangulate_face(ring)
+        # As bermuda does, the very points it was given, which napari moves
+        # by a rounding error on a turned ring.
+        faces = cKDTree(ring).query(np.asarray(points, float))[1][np.asarray(faces)]
         calls.append(np.array(ring))
         if len(calls) <= overlapping:
             faces = np.vstack([faces, faces[:1]])          # one triangle drawn twice
-        return faces, np.asarray(points, np.float32)
+        return faces, ring
 
     monkeypatch.setitem(sys.modules, "bermuda",
                         types.SimpleNamespace(triangulate_polygons_face=triangulate))
     u = np.array([[0, 0], [3, 0], [3, 3], [2, 3], [2, 1], [1, 1], [1, 3], [0, 3]], float)
     points, faces = contours._fill(u + 100.0)
-    assert len(calls) == min(overlapping + 1, 3)
+    assert len(calls) == min(overlapping + 1, len(contours._TURNS))
     assert _triangle_area(points, faces) == pytest.approx(ring_area(u), rel=1e-12)
     assert {tuple(p) for p in points[np.unique(faces)]} == {tuple(p) for p in u + 100.0}
 
