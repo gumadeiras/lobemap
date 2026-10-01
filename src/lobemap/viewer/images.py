@@ -6,6 +6,7 @@ the display defaults each role needs and the pyramid level 3D pins.
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import warnings
 import weakref
@@ -127,7 +128,7 @@ class FineLevel:
     #: How often the UI thread looks for the result, in milliseconds.
     POLL_MS = 30
 
-    def __init__(self, layer, level: int, coarse: int, sources) -> None:
+    def __init__(self, viewer, layer, level: int, coarse: int, sources) -> None:
         self._layer = weakref.ref(layer)
         self.level = level
         self.coarse = coarse
@@ -144,6 +145,10 @@ class FineLevel:
         self._stopped = False
         #: Set to end the read at its next batch of chunks.
         self._stop = threading.Event()
+        # A scene torn down, or a viewer closed, removes the layer: the read
+        # stops there, rather than swap a level into a layer nothing shows.
+        self._removed = viewer.layers.events.removed
+        self._removed.connect(self._on_removed)
 
     def pin(self, three_d: bool) -> None:
         """Pin the level 3D renders, reading the fine one if it is not in yet."""
@@ -197,12 +202,18 @@ class FineLevel:
         self._thread.start()
         self._timer.start()
 
+    def _on_removed(self, event=None) -> None:
+        if getattr(event, "value", None) is self._layer():
+            self.stop()
+
     def stop(self) -> None:
-        """End a read still running, for a scene being torn down."""
+        """End a read still running, for good: its layer is gone or going."""
         self._stopped = True
         self._stop.set()
         if self._timer is not None:
             self._timer.stop()
+        with contextlib.suppress(Exception):          # already disconnected
+            self._removed.disconnect(self._on_removed)
 
     def _poll(self) -> None:
         result = self._result
@@ -334,7 +345,7 @@ def add_images(viewer, registry, space: str) -> list:
             if coarse != level:
                 # Read by the same chunk reader as 2D, without caching:
                 # FineLevel keeps both levels itself.
-                _FINE[layer] = FineLevel(layer, level, coarse, data)
+                _FINE[layer] = FineLevel(viewer, layer, level, coarse, data)
         layer.metadata["lobemap"] = {
             "kind": "image",
             "asset": asset.id,

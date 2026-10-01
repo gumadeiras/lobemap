@@ -254,3 +254,31 @@ def test_a_switch_before_the_fine_level_arrives_leaves_nothing(monkeypatch):
         assert fine.array is None
         assert all(name.startswith(("grabe", "Grabe")) for name in layer_names(viewer))
         assert_rows_match_drawing(session(viewer))
+
+
+def test_closing_the_viewer_before_the_fine_level_arrives_stops_its_read(monkeypatch):
+    """Nothing is swapped into the closed viewer's layer, and the read ends."""
+    import threading
+
+    from lobemap.viewer import chunkcache, images
+
+    real = chunkcache._ChunkFiles.read
+
+    def slow(self, idx):
+        time.sleep(0.004)                    # a cold disk: the read outlasts the open
+        return real(self, idx)
+
+    monkeypatch.setattr(chunkcache._ChunkFiles, "read", slow)
+    with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
+        assert code == 0
+        image = session(viewer).images[0]
+        fine = images._FINE[image]
+        coarse = image.data_level
+        assert coarse == fine.coarse and fine.array is None
+        assert any(t.name == "lobemap-3d-level" for t in threading.enumerate())
+    # Closed: long enough for the whole read and the poll that would swap it in.
+    pump(2500)
+    assert fine.array is None
+    assert image.data_level == coarse
+    assert _rendered(image).shape == tuple(image.data[coarse].shape)
+    assert not any(t.name == "lobemap-3d-level" for t in threading.enumerate())
