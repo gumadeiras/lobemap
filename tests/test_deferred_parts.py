@@ -163,8 +163,10 @@ def test_switching_a_stand_in_on_builds_its_part_and_shows_it(monkeypatch):
         assert not stand_in.visible
         stand_in.visible = True
         pump(300)
-        assert stand_in not in viewer.layers
         tab = sess.panel.tabs["fafb_neuropil"]
+        # It became the part's mesh layer: no stand-in is left.
+        assert tab.surface.layer is stand_in
+        assert not [layer for layer in viewer.layers if "(not opened)" in layer.name]
         assert checked(tab) == set(range(tab.table.rowCount()))
         assert drawn(tab.surface, sess.contours["fafb_neuropil"])
         assert_rows_match_drawing(sess)
@@ -393,3 +395,90 @@ def test_closing_the_viewer_before_the_fine_level_arrives_stops_its_read(monkeyp
     assert image.data_level == coarse
     assert _rendered(image).shape == tuple(image.data[coarse].shape)
     assert not any(t.name == "lobemap-3d-level" for t in threading.enumerate())
+
+
+# -- the meshes, read ahead -------------------------------------------------
+
+
+def _count_loads(monkeypatch, slow: dict | None = None):
+    """Each mesh file read, in order, with when it started; `slow` delays some by path stem."""
+    from lobemap.core.meshfmt import MeshSet
+
+    real = MeshSet.load.__func__
+    loads = []
+
+    def load(cls, path, *args, **kwargs):
+        from pathlib import Path
+
+        loads.append((Path(path).stem, time.perf_counter()))
+        time.sleep((slow or {}).get(Path(path).stem, 0.0))
+        return real(cls, path, *args, **kwargs)
+
+    monkeypatch.setattr(MeshSet, "load", classmethod(load))
+    return loads
+
+
+def _read_ahead_done() -> bool:
+    import threading
+
+    return not any(t.name == "lobemap-meshes" for t in threading.enumerate())
+
+
+@pytest.mark.parametrize("space", ["FAFB14", "JRCFIB2018F", "JRCFIB2022M"])
+def test_a_tab_opened_after_the_read_ahead_reads_no_mesh(monkeypatch, space):
+    """A neuropil set's mesh is read once, in the background, and no tab reads one.
+
+    An atlas's mesh is read with the registry, for its compartment names.
+    """
+    loads = _count_loads(monkeypatch)
+    with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        sess = session(viewer)
+        shells = [sess.parts[n].asset.path.stem for n in sess.pending
+                  if sess.parts[n].reference]
+        assert shells
+        pump(50)
+        assert _wait(_read_ahead_done)
+        read = list(loads)
+        for name in list(sess.pending):
+            tab = _open_tab(sess.panel, name)
+            assert tab is sess.panel.tabs[name]
+        assert loads == read, "a tab read its mesh"
+        names = [stem for stem, _ in loads]
+        assert all(names.count(stem) == 1 for stem in shells), names
+
+
+def test_a_tab_opened_while_its_mesh_is_read_waits_for_that_read(monkeypatch):
+    loads = _count_loads(monkeypatch, slow={"neuprint_hemibrain_neuropil": 0.5})
+    with launched(monkeypatch, "view", "JRCFIB2018F", "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        sess = session(viewer)
+        assert _wait(lambda: any(s == "neuprint_hemibrain_neuropil" for s, _ in loads))
+        tab = _open_tab(sess.panel, "neuprint_hemibrain_neuropil")
+        assert tab is sess.panel.tabs["neuprint_hemibrain_neuropil"]
+        assert [s for s, _ in loads].count("neuprint_hemibrain_neuropil") == 1
+        _buttons(tab)["Show all"].click()
+        pump(300)
+        assert_rows_match_drawing(sess)
+
+
+def test_the_read_ahead_waits_while_the_slider_moves(monkeypatch):
+    from lobemap.viewer import deferred
+
+    # A pause it waits for that no machine load can fake between two steps.
+    monkeypatch.setattr(deferred, "QUIET_S", 0.5)
+    loads = _count_loads(monkeypatch)
+    with launched(monkeypatch, "view", "JRCFIB2018F", "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        axis = int(viewer.dims.order[0])
+        start = viewer.dims.current_step[axis]
+        before = len(loads)
+        # From before the event loop first turns, which is when it starts.
+        for k in range(40):                 # about a second of steps
+            viewer.dims.set_current_step(axis, start + 1 + k % 6)
+            pump(20)
+        stopped = time.perf_counter()
+        assert all(at > stopped for _, at in loads[before:]), (
+            "a mesh was read while the slider moved")
+        assert _wait(_read_ahead_done)
+        assert "neuprint_hemibrain_neuropil" in [s for s, _ in loads[before:]]

@@ -134,18 +134,22 @@ def contour_styles(parts) -> dict[str, tuple[str, float]]:
     }
 
 
-def make_surface(viewer, registry: Registry, space: str, part: ScenePart) -> AtlasSurface:
+def make_surface(viewer, registry: Registry, space: str, part: ScenePart,
+                 meshset=None, layer=None) -> AtlasSurface:
     """The Surface layer of one part, every compartment selected and resident.
 
     Made hidden: `AtlasSurface.sync` shows it in the mode that draws it.
+    `meshset` is the part's mesh if it has been read already, and `layer`
+    a stand-in to take over rather than add a layer (`AtlasSurface`).
     """
-    meshset = registry.mesh(part.asset.id)
+    if meshset is None:
+        meshset = registry.mesh(part.asset.id)
     if part.reference:
         # Additive, not translucent: a translucent shell writes depth and so
         # hides the very glomeruli it is meant to give context to.
         surface = AtlasSurface(
             viewer, meshset, name=part.asset.id + _tag(meshset), opacity=0.35,
-            blending="additive", shading="none", visible=False,
+            blending="additive", shading="none", visible=False, layer=layer,
         )
     else:
         atlas = part.atlas
@@ -156,7 +160,7 @@ def make_surface(viewer, registry: Registry, space: str, part: ScenePart) -> Atl
             # is exactly the atlases sharing its space.
             colors=canonical_colors(atlas.compartments, registry.vocabulary(space)),
             display_names=[c.label for c in atlas.compartments] or None,
-            visible=False,
+            visible=False, layer=layer,
         )
     surface.layer.metadata["lobemap"].update(
         id=part.name, asset=part.asset.id, role=part.asset.role
@@ -421,19 +425,26 @@ class SceneSession:
         cheap alpha change it always was, and its extent is what it was. It
         gets its contours and their color, the pairing that draws it in the
         right layer for the mode, the mirror, and its place in the layer
-        stack, and its stand-in, if it had one, goes once it is in. The
+        stack. Its mesh layer is its stand-in, if it had one, taken over. The
         layer selection is left as the user had it. All or nothing: a
         failure removes whatever was added.
         """
         if name in self.surfaces:
             return self.surfaces[name], self.contours.get(name)
         part = self.pending[name]
+        # Read ahead once the space opened, if it got that far (`deferred`).
+        meshset = self.deferred.take(name) if self.deferred is not None else None
+        if meshset is None:
+            meshset = self.registry.mesh(part.asset.id)
+        stand_in = self.deferred.adopt(name) if self.deferred is not None else None
         layers = self.viewer.layers
         selected, active = list(layers.selection), layers.selection.active
-        added = []
+        added = [] if stand_in is None else [stand_in]
         try:
-            surface = make_surface(self.viewer, self.registry, self.space, part)
-            added.append(surface.layer)
+            surface = make_surface(self.viewer, self.registry, self.space, part, meshset,
+                                   layer=stand_in)
+            if stand_in is None:
+                added.append(surface.layer)
             surface.set_selection(set())
             contour = None
             if USE_SLICE_CONTOURS:
@@ -458,8 +469,6 @@ class SceneSession:
         self.surfaces[name] = surface
         if contour is not None:
             self.contours[name] = contour
-        if self.deferred is not None:
-            self.deferred.release(name)
         with contextlib.suppress(Exception):
             layers.selection.clear()
             layers.selection.update(selected)
@@ -476,7 +485,10 @@ class SceneSession:
         return position if self.parts[name].reference else 20_000 + position
 
     def _stack(self, layer, rank: int) -> None:
-        """Move `layer`, just added on top, under this scene's layers ranked above it."""
+        """Move `layer` under this scene's layers ranked above it, or on top.
+
+        Just added, it is on top; a stand-in taken over is at the bottom.
+        """
         ranks = {id(image): 10_000 + i for i, image in enumerate(self.images)}
         for key, surface in self.surfaces.items():
             ranks[id(surface.layer)] = self._rank(key)
@@ -484,8 +496,7 @@ class SceneSession:
             ranks[id(overlay.layer)] = self._rank(key, contour=True)
         layers = self.viewer.layers
         above = [i for i, other in enumerate(layers) if ranks.get(id(other), -1) > rank]
-        if above:
-            layers.move(layers.index(layer), min(above))
+        layers.move(layers.index(layer), min(above) if above else len(layers))
 
     def set_mirror(self, on: bool) -> None:
         """Show the space reflected, or stop.
@@ -647,6 +658,8 @@ class SceneSession:
         for surface in self.surfaces.values():
             surface.stop()
         stop_levels(self.images)
+        if self.deferred is not None:
+            self.deferred.stop()
         # LAYERS FIRST, then the dock. The other order crashes the process.
         #
         # Removing a dock widget relays out the window, which resizes the

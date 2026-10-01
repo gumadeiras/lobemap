@@ -233,7 +233,8 @@ def load_space(
     down only once that build has succeeded.
 
     Only the primary atlas is built; the rest of the scene is built the
-    first time it is needed (`SceneSession.realize`), and the images are
+    first time it is needed (`SceneSession.realize`), from meshes read in
+    the background once the space is open (`deferred`), and the images are
     shown once the plane and the 3D pyramid level are set, so each is read
     once. See `build_scene`.
     """
@@ -263,6 +264,8 @@ def load_space(
             session.show(show)
         install_home_orientation(viewer, registry.spaces[space],
                                  reflect_axis=session.reflect_axis)
+        if session.deferred is not None:
+            session.deferred.read_ahead()
     except BaseException:
         session.teardown()
         raise

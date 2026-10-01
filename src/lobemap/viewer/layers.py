@@ -179,7 +179,11 @@ class AtlasSurface:
         display_names: list[str] | None = None,
         shading: str = "smooth",
         visible: bool = True,
+        layer=None,
     ) -> None:
+        """`layer` is a hidden Surface layer to take over rather than add one:
+        a stand-in a scene added for this mesh before it was read
+        (`deferred`). It is given everything a new layer would be."""
         self.viewer = viewer
         self.meshset = meshset
         self.name = name
@@ -209,24 +213,37 @@ class AtlasSurface:
         self._syncing = False
         self._resident: list[int] = sorted(self.selection)
         v, f, vals = meshset.select(sorted(self.selection))
-        self.layer = viewer.add_surface(
-            (v, self._oriented(f), vals),
-            name=name,
-            colormap=step_colormap(self.colors, name=f"{name}-colors"),
-            contrast_limits=contrast_limits_for(n),
-            opacity=opacity,
+        settings = {
+            "colormap": step_colormap(self.colors, name=f"{name}-colors"),
+            "contrast_limits": contrast_limits_for(n),
+            "opacity": opacity,
             # Given here rather than set afterwards, so vispy never computes
             # the vertex normals a shell drawn with "none" does not use: they
             # are most of the cost of showing a large mesh in 3D, 0.45 s for
             # the hemibrain neuropils.
-            shading=shading,
-            blending=blending,
-            # A scene makes its surfaces hidden and lets `sync` show each in
-            # the mode that draws it: napari slices a visible layer as it is
-            # added, so a surface made visible was sliced for nothing in 2D,
-            # and in 3D had its normals computed twice.
-            visible=visible,
-        )
+            "shading": shading,
+            "blending": blending,
+        }
+        if layer is None:
+            self.layer = viewer.add_surface(
+                (v, self._oriented(f), vals), name=name, **settings,
+                # A scene makes its surfaces hidden and lets `sync` show each
+                # in the mode that draws it: napari slices a visible layer as
+                # it is added, so a surface made visible was sliced for nothing
+                # in 2D, and in 3D had its normals computed twice.
+                visible=visible,
+            )
+        else:
+            # Hidden first, and shaded before it has the mesh, for the same
+            # reasons; a stand-in switched on is being built to be shown.
+            layer.visible = False
+            layer.shading = settings.pop("shading")
+            layer.data = (v, self._oriented(f), vals)
+            layer.name = name
+            for key, value in settings.items():
+                setattr(layer, key, value)
+            layer.visible = visible
+            self.layer = layer
         self.layer.metadata["lobemap"] = {"meshset": meshset, "kind": "atlas"}
         self.layer.events.visible.connect(self._on_eye)
 
