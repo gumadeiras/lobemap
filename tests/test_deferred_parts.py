@@ -482,3 +482,20 @@ def test_the_read_ahead_waits_while_the_slider_moves(monkeypatch):
             "a mesh was read while the slider moved")
         assert _wait(_read_ahead_done)
         assert "neuprint_hemibrain_neuropil" in [s for s, _ in loads[before:]]
+
+
+def test_closing_the_viewer_stops_the_read_ahead(monkeypatch):
+    from lobemap.viewer import deferred
+
+    # Kept waiting by one step until the viewer has closed.
+    monkeypatch.setattr(deferred, "QUIET_S", 5.0)
+    loads = _count_loads(monkeypatch)
+    with launched(monkeypatch, "view", "JRCFIB2018F", "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        before = len(loads)
+        axis = int(viewer.dims.order[0])
+        viewer.dims.set_current_step(axis, viewer.dims.current_step[axis] + 1)
+        pump(100)
+        assert not _read_ahead_done(), "it should be waiting"
+    assert _wait(_read_ahead_done, seconds=1.0)
+    assert len(loads) == before

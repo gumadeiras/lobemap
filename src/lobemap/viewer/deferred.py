@@ -181,12 +181,18 @@ class Deferred:
     def read_ahead(self) -> None:
         """Read the deferred meshes in a thread, from when the event loop next runs.
 
-        Not before: the space is opened first, uncontested.
+        Not before: the space is opened first, uncontested. It stops with
+        the scene, or when the viewer closes and empties its layer list.
         """
         from qtpy.QtCore import QTimer
 
         napari_private.before_slicing(self.viewer, _sliced)
+        self.viewer.layers.events.removed.connect(self._on_removed)
         QTimer.singleShot(0, self._start)
+
+    def _on_removed(self, event=None) -> None:
+        if not len(self.viewer.layers):
+            self.stop()
 
     def _start(self) -> None:
         if self._stopped:
@@ -230,9 +236,11 @@ class Deferred:
         return got
 
     def stop(self) -> None:
-        """No further mesh is read, for a scene being torn down."""
+        """No further mesh is read: the scene is being torn down."""
         with self._done:
             self._stopped = True
+        with contextlib.suppress(Exception):          # never connected, or gone
+            self.viewer.layers.events.removed.disconnect(self._on_removed)
 
 
 __all__ = ["STANDIN_NAME", "Deferred", "mesh_bounds"]
