@@ -167,14 +167,16 @@ class Deferred:
     def adopt(self, name: str):
         """Hand over the stand-in of a part being built, to become its mesh layer.
 
-        None if it has none. From now on it is the part's, not a stand-in.
+        None if it has none, or if it was deleted from the layer list by
+        hand: the part then gets a layer of its own. From now on it is the
+        part's, not a stand-in.
         """
         self.parts.pop(name, None)
         layer = self.standins.pop(name, None)
         if layer is not None:
             with contextlib.suppress(Exception):
                 layer.events.visible.disconnect(self._eyes.pop(name))
-        return layer
+        return layer if layer is not None and layer in self.viewer.layers else None
 
     # -- the meshes ---------------------------------------------------------
 

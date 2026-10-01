@@ -172,6 +172,29 @@ def test_switching_a_stand_in_on_builds_its_part_and_shows_it(monkeypatch):
         assert_rows_match_drawing(sess)
 
 
+@pytest.mark.parametrize(("space", "name"), [("FAFB14", "fafb_neuropil"),
+                                             ("JRCFIB2022M", "neuprint_cns_neuropil")])
+def test_a_stand_in_deleted_by_hand_leaves_its_tab_working(monkeypatch, space, name):
+    """Its tab builds the part in a layer of its own, the first time it opens."""
+    with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        sess = session(viewer)
+        viewer.layers.remove(viewer.layers[STANDIN_NAME.format(name=name)])
+        pump()
+
+        tab = _open_tab(sess.panel, name)
+        assert tab is sess.panel.tabs[name]
+        assert name in sess.surfaces and name not in sess.pending
+        assert tab.surface.layer in viewer.layers
+        assert sess.contours[name].layer in viewer.layers
+        _buttons(tab)["Show all"].click()
+        pump(300)
+        assert checked(tab) == set(range(tab.table.rowCount()))
+        assert drawn(tab.surface, sess.contours[name]), "no outline on the plane"
+        assert_renders_loops(sess.contours[name])
+        assert_rows_match_drawing(sess)
+
+
 @pytest.mark.parametrize(("space", "name"), DEFERRED)
 def test_a_part_built_under_the_mirror_is_drawn_mirrored(monkeypatch, space, name):
     """Built after the mirror was turned on, it is reflected like the rest."""
