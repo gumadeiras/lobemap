@@ -98,3 +98,38 @@ def test_refresh_replaces_rather_than_appends():
         assert_renders_loops(overlay)
     finally:
         viewer.close()
+
+
+def test_the_slice_blends_and_fades_as_napari_draws_the_layer():
+    """The contour visuals take the layer's blending and opacity as napari's
+    own visual of that layer does: the GL state vispy draws them with, and the
+    alpha their shaders apply."""
+    napari = pytest.importorskip("napari")
+    from vispy.scene.visuals import Text
+
+    from lobemap.viewer.napari_private import layer_visual
+
+    viewer = napari.Viewer(show=False)
+    try:
+        overlay = ContourOverlay(viewer, _meshset(), "t", "#ff0000")
+        overlay.layer.visible = True
+        viewer.dims.ndisplay = 2
+        viewer.dims.order = (2, 1, 0)
+        viewer.dims.set_point(2, 1.5)
+        overlay.set_labels({0, 1})
+        assert overlay.visual.mesh.visible and overlay.visual.text.visible
+        own = layer_visual(viewer, overlay.layer).node
+        shapes = next(v for v in own._subvisuals if not isinstance(v, Text))
+        text = next(v for v in own._subvisuals if isinstance(v, Text))
+        for blending in ("additive", "opaque", "minimum", "translucent_no_depth",
+                         "translucent"):
+            overlay.layer.blending = blending
+            assert overlay.visual.mesh._vshare.gl_state == shapes._vshare.gl_state, blending
+            assert overlay.visual.text._vshare.gl_state == text._vshare.gl_state, blending
+        for opacity in (0.25, 0.8, 1.0):
+            overlay.layer.opacity = opacity
+            for visual in (overlay.visual.mesh, overlay.visual.text):
+                assert visual.opacity == pytest.approx(own.opacity) == opacity
+                assert visual._opacity_filter.alpha == pytest.approx(opacity)
+    finally:
+        viewer.close()

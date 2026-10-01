@@ -274,3 +274,28 @@ def test_a_stopped_background_read_ends_at_its_next_batch(store, monkeypatch):
     background.join()
     assert out["level"] is None
     assert len(log) <= 2 * WORKERS, "read on after it was stopped"
+
+
+@pytest.mark.parametrize("fill", [7, 200])
+def test_an_absent_chunk_reads_as_the_fill_value(tmp_path, fill):
+    """zarr writes no file for a chunk that is all fill value; the direct
+    reader gives that chunk the array's fill value, as zarr does, not zeros."""
+    import zarr
+    from numcodecs import Zstd
+
+    path = tmp_path / "a.zarr"
+    arr = zarr.create_array(store=str(path), shape=(40, 30, 20), chunks=(16, 16, 16),
+                            dtype="u1", zarr_format=2, compressors=Zstd(), fill_value=fill)
+    truth = np.random.default_rng(2).integers(0, 255, arr.shape).astype(np.uint8)
+    truth[16:32, :16, :16] = fill                 # chunk (1, 0, 0): all fill value
+    arr[:] = truth
+    arr = zarr.open_array(str(path), mode="r")
+    files = chunkcache._ChunkFiles.of(arr)
+    assert files is not None, "not read directly"
+    assert not (path / files.key((1, 0, 0))).exists(), "zarr wrote the chunk"
+    assert (path / files.key((0, 0, 0))).exists()
+    level = CachedLevel(arr, ChunkCache(), 0)
+    for k in (16, 20, 31):
+        assert np.array_equal(level[k], truth[k]), k
+        assert np.array_equal(level[:, :, k % 20], truth[:, :, k % 20]), k
+    assert np.array_equal(np.asarray(level), truth)
