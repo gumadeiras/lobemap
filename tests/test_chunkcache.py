@@ -203,3 +203,74 @@ def test_a_whole_level_for_3d_is_read_but_not_kept(store):
     assert len(cache) == 0
     plain = np.arange(24).reshape(2, 3, 4)
     assert np.array_equal(read_whole(plain), plain)
+
+
+def _slow_reads(monkeypatch, seconds):
+    """Make every chunk file read take `seconds`, and record each read's thread."""
+    import threading
+
+    real = chunkcache._ChunkFiles.read
+    log = []
+
+    def read(self, idx):
+        log.append(threading.current_thread().name)
+        import time
+
+        time.sleep(seconds)
+        return real(self, idx)
+
+    monkeypatch.setattr(chunkcache._ChunkFiles, "read", read)
+    return log
+
+
+def test_a_read_from_the_ui_thread_waits_behind_one_batch_of_a_background_read(
+        store, monkeypatch):
+    """A whole level read in the background shares the pool a batch at a time.
+
+    Handed over at once, its chunks queued every read the UI thread made
+    meanwhile behind the whole level. Here the level is 45 chunks of 20 ms
+    each, about 120 ms for the pool; the UI thread's read, made once the
+    background read is under way, may wait for one batch, not the rest.
+    """
+    import threading
+    import time
+
+    from lobemap.viewer.chunkcache import WORKERS, read_whole
+
+    _, levels = store
+    whole, plane = cached_levels(levels)[0], cached_levels(levels)[0]
+    _slow_reads(monkeypatch, 0.02)
+    out = {}
+    background = threading.Thread(
+        target=lambda: out.update(level=read_whole(whole, stop=threading.Event())))
+    background.start()
+    time.sleep(0.03)                                 # the first batch is in
+    started = time.perf_counter()
+    got = plane[0, 0, 0]                             # one chunk, kept: a UI read
+    waited = time.perf_counter() - started
+    background.join()
+    assert got == np.asarray(levels[0][0, 0, 0])
+    assert np.array_equal(out["level"], np.asarray(levels[0][:]))
+    # Its own read, plus one batch of the background read at most.
+    assert waited < 3 * 0.02, (waited, WORKERS)
+
+
+def test_a_stopped_background_read_ends_at_its_next_batch(store, monkeypatch):
+    import threading
+    import time
+
+    from lobemap.viewer.chunkcache import WORKERS, read_whole
+
+    _, levels = store
+    level = cached_levels(levels)[0]
+    log = _slow_reads(monkeypatch, 0.01)
+    stop = threading.Event()
+    out = {}
+    background = threading.Thread(target=lambda: out.update(level=read_whole(level, stop=stop)))
+    background.start()
+    while not log:
+        time.sleep(0.001)
+    stop.set()
+    background.join()
+    assert out["level"] is None
+    assert len(log) <= 2 * WORKERS, "read on after it was stopped"

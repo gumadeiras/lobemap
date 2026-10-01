@@ -24,7 +24,9 @@ the chunk files without keeping any: `images.FineLevel` holds each such
 level as an array for the layer's life, so a return to 3D is served from
 memory, and the cache holds 2D's chunks only. Any other read larger than
 half the budget is assembled the same way, so no single read can flush
-everything else out.
+everything else out. A whole level read in the background shares the pool
+with the UI thread's reads, so it hands the pool one batch at a time; see
+`read_whole`.
 """
 
 from __future__ import annotations
@@ -45,6 +47,10 @@ import numpy as np
 #: plane only needs the one it lies in.
 CACHE_BYTES = 512 * 2**20
 
+#: Threads reading chunk files, and so the chunks a background read hands
+#: the pool at a time.
+WORKERS = min(8, os.cpu_count() or 1)
+
 _POOL: ThreadPoolExecutor | None = None
 _POOL_LOCK = threading.Lock()
 
@@ -53,7 +59,7 @@ def _pool() -> ThreadPoolExecutor:
     global _POOL
     with _POOL_LOCK:
         if _POOL is None:
-            _POOL = ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1),
+            _POOL = ThreadPoolExecutor(max_workers=WORKERS,
                                        thread_name_prefix="lobemap-chunks")
         return _POOL
 
@@ -212,11 +218,12 @@ class CachedLevel:
         block = self._read(lo, hi)
         return block[tuple(0 if b[3] else slice(None, None, b[2]) for b in box)]
 
-    def _read(self, lo: np.ndarray, hi: np.ndarray, keep: bool = True) -> np.ndarray:
+    def _read(self, lo: np.ndarray, hi: np.ndarray, keep: bool = True,
+              stop: threading.Event | None = None) -> np.ndarray | None:
         """The box [lo, hi) of the level, from cached chunks where it can.
 
         With `keep` false, or a box too big to cache, the chunks it reads are
-        not kept.
+        not kept. `stop` is for a read in the background; see `read_whole`.
         """
         if np.any(hi <= lo):
             return np.empty(tuple(np.maximum(hi - lo, 0)), dtype=self.dtype)
@@ -236,7 +243,8 @@ class CachedLevel:
         out = np.empty(tuple(hi - lo), dtype=self.dtype)
         spanned = len(cells) * int(np.prod(self.chunks)) * self.dtype.itemsize
         if not keep or spanned > self._cache.max_bytes // 2:
-            return self._read_through(cells, product(*dst), product(*src), out, lo, hi)
+            return self._read_through(cells, product(*dst), product(*src), out, lo, hi,
+                                      stop)
         arrays = self._cache.get_many([(self._key, idx) for idx in cells])
         missing = [idx for idx, arr in zip(cells, arrays, strict=True) if arr is None]
         fetched = self._fetch(missing) if missing else {}
@@ -244,8 +252,11 @@ class CachedLevel:
             out[d] = (fetched[idx] if arr is None else arr)[s]
         return out
 
-    def _read_through(self, cells, dst, src, out, lo, hi) -> np.ndarray:
-        """A read too big to cache, straight into `out`."""
+    def _read_through(self, cells, dst, src, out, lo, hi, stop=None) -> np.ndarray | None:
+        """A read too big to cache, straight into `out`.
+
+        With `stop`, a batch at a time, and None once `stop` is set.
+        """
         if self._files is None:
             return np.asarray(self._array[tuple(slice(a, b) for a, b in zip(lo, hi, strict=True))])
 
@@ -253,7 +264,12 @@ class CachedLevel:
             idx, d, s = job
             out[d] = self._files.read(idx)[s]
 
-        list(_pool().map(one, zip(cells, dst, src, strict=True)))
+        jobs = list(zip(cells, dst, src, strict=True))
+        batch = len(jobs) if stop is None else WORKERS
+        for start in range(0, len(jobs), batch):
+            if stop is not None and stop.is_set():
+                return None
+            list(_pool().map(one, jobs[start:start + batch]))
         return out
 
     def _fetch(self, missing) -> dict:
@@ -314,15 +330,22 @@ def _box(key, shape):
     return out
 
 
-def read_whole(level) -> np.ndarray:
+def read_whole(level, stop: threading.Event | None = None) -> np.ndarray | None:
     """A whole pyramid level as an array, read without filling the cache.
 
     For a `CachedLevel`, straight from its chunk files by the thread pool;
     for anything else, whatever reading it whole does.
+
+    `stop` makes it a background read, for a thread other than the UI one.
+    Its chunks then go to the pool `WORKERS` at a time, the next batch once
+    the last is done, so a read the UI thread makes meanwhile waits behind
+    one batch at most. Handed over all at once, the 1,600-2,300 chunks of an
+    EM stain's 3D level kept the UI thread's own reads waiting 20-220 ms.
+    Once `stop` is set, no further batch is read and the result is None.
     """
     if isinstance(level, CachedLevel):
         lo, hi = (np.array(v) for v in zip(*level._box, strict=True))
-        return level._read(lo, hi, keep=False)
+        return level._read(lo, hi, keep=False, stop=stop)
     return np.asarray(level[...])
 
 
@@ -339,4 +362,5 @@ def cached_levels(levels, cache: ChunkCache | None = None) -> list:
     return out
 
 
-__all__ = ["CACHE_BYTES", "CachedLevel", "ChunkCache", "cached_levels", "read_whole"]
+__all__ = ["CACHE_BYTES", "WORKERS", "CachedLevel", "ChunkCache", "cached_levels",
+           "read_whole"]

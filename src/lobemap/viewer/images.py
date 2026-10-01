@@ -6,6 +6,7 @@ the display defaults each role needs and the pyramid level 3D pins.
 
 from __future__ import annotations
 
+import threading
 import warnings
 import weakref
 
@@ -110,13 +111,14 @@ class FineLevel:
     Both are kept for the layer's life, so the next entry into 3D pins the
     fine one at once; the price is their memory, 0.3-0.7 GB, which 3D held
     anyway. While the fine one is read, the UI thread shares the chunk
-    reader's threads and the interpreter with it, so it runs slower, not
-    stalled.
+    reader's threads and the interpreter with it: the read hands the pool a
+    batch of chunks at a time, so a chunk the UI thread needs meanwhile
+    waits behind one batch, not behind the level (`chunkcache.read_whole`).
 
     A daemon thread, polled from the UI thread, rather than a Qt worker:
     the thread only stores its result, so no Qt object is touched off the
     UI thread. A read still running when the process exits decodes the
-    chunks it has queued, well under a second, and is then dropped.
+    batch it has queued, a few milliseconds, and is then dropped.
     A Qt pool worker is waited for when the application object is
     destroyed, which happens with the interpreter lock held, and a worker
     needing that lock to finish hung the process at exit.
@@ -140,6 +142,8 @@ class FineLevel:
         self._timer = None
         self._three_d = False
         self._stopped = False
+        #: Set to end the read at its next batch of chunks.
+        self._stop = threading.Event()
 
     def pin(self, three_d: bool) -> None:
         """Pin the level 3D renders, reading the fine one if it is not in yet."""
@@ -175,15 +179,13 @@ class FineLevel:
         layer.data = levels
 
     def _start(self) -> None:
-        import threading
-
         from qtpy.QtCore import QTimer
 
         source = self._sources[self.level]
 
         def read() -> None:
             try:
-                self._result = ("ok", read_whole(source))
+                self._result = ("ok", read_whole(source, stop=self._stop))
             except Exception as exc:              # noqa: BLE001 - reported below
                 self._result = ("failed", exc)
 
@@ -196,8 +198,9 @@ class FineLevel:
         self._timer.start()
 
     def stop(self) -> None:
-        """Drop a read still running, for a scene being torn down."""
+        """End a read still running, for a scene being torn down."""
         self._stopped = True
+        self._stop.set()
         if self._timer is not None:
             self._timer.stop()
 
