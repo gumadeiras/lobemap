@@ -95,22 +95,9 @@ def label_viewer_axes(viewer, space) -> bool:
         viewer.dims.axis_labels = labels
     except Exception:            # noqa: BLE001 - cosmetic, never fatal
         return False
-    # The canvas overlay, not the scene one: see the module docstring. Both
-    # exist in napari 0.9 under `canvas.overlays` and `scene.overlays`;
-    # older napari has only `viewer.axes`, which is the canvas-anchored one.
-    overlay = None
-    for holder in ("canvas", "scene"):
-        container = getattr(getattr(viewer, holder, None), "overlays", None)
-        if container is not None:
-            with contextlib.suppress(Exception):
-                overlay = container["axes"]
-            if overlay is not None:
-                break
-    if overlay is None:
-        with contextlib.suppress(Exception):
-            overlay = viewer.axes
-    if overlay is None:
-        return True             # labels landed; the indicator is cosmetic
+    # The canvas overlay, not the scene one: see the module docstring.
+    # napari 0.9 deprecated `viewer.axes`; the pin guarantees this path.
+    overlay = viewer.canvas.overlays["axes"]
     with contextlib.suppress(Exception):
         overlay.visible = True
         overlay.labels = True
@@ -124,16 +111,7 @@ def _vispy_axes_overlay(viewer):
     the whole point is to keep napari's triad -- its geometry, arrowheads,
     colors, sizing and font -- and change only where it points.
     """
-    model = None
-    for holder in ("canvas", "scene"):
-        container = getattr(getattr(viewer, holder, None), "overlays", None)
-        if container is not None:
-            with contextlib.suppress(Exception):
-                model = container["axes"]
-            if model is not None:
-                break
-    if model is None:
-        return None
+    model = viewer.canvas.overlays["axes"]
     canvas = None
     with contextlib.suppress(Exception):
         canvas = viewer.window._qt_viewer.canvas
@@ -261,13 +239,10 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
     # Switching it on is also what makes napari BUILD the visual: it
     # skips overlays that are not visible and waits on their `visible`
     # event, so nothing below is reachable until this has happened.
-    for holder in ("canvas", "scene"):
-        container = getattr(getattr(viewer, holder, None), "overlays", None)
-        if container is not None:
-            with contextlib.suppress(Exception):
-                container["axes"].visible = True
-                container["axes"].labels = True
-                break
+    with contextlib.suppress(Exception):
+        model = viewer.canvas.overlays["axes"]
+        model.visible = True
+        model.labels = True
 
     overlay = _vispy_axes_overlay(viewer)
     if overlay is None:
