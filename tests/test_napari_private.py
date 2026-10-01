@@ -1,25 +1,122 @@
-"""Every private internal the viewer relies on, by name and shape.
+"""Every private internal of another package that lobemap reaches, by name and shape.
 
-napari offers no public way to draw a visual under a layer or to keep a
-slice step from recomputing every layer's extent, and bermuda, vispy and
-zarr are reached below their documented surface in places too. pyproject
-pins napari to the minor version all of this was written against. After
-any upgrade, a failure here names what moved and which module uses it,
-instead of the viewer misdrawing or slowing down without a word.
+napari has no public way to draw a visual under a layer, to keep a slice
+step from recomputing every layer's extent, to recolor its axis indicator
+or add a second one, or to reach its Qt window; bermuda, vispy, zarr and
+navis are reached below their documented surface in places too. Most of
+these are reached through `getattr` defaults or `contextlib.suppress`, so
+when one moves the viewer misdraws, slows down or drops a control without
+a word. pyproject pins napari to the minor version its internals were
+written against; the others are not pinned.
+
+After any upgrade, a failure here names what moved and which module uses
+it. `need` writes that message, and `reaching` routes a missing import or
+attribute through it too, rather than letting it fail as a bare
+ImportError or AttributeError. What a scene reaches is checked on the
+objects `viewer.app.load_space` builds, and again on a bare viewer set up
+by the same calls, so a checkout without data still checks it.
+
+`CHECKED` names the test that checks each private name, and
+`test_every_private_name_src_reaches_is_checked` scans `src/` so that a new
+one cannot go unchecked.
 """
 
 from __future__ import annotations
 
+import ast
+import contextlib
 import inspect
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 napari = pytest.importorskip("napari")
 
+SRC = Path(__file__).resolve().parents[1] / "src" / "lobemap"
+
+#: Every private name or private module `src/` reaches in another package,
+#: and the test below that checks it.
+CHECKED = {
+    "_qt_viewer": "test_a_layer_has_a_vispy_node_to_draw_under",
+    "_qt_window": "test_the_window_and_canvas_lobemap_reaches",
+    "_viewer_overlay_to_visual": "test_the_axis_indicator_is_recolored_and_gets_a_second_triad",
+    "_font_info": "test_the_axis_indicator_is_recolored_and_gets_a_second_triad",
+    "_default_color": "test_the_axis_indicator_is_recolored_and_gets_a_second_triad",
+    "_on_data_change": "test_the_axis_indicator_is_recolored_and_gets_a_second_triad",
+    "napari._vispy.visuals.axes": "test_the_axis_indicator_is_recolored_and_gets_a_second_triad",
+    "napari._vispy.visuals.text": "test_napari_text_visual_takes_labels",
+    "napari._vispy.utils.gl": "test_every_blending_has_a_gl_state",
+    "napari.layers.shapes._shapes_utils": "test_napari_triangulation_without_bermuda",
+    "napari.layers.shapes._accelerated_triangulate_dispatch":
+        "test_napari_triangulation_without_bermuda",
+    "_slice_dims": "test_a_slice_step_goes_through_slice_dims_and_clears_the_extent",
+    "_clear_extent": "test_a_slice_step_goes_through_slice_dims_and_clears_the_extent",
+    "_layer_slicer": "test_a_step_can_be_seen_before_any_layer_is_sliced",
+    "_transforms": "test_the_prefetch_finds_the_planes_a_step_lands_on",
+    "_cmtkbin": "test_navis_says_whether_cmtk_is_installed",
+}
+
+#: lobemap's own private names, reached from another of its modules.
+OWN = {"_load_spaces", "_load_assets", "_load_atlases", "_read", "_box", "_obj"}
+
 
 def need(ok, what: str, used_by: str) -> None:
     assert ok, f"{what} is missing or has changed shape; {used_by} relies on it"
+
+
+@contextlib.contextmanager
+def reaching(what: str, used_by: str):
+    """Fail through `need` when reaching `what` raises: an import, an attribute."""
+    try:
+        yield
+    except AssertionError:
+        raise
+    except Exception as exc:                # whatever moved, name it
+        need(False, f"{what} ({type(exc).__name__}: {exc})", used_by)
+
+
+def _private(name: str) -> bool:
+    return name.startswith("_") and not name.startswith(("__", "_lobemap"))
+
+
+def _private_names() -> dict[str, list[str]]:
+    """Every private name `src/` reaches outside `self`, and where."""
+    found: dict[str, list[str]] = {}
+    for path in sorted(SRC.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            names = []
+            if isinstance(node, ast.Attribute) and _private(node.attr):
+                if not (isinstance(node.value, ast.Name) and node.value.id in ("self", "cls")):
+                    names.append(node.attr)
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                  and node.func.id in ("getattr", "hasattr", "setattr")
+                  and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)
+                  and isinstance(node.args[1].value, str) and _private(node.args[1].value)
+                  and not (isinstance(node.args[0], ast.Name)
+                           and node.args[0].id in ("self", "cls"))):
+                names.append(node.args[1].value)
+            elif (isinstance(node, ast.ImportFrom) and node.module
+                  and node.module != "__future__"):
+                if any(part.startswith("_") for part in node.module.split(".")):
+                    names.append(node.module)
+                names += [alias.name for alias in node.names if _private(alias.name)]
+            for name in names:
+                found.setdefault(name, []).append(
+                    f"{path.relative_to(SRC.parent)}:{node.lineno}")
+    return found
+
+
+def test_every_private_name_src_reaches_is_checked():
+    found = _private_names()
+    unchecked = {name: where for name, where in found.items()
+                 if name not in CHECKED and name not in OWN}
+    assert not unchecked, f"private names no test here checks: {unchecked}"
+    stale = sorted(set(CHECKED) - set(found))
+    assert not stale, f"CHECKED lists names src/ no longer reaches: {stale}"
+    missing = sorted({test for test in CHECKED.values() if test not in globals()})
+    assert not missing, f"CHECKED names tests that do not exist: {missing}"
 
 
 @pytest.fixture
@@ -29,56 +126,99 @@ def viewer():
     v.close()
 
 
+@pytest.fixture(params=["bare viewer", "loaded scene"])
+def opened(request, registry):
+    """A 2D viewer as lobemap leaves it: a GRABE scene, or a bare one set up alike.
+
+    The bare one has an image and an empty Shapes layer, as a scene's image
+    and contour layers are, and the axis indicator set up by the call a
+    scene makes, `viewer.axes.apply_axis_mode`.
+    """
+    from qtpy.QtWidgets import QApplication
+
+    from lobemap.viewer.axes import apply_axis_mode
+
+    scene = request.param == "loaded scene"
+    if scene:
+        request.getfixturevalue("core_data")
+    space = registry.spaces["GRABE"]
+    v = napari.Viewer(show=False, ndisplay=2)
+    try:
+        if scene:
+            from lobemap.viewer.app import load_space
+
+            with reaching("a GRABE scene opened by load_space", "the viewer"):
+                session = load_space(v, registry, "GRABE", fit=False)
+            contour = session.contours[registry.primary_atlas("GRABE").id].layer
+            image = next(layer for layer in v.layers
+                         if layer.metadata.get("lobemap", {}).get("kind") == "image")
+        else:
+            image = v.add_image(np.zeros((8, 8, 8), np.uint8))
+            contour = v.add_shapes(data=[], ndim=3)
+            apply_axis_mode(v, space)
+        QApplication.processEvents()
+        yield SimpleNamespace(viewer=v, space=space, image=image, contour=contour)
+    finally:
+        v.close()
+
+
 def test_napari_is_the_pinned_minor_version():
     major, minor = (int(p) for p in napari.__version__.split(".")[:2])
     need((major, minor) == (0, 9), f"napari {napari.__version__} (0.9 is pinned)",
          "every check below")
 
 
-def test_a_layer_has_a_vispy_node_to_draw_under(viewer):
+def test_a_layer_has_a_vispy_node_to_draw_under(opened):
     from vispy.scene.node import Node
 
     from lobemap.viewer.napari_private import layer_visual
 
-    layer = viewer.add_shapes(data=[], ndim=3)
-    visual = layer_visual(viewer, layer)
     where = "viewer.window._qt_viewer.canvas.layer_to_visual[layer]"
-    need(isinstance(visual.node, Node), f"{where}.node", "viewer.contours.SliceVisual")
-    font = visual.font_info
+    used = "viewer.contours.SliceVisual"
+    with reaching(where, used):
+        visual = layer_visual(opened.viewer, opened.contour)
+        node, font = visual.node, visual.font_info
+    need(isinstance(node, Node), f"{where}.node", used)
     need(hasattr(font, "font_manager") and hasattr(font, "face"), f"{where}.font_info",
-         "viewer.contours.SliceVisual labels")
+         f"{used} labels")
 
 
-def test_napari_text_visual_takes_labels(viewer):
+def test_napari_text_visual_takes_labels(opened):
     from lobemap.viewer.napari_private import layer_visual, text_visual
 
-    layer = viewer.add_shapes(data=[], ndim=3)
-    visual = layer_visual(viewer, layer)
-    text = text_visual(visual.node, visual.font_info)
-    used = "viewer.contours.SliceVisual labels (napari._vispy.visuals.text.Text)"
-    text.font_size = 10.5
-    text.anchors = ("center", "center")
-    text.text = ["DA1", "DM1"]
-    text.pos = np.zeros((2, 2), np.float32)
-    text.color = np.ones((2, 4), np.float32)
+    used = "viewer.contours.SliceVisual labels"
+    with reaching("napari._vispy.visuals.text.Text(parent=, font_info=)", used):
+        visual = layer_visual(opened.viewer, opened.contour)
+        text = text_visual(visual.node, visual.font_info)
+    with reaching("Text.font_size, .anchors, .text, .pos and .color", used):
+        text.font_size = 10.5
+        text.anchors = ("center", "center")
+        text.text = ["DA1", "DM1"]
+        text.pos = np.zeros((2, 2), np.float32)
+        text.color = np.ones((2, 4), np.float32)
+        shape = text.color.rgba.shape
     need(text.parent is visual.node, "Text(parent=, font_info=)", used)
-    need(list(text.text) == ["DA1", "DM1"] and text.color.rgba.shape == (2, 4),
+    need(list(text.text) == ["DA1", "DM1"] and shape == (2, 4),
          "Text.text / Text.color per label", used)
 
 
 def test_every_blending_has_a_gl_state():
     """A key vispy's `set_gl_state` takes: a GL flag, or a `set_<key>` setter."""
-    from napari.layers.base._base_constants import Blending
-    from vispy.gloo.wrappers import BaseGlooFunctions
-
     from lobemap.viewer.napari_private import gl_state
 
-    for blending in Blending:
-        state = gl_state(str(blending))
+    used = "viewer.contours.SliceVisual blending"
+    with reaching("napari.layers.base._base_constants.Blending and vispy's "
+                  "BaseGlooFunctions", used):
+        from napari.layers.base._base_constants import Blending
+        from vispy.gloo.wrappers import BaseGlooFunctions
+
+        blendings = [str(blending) for blending in Blending]
+    for blending in blendings:
+        with reaching(f"napari._vispy.utils.gl.BLENDING_MODES[{blending}]", used):
+            state = gl_state(blending)
         need(state and all(isinstance(value, bool) or hasattr(BaseGlooFunctions, f"set_{key}")
                            for key, value in state.items()),
-             f"napari._vispy.utils.gl.BLENDING_MODES[{blending!s}]",
-             "viewer.contours.SliceVisual blending")
+             f"napari._vispy.utils.gl.BLENDING_MODES[{blending}]", used)
 
 
 def test_a_slice_step_goes_through_slice_dims_and_clears_the_extent(viewer):
@@ -103,80 +243,166 @@ def test_napari_triangulation_without_bermuda():
     from lobemap.viewer.napari_private import triangulate_edge, triangulate_face
 
     square = np.array([[0, 0], [0, 1], [1, 1], [1, 0]], np.float32)
-    centers, offsets, triangles = triangulate_edge(square)
     used = "viewer.contours outlines and fills without bermuda"
+    where = "napari.layers.shapes._shapes_utils.triangulate_edge"
+    with reaching(where, used):
+        centers, offsets, triangles = triangulate_edge(square)
     need(centers.shape == offsets.shape and centers.shape[1] == 2 and triangles.shape[1] == 3,
-         "napari.layers.shapes._shapes_utils.triangulate_edge", used)
-    points, faces = triangulate_face(square)
-    need(np.asarray(points).shape[1] == 2 and np.asarray(faces).shape[1] == 3,
-         "napari's normalize_vertices_and_edges + triangulate_face_vispy", used)
+         where, used)
+    where = ("napari.layers.shapes._accelerated_triangulate_dispatch."
+             "normalize_vertices_and_edges + _shapes_utils.triangulate_face_vispy")
+    with reaching(where, used):
+        points, faces = triangulate_face(square)
+    need(np.asarray(points).shape[1] == 2 and np.asarray(faces).shape[1] == 3, where, used)
 
 
 def test_bermuda_strokes_and_fills():
     bermuda = pytest.importorskip("bermuda")
     ring = np.array([[0, 0], [0, 2], [1, 3], [2, 2], [2, 0]], np.float32)
     used = "viewer.contours outlines and fills"
-    centers, offsets, triangles = bermuda.triangulate_path_edge(ring, closed=True, limit=3.0)
-    need(centers.shape == offsets.shape and triangles.shape[1] == 3,
-         "bermuda.triangulate_path_edge(ring, closed=, limit=)", used)
-    triangles, points = bermuda.triangulate_polygons_face([ring])
-    need(triangles.shape[1] == 3 and points.shape[1] == 2,
-         "bermuda.triangulate_polygons_face -> (triangles, points)", used)
+    where = "bermuda.triangulate_path_edge(ring, closed=, limit=)"
+    with reaching(where, used):
+        centers, offsets, triangles = bermuda.triangulate_path_edge(ring, closed=True,
+                                                                    limit=3.0)
+    need(centers.shape == offsets.shape and triangles.shape[1] == 3, where, used)
+    where = "bermuda.triangulate_polygons_face -> (triangles, points)"
+    with reaching(where, used):
+        triangles, points = bermuda.triangulate_polygons_face([ring])
+    need(triangles.shape[1] == 3 and points.shape[1] == 2, where, used)
 
 
 def test_vispy_mesh_takes_and_gives_back_its_buffers(viewer):
     from vispy.scene.visuals import Mesh
 
-    mesh = Mesh()
-    vertices = np.array([[0, 0], [1, 0], [0, 1]], np.float32)
-    mesh.set_data(vertices=vertices, faces=np.array([[0, 1, 2]], np.uint32),
-                  vertex_colors=np.ones((3, 4), np.float32))
-    data = mesh.mesh_data
     used = "viewer.contours.SliceVisual and the tests' rendered-buffer readers"
-    need(np.array_equal(np.asarray(data.get_vertices())[:, :2], vertices)
-         and np.asarray(data.get_vertex_colors()).shape == (3, 4),
+    vertices = np.array([[0, 0], [1, 0], [0, 1]], np.float32)
+    with reaching("vispy MeshVisual.set_data / mesh_data", used):
+        mesh = Mesh()
+        mesh.set_data(vertices=vertices, faces=np.array([[0, 1, 2]], np.uint32),
+                      vertex_colors=np.ones((3, 4), np.float32))
+        got = np.asarray(mesh.mesh_data.get_vertices())[:, :2]
+        colors = np.asarray(mesh.mesh_data.get_vertex_colors())
+    need(np.array_equal(got, vertices) and colors.shape == (3, 4),
          "vispy MeshVisual.set_data / mesh_data", used)
     need(callable(getattr(mesh, "get_transform", None)), "vispy Node.get_transform", used)
 
 
 def test_zarr_v2_metadata_the_chunk_reader_reads(tmp_path):
-    import zarr
-    from numcodecs import Zstd
-    from zarr.storage import LocalStore
-
-    arr = zarr.create_array(store=str(tmp_path / "a.zarr"), shape=(4, 4), chunks=(2, 2),
-                            dtype="u1", zarr_format=2, compressors=Zstd())
-    arr = zarr.open_array(str(tmp_path / "a.zarr"), mode="r")
-    meta = arr.metadata
     used = "viewer.chunkcache._ChunkFiles"
+    with reaching("zarr.create_array / open_array (format 2) and zarr.storage.LocalStore",
+                  used):
+        import zarr
+        from numcodecs import Zstd
+        from zarr.storage import LocalStore
+
+        zarr.create_array(store=str(tmp_path / "a.zarr"), shape=(4, 4), chunks=(2, 2),
+                          dtype="u1", zarr_format=2, compressors=Zstd())
+        arr = zarr.open_array(str(tmp_path / "a.zarr"), mode="r")
+        meta = arr.metadata
     for name in ("zarr_format", "filters", "order", "compressor", "fill_value",
                  "encode_chunk_key"):
         need(hasattr(meta, name), f"zarr ArrayV2Metadata.{name}", used)
     need(isinstance(arr.store, LocalStore) and hasattr(arr.store, "root")
          and arr.path == "", "zarr LocalStore.root and Array.path", used)
-    need(meta.encode_chunk_key((1, 0)) == "1.0", "ArrayV2Metadata.encode_chunk_key", used)
+    with reaching("ArrayV2Metadata.encode_chunk_key", used):
+        key = meta.encode_chunk_key((1, 0))
+    need(key == "1.0", "ArrayV2Metadata.encode_chunk_key", used)
 
 
 def test_what_the_slice_benchmark_reaches_into(viewer):
-    from napari._qt.qt_viewer import QtViewer
-
     used = "benchmarks/slice_step.py"
-    need(callable(getattr(QtViewer._on_slice_ready, "__wrapped__", None)),
+    with reaching("napari._qt.qt_viewer.QtViewer._on_slice_ready", used):
+        from napari._qt.qt_viewer import QtViewer
+
+        ready = QtViewer._on_slice_ready
+    need(callable(getattr(ready, "__wrapped__", None)),
          "QtViewer._on_slice_ready.__wrapped__", used)
-    need(hasattr(viewer._layer_slicer, "_force_sync"), "viewer._layer_slicer._force_sync", used)
-    need(callable(getattr(viewer.window._qt_viewer.canvas, "on_draw", None)),
-         "QtViewer.canvas.on_draw", used)
+    with reaching("viewer._layer_slicer", used):
+        slicer = viewer._layer_slicer
+    need(hasattr(slicer, "_force_sync"), "viewer._layer_slicer._force_sync", used)
+    with reaching("viewer.window._qt_viewer.canvas", used):
+        canvas = viewer.window._qt_viewer.canvas
+    need(callable(getattr(canvas, "on_draw", None)), "QtViewer.canvas.on_draw", used)
     layer = viewer.add_image([np.zeros((8, 8, 8)), np.zeros((4, 4, 4))], multiscale=True)
     need(hasattr(layer, "_data_level") and np.asarray(layer.corner_pixels).shape == (2, 3),
          "Image._data_level and Image.corner_pixels", used)
 
 
-def test_what_the_axes_and_camera_code_reaches_into(viewer):
-    from napari._vispy.visuals.axes import Axes
+def test_the_axis_indicator_is_recolored_and_gets_a_second_triad(opened):
+    """What `viewer.axes` reaches in napari's canvas axes overlay, by what it draws.
 
-    need(inspect.isclass(Axes), "napari._vispy.visuals.axes.Axes", "viewer.axes")
-    need(hasattr(viewer.window._qt_viewer, "canvas"), "viewer.window._qt_viewer.canvas",
-         "viewer.axes and viewer.view")
+    napari's triad is drawn in lobemap's colors only if `Axes._default_color`
+    is still the table `Axes.set_data` reads and `_on_data_change` still
+    redraws from it; the anatomical triad is there only if a second `Axes`,
+    built with the overlay's `_font_info`, still draws in its ViewBox.
+    """
+    from lobemap.viewer import axes
+
+    viewer = opened.viewer
+    viewer.dims.ndisplay = 3
+    axes.apply_axis_mode(viewer, opened.space)
+    used = "viewer.axes.apply_axis_mode"
+    where = "viewer.window._qt_viewer.canvas._viewer_overlay_to_visual[axes overlay]"
+    with reaching(where, used):
+        from napari._vispy.utils.qt_font import FontInfo
+        from napari._vispy.visuals.axes import Axes
+        from vispy.scene.node import Node
+
+        canvas = viewer.window._qt_viewer.canvas
+        vispys = list(canvas._viewer_overlay_to_visual[viewer.canvas.overlays["axes"]])
+    need(len(vispys) == 1 and isinstance(getattr(vispys[0].node, "axes", None), Axes),
+         f"{where}.node.axes, a napari._vispy.visuals.axes.Axes", used)
+    overlay = vispys[0]
+    need(isinstance(getattr(overlay, "_font_info", None), FontInfo),
+         "VispyCanvasAxesOverlay._font_info", "viewer.axes._anatomy_triad")
+    need(isinstance(getattr(overlay.node, "scene", None), Node),
+         "VispyCanvasAxesOverlay.node.scene", "viewer.axes._anatomy_triad")
+    need(callable(getattr(overlay, "_on_data_change", None)),
+         "VispyCanvasAxesOverlay._on_data_change", used)
+    need(len(getattr(overlay.node.axes, "_default_color", ())) == 6,
+         "Axes._default_color, six RGBA", used)
+    need({"axes", "reversed_axes", "colored", "bg_color", "dashed", "arrows", "text_offset"}
+         <= set(inspect.signature(Axes.set_data).parameters),
+         "Axes.set_data(axes=, reversed_axes=, colored=, bg_color=, dashed=, arrows=, "
+         "text_offset=)", used)
+
+    def drawn_colors(node) -> set:
+        with reaching("Axes.line.color", used):
+            return {tuple(np.round(c, 6)) for c in np.asarray(node.line.color, float)}
+
+    def table(rows) -> set:
+        return {tuple(np.round(c, 6)) for c in np.asarray(rows, float)[:3]}
+
+    need(drawn_colors(overlay.node.axes) == table(axes.VOXEL_COLORS),
+         "Axes._default_color read by Axes.set_data, redrawn by "
+         "VispyCanvasAxesOverlay._on_data_change", used)
+    second = getattr(overlay, axes._ANATOMY_ATTR, None)
+    need(isinstance(second, Axes) and second.parent is overlay.node.scene and second.visible,
+         "Axes(font_info=) parented into VispyCanvasAxesOverlay.node.scene",
+         "viewer.axes._anatomy_triad")
+    with reaching("Axes.text.text", used):
+        labels = list(second.text.text)
+    need(labels == list(axes.axis_labels_for(opened.space))[::-1]
+         and drawn_colors(second) == table(axes.ANATOMY_COLORS),
+         "Axes.set_data and Axes.text on a second Axes", used)
+
+
+def test_the_window_and_canvas_lobemap_reaches(opened):
+    from qtpy.QtWidgets import QMainWindow
+
+    used = "viewer.switcher.SpaceSwitcher docking and viewer.view.maximize"
+    with reaching("napari Window._qt_window", used):
+        window = opened.viewer.window._qt_window
+    need(isinstance(window, QMainWindow)
+         and all(callable(getattr(window, name, None))
+                 for name in ("splitDockWidget", "resizeDocks", "showNormal", "showMaximized")),
+         "Window._qt_window, a QMainWindow", used)
+    used = "viewer.view.install_initial_fit"
+    with reaching("viewer.window._qt_viewer.canvas.events", used):
+        events = opened.viewer.window._qt_viewer.canvas.events
+    need(all(hasattr(events, name) for name in
+             ("resize", "draw", "mouse_press", "mouse_wheel", "key_press")),
+         "QtViewer.canvas.events resize, draw, mouse_press, mouse_wheel and key_press", used)
 
 
 def test_the_prefetch_finds_the_planes_a_step_lands_on(viewer):
@@ -190,30 +416,41 @@ def test_the_prefetch_finds_the_planes_a_step_lands_on(viewer):
     layer = viewer.add_shapes(data=[], ndim=3)
     viewer.add_image(np.zeros((40, 30, 20), np.uint8), scale=(0.3, 0.25, 0.7))
     layer.affine = mirror_matrix(3, 7.3, 0)
-    to_data = data_from_world(layer)
+    with reaching("Layer._transforms[1:].simplified.inverse", used):
+        to_data = data_from_world(layer)
     for axis in range(3):
         start, _stop, step = viewer.dims.range[axis]
         for k in (0, 3, 17, int(viewer.dims.nsteps[axis]) - 1):
             viewer.dims.set_current_step(axis, k)
             point = viewer.dims.point
             need(point[axis] == start + k * step, "Dims.point after set_current_step", used)
-            got = to_data(list(np.asarray(point)))
+            with reaching("Layer._transforms[1:].simplified.inverse", used):
+                got = to_data(list(np.asarray(point)))
             need(np.array_equal(got, layer.world_to_data(point)),
                  "Layer._transforms[1:].simplified.inverse", used)
 
 
-def test_a_step_can_be_seen_before_any_layer_is_sliced(viewer):
+def test_a_step_can_be_seen_before_any_layer_is_sliced(opened):
     """`before_slicing` wraps `viewer._layer_slicer.submit`: the prefetch is told
     to give way before napari slices any layer for the step."""
     from lobemap.viewer.napari_private import before_slicing
 
     used = "viewer.contours (the prefetch's poke)"
-    layer = viewer.add_image(np.zeros((6, 4, 4), np.uint8))
+    viewer, layer = opened.viewer, opened.image
     seen = []
-    before_slicing(viewer, lambda: seen.append("before"))
-    before_slicing(viewer, lambda: None)       # one wrapper, however many hooks
+    with reaching("viewer._layer_slicer.submit", used):
+        before_slicing(viewer, lambda: seen.append("before"))
+        before_slicing(viewer, lambda: None)       # one wrapper, however many hooks
     slice_dims = layer._slice_dims
     layer._slice_dims = lambda *a, **k: (seen.append("slice"), slice_dims(*a, **k))[1]
-    viewer.dims.set_current_step(0, 3)
+    axis = int(viewer.dims.order[0])
+    viewer.dims.set_current_step(axis, (viewer.dims.current_step[axis] + 1)
+                                 % int(viewer.dims.nsteps[axis]))
     need(seen[:2] == ["before", "slice"], "viewer._layer_slicer.submit slicing every layer",
          used)
+
+
+def test_navis_says_whether_cmtk_is_installed():
+    cmtk = pytest.importorskip("navis.transforms.cmtk")
+    need(hasattr(cmtk, "_cmtkbin"), "navis.transforms.cmtk._cmtkbin",
+         "core.spaces.cmtk_available")
