@@ -52,6 +52,12 @@ Parts of a step:
   the scene is open, as a shown window does on its next frame, so each level
   follows napari's rule for the benchmark's canvas.
 
+The viewer cuts every slider plane of a shown atlas ahead of time, in a
+worker thread (`viewer.prefetch`), from the moment a space opens in 2D. By
+default the first sweep starts right after the load, while that runs, and
+each result says whether it still was; `--wait-prefetch` starts the sweeps
+once it has finished and reports how long it took.
+
 The machine is rarely quiet, so use `--repeat` and read the spread, not one
 number. `--no-bermuda` hides napari's compiled triangulation backend, which
 reproduces an environment without it.
@@ -276,8 +282,28 @@ def _row_toggles(session, primary, app, count: int = 10) -> dict:
     return out
 
 
+def _prefetch_state(overlay, wait: bool) -> dict:
+    """Whether the contour prefetch is still running as the sweeps start.
+
+    With `wait`, the sweeps start once it has finished, and its time is
+    reported: the worker's own, from its start to its end.
+    """
+    try:
+        from lobemap.viewer import prefetch
+    except ImportError:              # a viewer from before the prefetch
+        return {"prefetch": None}
+    waited = prefetch.settle(120) if wait else None
+    plan = getattr(overlay, "_plan", None)
+    done = plan is not None and plan.finished is not None
+    return {"prefetch": {
+        "waited": waited, "running_at_start": prefetch.busy(),
+        "s": (plan.finished - plan.started) if done else None,
+        "planes": getattr(plan, "planes", None), "full": getattr(plan, "full", None),
+    }}
+
+
 def work_steps(space, mode, planes, registry_root, data_root, hide=None,
-               asynchronous=False, draw=False) -> dict:
+               asynchronous=False, draw=False, wait_prefetch=False) -> dict:
     viewer, registry, session, app, load = _open(space, 2, registry_root, data_root,
                                                  asynchronous)
     try:
@@ -291,10 +317,11 @@ def work_steps(space, mode, planes, registry_root, data_root, hide=None,
             viewer.window._qt_viewer.canvas.on_draw()
             _settle(app)
         _hide(viewer, session, hide, app)
+        state = _prefetch_state(overlay, wait_prefetch)
         result = {
             "space": space, "mode": mode, "axis": axis, "planes": len(ks),
             "hide": hide, "async": asynchronous, "draw": draw,
-            **load, **_backend(),
+            **load, **_backend(), **state,
             "sweeps": _sweeps(viewer, axis, ks, app,
                               shapes_of=lambda: len(overlay.paths)),
         }
@@ -396,7 +423,7 @@ def _worker_main(args) -> int:
     else:
         result = work_steps(args.space, args.mode, args.planes,
                             registry_root, args.data_root, args.hide, args.asynchronous,
-                            args.draw)
+                            args.draw, args.wait_prefetch)
     print("RESULT " + json.dumps(result), flush=True)
     return 0
 
@@ -477,6 +504,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="slice with napari's asynchronous slicing (the viewer does not)")
     p.add_argument("--draw", action="store_true",
                    help="let napari pick image levels for the canvas before the sweeps")
+    p.add_argument("--wait-prefetch", action="store_true",
+                   help="start the sweeps once the contour prefetch has finished")
     p.add_argument("--json", default=None, help="write every result here")
     p.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--mode", default=None, help=argparse.SUPPRESS)
@@ -498,6 +527,8 @@ def main(argv: list[str] | None = None) -> int:
         common.append("--async")
     if args.draw:
         common.append("--draw")
+    if args.wait_prefetch:
+        common.append("--wait-prefetch")
     jobs = []
     for mode in args.modes:
         if mode == "benton":
