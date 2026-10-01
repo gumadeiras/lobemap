@@ -262,15 +262,20 @@ def test_a_step_onto_an_open_compartment_draws_the_new_plane(open_box_viewer):
 
 def test_a_plane_whose_cut_raises_is_skipped_and_the_rest_are_cut(open_box_viewer,
                                                                  monkeypatch):
+    """Either kind: an Exception, or a Rust panic in bermuda, which pyo3 raises
+    as a BaseException. Neither ends the worker."""
+    from test_contour_sections import PanicException
+
     viewer, overlay = open_box_viewer
     _step_to(viewer, 2, 2.5)
     positions = _slider_positions(viewer, overlay)
-    bad = {positions[3], positions[-2]}
+    # The panic's plane is the nearer to the slice, so it is cut first.
+    bad = {positions[3]: RuntimeError, positions[-2]: PanicException}
     real = MeshSections._compute
 
     def compute(self, axis, p, pause=None):
         if p in bad:
-            raise RuntimeError(f"cannot cut {p}")
+            raise bad[p](f"cannot cut {p}")
         return real(self, axis, p, pause)
 
     monkeypatch.setattr(MeshSections, "_compute", compute)
@@ -279,12 +284,18 @@ def test_a_plane_whose_cut_raises_is_skipped_and_the_rest_are_cut(open_box_viewe
     assert prefetch.settle(30)
     plan = overlay._plan
     assert plan.skipped == 2 and not plan.full
-    assert isinstance(plan.error, RuntimeError), plan.error
+    assert isinstance(plan.error, PanicException), plan.error
     assert plan.planes == len(positions) - 2
     cut = {p for p in positions if overlay._geometry.get((2, p)) is not None}
-    assert cut == set(positions) - bad
+    assert cut == set(positions) - set(bad)
+    assert not prefetch.busy()
     monkeypatch.setattr(MeshSections, "_compute", real)
-    for z in (positions[0], positions[-1], next(iter(bad))):
+    overlay.layer.visible = False                   # and on again: a new plan
+    overlay.layer.visible = True
+    pump()
+    assert prefetch.settle(30)
+    assert overlay._plan is not plan and overlay._plan.planes == len(positions)
+    for z in (positions[0], positions[-1], *bad):
         _step_to(viewer, 2, z)
         _assert_drawn_is_fresh(overlay)
 

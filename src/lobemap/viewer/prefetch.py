@@ -27,9 +27,10 @@ Threading model, after route (c) of the slice-step search:
   at.
 - To make room it evicts only planes that are not its own, the ones an
   earlier axis or mirror left, and stops when that is not enough.
-- A plane whose cut raises is skipped, and the plan goes on to the next;
-  the plan keeps the first error. A step onto that plane cuts it on the UI
-  thread, where the error is seen.
+- A plane whose cut raises anything -- a Rust panic in bermuda is a
+  BaseException -- is skipped, and the plan goes on to the next; the plan
+  keeps the first error. A step onto that plane cuts it on the UI thread,
+  where the error is seen. Nothing a plan raises ends the worker.
 """
 
 from __future__ import annotations
@@ -128,9 +129,10 @@ class Plan:
                     kept = self._cut(position, mine)
                 except _Cancelled:
                     raise
-                except Exception as exc:  # noqa: BLE001 - a step cuts this plane itself
+                except BaseException as exc:  # noqa: BLE001 - a step cuts this plane itself
                     # One bad plane is left to the step that lands on it,
                     # which raises where it can be seen; the rest are cut.
+                    # BaseException: a Rust panic in bermuda is one.
                     self.skipped += 1
                     if self.error is None:
                         self.error = exc
@@ -170,7 +172,7 @@ def _work() -> None:
                 plan.run()
         except _Cancelled:
             pass
-        except Exception as exc:  # noqa: BLE001 - a step computes the plane itself
+        except BaseException as exc:  # noqa: BLE001 - the worker outlives any plan
             plan.error = exc
 
 

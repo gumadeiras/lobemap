@@ -322,6 +322,51 @@ def test_a_fill_covers_its_ring_where_bermuda_overlaps(registry):
         ring_area(ring), rel=1e-9)
 
 
+class PanicException(BaseException):
+    """What pyo3 raises when bermuda's Rust code panics: not an Exception."""
+
+
+def test_a_ring_bermuda_panics_on_is_drawn_by_napari(monkeypatch):
+    import sys
+    import types
+
+    from viewer_harness import ring_area
+
+    from lobemap.viewer import contours, napari_private
+
+    def panic(*args, **kwargs):
+        raise PanicException("Segment not found in interval")
+
+    monkeypatch.setitem(sys.modules, "bermuda", types.SimpleNamespace(
+        triangulate_polygons_face=panic, triangulate_path_edge=panic))
+    u = np.array([[0, 0], [3, 0], [3, 3], [2, 3], [2, 1], [1, 1], [1, 3], [0, 3]], float)
+    points, faces = contours._fill(u)
+    assert _triangle_area(points, faces) == pytest.approx(ring_area(u), rel=1e-12)
+    vertices, triangles = contours._stroke(u, 0.35)
+    centers, offsets, want = napari_private.triangulate_edge(u.astype(np.float32))
+    np.testing.assert_array_equal(vertices, centers + 0.35 * offsets)
+    np.testing.assert_array_equal(triangles, want)
+
+
+@pytest.mark.requires_data("neuprint_cns_neuropil")
+def test_a_section_bermuda_panics_on_is_filled_exactly(registry):
+    """The male CNS `LA(L)` cut at y = 198 um: bermuda panics on the ring."""
+    import bermuda
+    from viewer_harness import ring_area
+
+    from lobemap.viewer.contours import _fill
+
+    meshset = registry.mesh("neuprint_cns_neuropil")
+    loops = MeshSections(meshset).at(1, 198.0)[meshset.names.index("LA(L)")]
+    ring = max(loops, key=len)[:-1][:, [0, 2]]
+    with pytest.raises(BaseException, match="Segment not found") as caught:
+        bermuda.triangulate_polygons_face([np.asarray(ring, np.float32)])
+    assert type(caught.value).__name__ == "PanicException", "the case is gone"
+    points, faces = _fill(ring)
+    assert _triangle_area(points.astype(np.float32), faces) == pytest.approx(
+        ring_area(ring), rel=1e-9)
+
+
 def test_a_doubled_face_is_left_to_trimesh(monkeypatch):
     """A face listed twice cuts one segment twice: two points joined twice.
 

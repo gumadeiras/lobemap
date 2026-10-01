@@ -54,14 +54,31 @@ def _stroke(ring: np.ndarray, width: float) -> tuple[np.ndarray, np.ndarray]:
     ends.
     """
     ring = np.ascontiguousarray(ring, dtype=np.float32)
+    made = _bermuda("triangulate_path_edge", ring, closed=True, limit=MITER_LIMIT)
+    centers, offsets, triangles = (napari_private.triangulate_edge(ring) if made is None
+                                   else made)
+    return centers + width * offsets, np.asarray(triangles, dtype=np.int64)
+
+
+def _bermuda(name: str, *args, **kwargs):
+    """bermuda's `name(*args, **kwargs)`, or None where it is missing or fails.
+
+    bermuda is Rust, and on a few rings it panics -- "Segment not found in
+    interval" for the male CNS `LA(L)` cut at y = 198 um -- which pyo3
+    raises as a PanicException: a BaseException, so no `except Exception`
+    sees it, and one that escaped the prefetch would end its thread. napari's
+    own triangulation stands in.
+    """
     try:
         import bermuda
 
-        centers, offsets, triangles = bermuda.triangulate_path_edge(
-            ring, closed=True, limit=MITER_LIMIT)
-    except ImportError:
-        centers, offsets, triangles = napari_private.triangulate_edge(ring)
-    return centers + width * offsets, np.asarray(triangles, dtype=np.int64)
+        return getattr(bermuda, name)(*args, **kwargs)
+    except Exception:  # noqa: BLE001 - missing, or failed on these points
+        return None
+    except BaseException as exc:
+        if type(exc).__name__ != "PanicException":
+            raise
+        return None
 
 
 def _fill(ring: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -94,15 +111,12 @@ def _fill(ring: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             faces = np.column_stack((np.zeros(n, np.int64), idx, np.roll(idx, -1)))
             return np.vstack((center[None, :], ring)), faces
     ring32 = np.ascontiguousarray(ring, dtype=np.float32)
-    try:
-        import bermuda
-    except ImportError:
-        points, triangles = napari_private.triangulate_face(ring32)
-        return np.asarray(points, dtype=np.float64), np.asarray(triangles, dtype=np.int64)
     first = None
     for flip in (_as_is, _swapped, _mirrored):
-        triangles, points = bermuda.triangulate_polygons_face(
-            [np.ascontiguousarray(flip(ring32))])
+        made = _bermuda("triangulate_polygons_face", [np.ascontiguousarray(flip(ring32))])
+        if made is None:
+            continue
+        triangles, points = made
         made = flip(np.asarray(points, dtype=np.float64)), np.asarray(triangles, np.int64)
         if _covers(*made, ring32):
             return made
@@ -110,10 +124,12 @@ def _fill(ring: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             first = made
     try:
         points, triangles = napari_private.triangulate_face(ring32)
-        made = np.asarray(points, dtype=np.float64), np.asarray(triangles, dtype=np.int64)
-    except Exception:  # noqa: BLE001 - keep bermuda's, as napari drew it
-        return first
-    return made if _covers(*made, ring32) else first
+    except Exception:
+        if first is None:
+            raise
+        return first                    # bermuda's, as napari's Shapes drew it
+    made = np.asarray(points, dtype=np.float64), np.asarray(triangles, dtype=np.int64)
+    return made if first is None or _covers(*made, ring32) else first
 
 
 def _as_is(points: np.ndarray) -> np.ndarray:
