@@ -47,7 +47,7 @@
 - A space opens with only its primary atlas built. Every other atlas and neuropil set is built, and its layers added to napari's layer list, the first time its tab opens.
 - `lobemap view` reads the registry once when it has nothing to fetch; it used to read every atlas mesh twice before the window opened.
 - A neuropil set that reaches past the rest of its space, as in FAFB14 and the male CNS, waits in napari's layer list as a hidden `<name> (not opened)` layer, which becomes its mesh layer when its tab opens, so the sliders and the view span the whole space from the start and opening the tab moves neither the slider grid nor the plane. Switching that layer on opens the set and shows it.
-- Once a space is open, the meshes of its other atlases and neuropil sets are read in the background, pausing while the slider moves, so opening their tab only builds their layers.
+- The meshes of a space's other atlases and neuropil sets are read in the background while the space opens, so opening their tab only builds their layers, and the 2D contour prefetch waits while it does.
 - In 3D a virtual stain opens at a coarser pyramid level and switches to the finest level that fits one texture once that level has been read in the background, instead of blocking the window for up to a second on every entry into 3D.
 - The virtual stains are read through a cache of decoded chunks, up to 512 MiB per stain, so a 2D step within the chunks already read decodes nothing, and missing chunks, and the 3D levels, are decoded by several threads.
 - The viewer requires napari 0.9 (`>=0.9.1,<0.10`), because its 2D slice, its axis indicators and its window layout use napari internals that other versions may not have; `tests/test_napari_private.py` checks each one.

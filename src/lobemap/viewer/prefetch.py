@@ -21,8 +21,8 @@ Threading model, after route (c) of the slice-step search:
   UI thread that wants it at the same moment. So it gives way: every slice
   step pokes it before napari slices anything
   (`napari_private.before_slicing`), and while the UI thread has worked on
-  a slice in the last `QUIET_S`, it waits at its next pause -- between
-  planes, and between the stages of a cut.
+  a slice in the last `QUIET_S`, or is in a `held` block, it waits at its
+  next pause -- between planes, and between the stages of a cut.
 - A plan is cancelled when its overlay asks for another (a new axis, a
   mirror, other fills), is hidden, or is torn down; it stops at its next
   pause. Nothing it has made is ever wrong: a cache entry is keyed by the
@@ -39,6 +39,7 @@ Threading model, after route (c) of the slice-step search:
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from collections import deque
@@ -50,6 +51,8 @@ import numpy as np
 QUIET_S = 0.03
 
 _last_ui = [0.0]
+#: How many `held` blocks the UI thread is in.
+_held = [0]
 #: Guards `_PLANS` and `_WORKER`, and is waited on by `settle`.
 _LOCK = threading.Condition()
 _PLANS: deque = deque()
@@ -59,6 +62,23 @@ _WORKER: threading.Thread | None = None
 def poke() -> None:
     """The UI thread is working on a slice now. UI thread only."""
     _last_ui[0] = time.perf_counter()
+
+
+@contextlib.contextmanager
+def held():
+    """The worker waits at its next pause until this block ends. UI thread only.
+
+    For UI work that is not a slice and outlasts `QUIET_S`, such as building
+    a part of the scene: opening the hemibrain neuropils' tab soon after the
+    space opened took a median 165-170 ms with the worker running, and
+    137-146 ms with it held.
+    """
+    _held[0] += 1
+    try:
+        yield
+    finally:
+        _held[0] -= 1
+        poke()
 
 
 class _Cancelled(Exception):
@@ -104,9 +124,9 @@ class Plan:
         """Where the worker gives way to the UI thread; a cancelled plan stops here."""
         while not self.cancelled:
             idle = time.perf_counter() - _last_ui[0]
-            if idle >= QUIET_S:
+            if idle >= QUIET_S and not _held[0]:
                 return
-            time.sleep(min(QUIET_S - idle, 0.01))
+            time.sleep(max(min(QUIET_S - idle, 0.01), 0.001))
         raise _Cancelled
 
     def positions(self, pause=None) -> list[float]:
@@ -211,4 +231,4 @@ def settle(timeout: float = 30.0) -> bool:
         return _LOCK.wait_for(lambda: _WORKER is None, timeout)
 
 
-__all__ = ["QUIET_S", "Plan", "busy", "poke", "settle", "submit"]
+__all__ = ["QUIET_S", "Plan", "busy", "held", "poke", "settle", "submit"]

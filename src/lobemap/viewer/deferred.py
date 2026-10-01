@@ -16,73 +16,35 @@ replaced, since napari charges a layer's removal a full garbage collection,
 builds the part and shows it, as the part's own layer did when every part
 was built at open.
 
-The corners come from the mesh file's vertices alone, read in a thread
-while the rest of the scene is built -- for an atlas, from the mesh the
-registry already holds.
-
-Once the space is open, a second thread reads each deferred part's mesh, so
-opening its tab only builds its layers: reading the hemibrain neuropils was
-76 ms of the 180 their tab took. It follows the contour prefetch's rules
-(`prefetch`): it gives way while the UI thread slices, starting no file
-within `prefetch.QUIET_S` of a slice, and it touches no layer and no Qt
-object. Each mesh is read once: a tab opened while its mesh is being read
-waits for that read, and one opened before the thread reached it reads it
-itself and the thread passes it by.
-
-Both threads only read files and hand back arrays.
+The meshes themselves are read whole, into the registry, by a thread
+started before the rest of the scene is built, so opening a part's tab only
+builds its layers; a tab opened soon after the space used to read its mesh
+first, 74 ms for the hemibrain neuropils. `hold` waits for the thread, and
+in every space it has long finished: the hemibrain's neuropils take 74 ms
+to read, the male CNS's 37 and FAFB's 3, and `hold` comes after the primary
+atlas, the images and their contours are built. An atlas's mesh is in
+memory already, since the registry reads it for its compartment names. The
+corners come from those meshes. The thread only reads files.
 """
 
 from __future__ import annotations
 
 import contextlib
 import threading
-import time
 
 import numpy as np
-
-from . import napari_private
-from .prefetch import QUIET_S
 
 #: What a stand-in is called: its part's name, and that it is not built.
 STANDIN_NAME = "{name} (not opened)"
 
-#: When napari last sliced on the UI thread; see `read_ahead`.
-_last_slice = [0.0]
-
-#: A mesh the read-ahead thread is reading now.
-_READING = object()
-
-
-def _sliced() -> None:
-    _last_slice[0] = time.perf_counter()
-
-
-def mesh_bounds(registry, part) -> tuple[np.ndarray, np.ndarray]:
-    """The lowest and highest vertex of a part's mesh, per axis.
-
-    An atlas's mesh is in memory already: the registry reads it for its
-    compartment names. A neuropil set's is read only when it is built, and
-    reading its vertices alone costs well under half of reading it: 29 ms
-    of the 76 the hemibrain's takes.
-    """
-    if part.reference:
-        with np.load(part.asset.path, allow_pickle=False) as z:
-            vertices = z["vertices"]
-    else:
-        vertices = registry.mesh(part.asset.id).vertices
-    if not len(vertices):
-        raise ValueError(f"{part.name} has no vertices")
-    return vertices.min(axis=0), vertices.max(axis=0)
-
 
 class Deferred:
-    """The parts one scene left for later, their stand-ins and their meshes.
+    """The parts one scene left for later, their meshes and their stand-ins.
 
-    `parts` is every deferred part by scene key. Their bounds are read from
+    `parts` is every deferred part by scene key. Their meshes are read from
     the moment this is made; `hold` waits for them and adds the stand-ins,
-    `read_ahead` reads their meshes once the space is open, and `take` and
-    `adopt` hand the part being built its mesh and its stand-in. `show` is
-    called with a part's name when its stand-in is switched on.
+    and `adopt` hands the part being built its stand-in. `show` is called
+    with a part's name when its stand-in is switched on.
     """
 
     def __init__(self, viewer, registry, parts: dict, show=None) -> None:
@@ -95,22 +57,19 @@ class Deferred:
         #: Part name -> its stand-in's eye handler.
         self._eyes: dict = {}
         self._bounds: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-        self._reader = threading.Thread(target=self._read_bounds, name="lobemap-bounds",
+        self._reader = threading.Thread(target=self._read, name="lobemap-bounds",
                                         daemon=True)
         self._reader.start()
-        #: Part name -> its mesh read ahead, the error reading it raised, or
-        #: `_READING`; see `take`.
-        self._meshes: dict = {}
-        #: Parts the UI thread has asked for: the read-ahead passes them by.
-        self._taken: set[str] = set()
-        self._done = threading.Condition()
-        self._stopped = False
 
-    def _read_bounds(self) -> None:
+    def _read(self) -> None:
+        """Read each part's mesh into the registry, and its lowest and highest
+        vertex per axis."""
         for name, part in self.parts.items():
             # Unreadable: no stand-in, and its tab says why when it opens.
             with contextlib.suppress(Exception):
-                self._bounds[name] = mesh_bounds(self.registry, part)
+                vertices = self.registry.mesh(part.asset.id).vertices
+                if len(vertices):
+                    self._bounds[name] = vertices.min(axis=0), vertices.max(axis=0)
 
     def layers(self) -> list:
         """The stand-ins still in the viewer: one deleted by hand holds nothing."""
@@ -178,71 +137,5 @@ class Deferred:
                 layer.events.visible.disconnect(self._eyes.pop(name))
         return layer if layer is not None and layer in self.viewer.layers else None
 
-    # -- the meshes ---------------------------------------------------------
 
-    def read_ahead(self) -> None:
-        """Read the deferred meshes in a thread, from when the event loop next runs.
-
-        Not before: the space is opened first, uncontested. It stops with
-        the scene, or when the viewer closes and empties its layer list.
-        """
-        from qtpy.QtCore import QTimer
-
-        napari_private.before_slicing(self.viewer, _sliced)
-        self.viewer.layers.events.removed.connect(self._on_removed)
-        QTimer.singleShot(0, self._start)
-
-    def _on_removed(self, event=None) -> None:
-        if not len(self.viewer.layers):
-            self.stop()
-
-    def _start(self) -> None:
-        if self._stopped:
-            return
-        parts = list(self.parts.items())
-        threading.Thread(target=self._read_meshes, args=(parts,), name="lobemap-meshes",
-                         daemon=True).start()
-
-    def _read_meshes(self, parts) -> None:
-        for name, part in parts:
-            # A file is read whole once started, so it waits for a pause.
-            while not self._stopped and time.perf_counter() - _last_slice[0] < QUIET_S:
-                time.sleep(0.01)
-            with self._done:
-                if self._stopped:
-                    return
-                if name in self._taken:
-                    continue
-                self._meshes[name] = _READING
-            try:
-                got = self.registry.mesh(part.asset.id)
-            except Exception as exc:                  # noqa: BLE001 - its tab says why
-                got = exc
-            with self._done:
-                self._meshes[name] = got
-                self._done.notify_all()
-
-    def take(self, name: str):
-        """The mesh of `name` if it was read ahead, else None for the caller to read.
-
-        A read under way is waited for rather than made twice, and from now
-        on the read-ahead leaves this part alone. An error it met is raised
-        here, once; asking again reads anew.
-        """
-        with self._done:
-            self._taken.add(name)
-            self._done.wait_for(lambda: self._meshes.get(name) is not _READING)
-            got = self._meshes.pop(name, None)
-        if isinstance(got, BaseException):
-            raise got
-        return got
-
-    def stop(self) -> None:
-        """No further mesh is read: the scene is being torn down."""
-        with self._done:
-            self._stopped = True
-        with contextlib.suppress(Exception):          # never connected, or gone
-            self.viewer.layers.events.removed.disconnect(self._on_removed)
-
-
-__all__ = ["STANDIN_NAME", "Deferred", "mesh_bounds"]
+__all__ = ["STANDIN_NAME", "Deferred"]

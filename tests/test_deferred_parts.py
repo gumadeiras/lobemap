@@ -430,11 +430,11 @@ def test_closing_the_viewer_before_the_fine_level_arrives_stops_its_read(monkeyp
     assert not any(t.name == "lobemap-3d-level" for t in threading.enumerate())
 
 
-# -- the meshes, read ahead -------------------------------------------------
+# -- the meshes, read while the space opens ---------------------------------
 
 
-def _count_loads(monkeypatch, slow: dict | None = None):
-    """Each mesh file read, in order, with when it started; `slow` delays some by path stem."""
+def _count_loads(monkeypatch):
+    """Each mesh file read, in order, with when it started."""
     from lobemap.core.meshfmt import MeshSet
 
     real = MeshSet.load.__func__
@@ -444,25 +444,20 @@ def _count_loads(monkeypatch, slow: dict | None = None):
         from pathlib import Path
 
         loads.append((Path(path).stem, time.perf_counter()))
-        time.sleep((slow or {}).get(Path(path).stem, 0.0))
         return real(cls, path, *args, **kwargs)
 
     monkeypatch.setattr(MeshSet, "load", classmethod(load))
     return loads
 
 
-def _read_ahead_done() -> bool:
-    import threading
-
-    return not any(t.name == "lobemap-meshes" for t in threading.enumerate())
-
-
 @pytest.mark.parametrize("space", ["FAFB14", "JRCFIB2018F", "JRCFIB2022M"])
-def test_a_tab_opened_after_the_read_ahead_reads_no_mesh(monkeypatch, space):
-    """A neuropil set's mesh is read once, in the background, and no tab reads one.
+def test_every_deferred_mesh_is_read_once_while_its_space_opens(monkeypatch, space):
+    """And nothing reads one after: not a slider step, and not a tab.
 
     An atlas's mesh is read with the registry, for its compartment names.
     """
+    import threading
+
     loads = _count_loads(monkeypatch)
     with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
         assert code == 0
@@ -470,65 +465,42 @@ def test_a_tab_opened_after_the_read_ahead_reads_no_mesh(monkeypatch, space):
         shells = [sess.parts[n].asset.path.stem for n in sess.pending
                   if sess.parts[n].reference]
         assert shells
-        pump(50)
-        assert _wait(_read_ahead_done)
         read = list(loads)
+        names = [stem for stem, _ in read]
+        assert all(names.count(stem) == 1 for stem in shells), names
+        assert not any(t.name == "lobemap-bounds" for t in threading.enumerate())
+        axis = int(viewer.dims.order[0])
+        for _ in range(10):
+            viewer.dims.set_current_step(axis, viewer.dims.current_step[axis] + 1)
+            pump(20)
         for name in list(sess.pending):
             tab = _open_tab(sess.panel, name)
             assert tab is sess.panel.tabs[name]
-        assert loads == read, "a tab read its mesh"
-        names = [stem for stem, _ in loads]
-        assert all(names.count(stem) == 1 for stem in shells), names
+        assert loads == read, "a mesh was read after the space opened"
 
 
-def test_a_tab_opened_while_its_mesh_is_read_waits_for_that_read(monkeypatch):
-    loads = _count_loads(monkeypatch, slow={"neuprint_hemibrain_neuropil": 0.5})
+def test_building_a_deferred_part_holds_the_contour_prefetch(monkeypatch):
+    """The prefetch, cutting the primary atlas's planes from the open, cuts none
+    while a tab builds its part, and finishes afterwards."""
+    from lobemap.viewer import prefetch, scene
+
+    real = scene.make_surface
+    progress, plans = [], []
+
+    def slow(*args, **kwargs):
+        if plans:                           # the tab's build, not the open's
+            before = plans[0].planes
+            time.sleep(0.3)                 # ten of the worker's pauses, GIL free
+            progress.append((plans[0].planes - before, plans[0].finished))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(scene, "make_surface", slow)
     with launched(monkeypatch, "view", "JRCFIB2018F", "--ndisplay", "2") as (code, viewer):
         assert code == 0
         sess = session(viewer)
-        assert _wait(lambda: any(s == "neuprint_hemibrain_neuropil" for s, _ in loads))
-        tab = _open_tab(sess.panel, "neuprint_hemibrain_neuropil")
-        assert tab is sess.panel.tabs["neuprint_hemibrain_neuropil"]
-        assert [s for s, _ in loads].count("neuprint_hemibrain_neuropil") == 1
-        _buttons(tab)["Show all"].click()
-        pump(300)
-        assert_rows_match_drawing(sess)
-
-
-def test_the_read_ahead_waits_while_the_slider_moves(monkeypatch):
-    from lobemap.viewer import deferred
-
-    # A pause it waits for that no machine load can fake between two steps.
-    monkeypatch.setattr(deferred, "QUIET_S", 0.5)
-    loads = _count_loads(monkeypatch)
-    with launched(monkeypatch, "view", "JRCFIB2018F", "--ndisplay", "2") as (code, viewer):
-        assert code == 0
-        axis = int(viewer.dims.order[0])
-        start = viewer.dims.current_step[axis]
-        before = len(loads)
-        # From before the event loop first turns, which is when it starts.
-        for k in range(40):                 # about a second of steps
-            viewer.dims.set_current_step(axis, start + 1 + k % 6)
-            pump(20)
-        stopped = time.perf_counter()
-        assert all(at > stopped for _, at in loads[before:]), (
-            "a mesh was read while the slider moved")
-        assert _wait(_read_ahead_done)
-        assert "neuprint_hemibrain_neuropil" in [s for s, _ in loads[before:]]
-
-
-def test_closing_the_viewer_stops_the_read_ahead(monkeypatch):
-    from lobemap.viewer import deferred
-
-    # Kept waiting by one step until the viewer has closed.
-    monkeypatch.setattr(deferred, "QUIET_S", 5.0)
-    loads = _count_loads(monkeypatch)
-    with launched(monkeypatch, "view", "JRCFIB2018F", "--ndisplay", "2") as (code, viewer):
-        assert code == 0
-        before = len(loads)
-        axis = int(viewer.dims.order[0])
-        viewer.dims.set_current_step(axis, viewer.dims.current_step[axis] + 1)
-        pump(100)
-        assert not _read_ahead_done(), "it should be waiting"
-    assert _wait(_read_ahead_done, seconds=1.0)
-    assert len(loads) == before
+        plans.append(sess.contours[sess.registry.primary_atlas("JRCFIB2018F").id]._plan)
+        assert prefetch.busy(), "the prefetch is over before the test begins"
+        _open_tab(sess.panel, "neuprint_hemibrain_neuropil")
+        assert progress == [(0, None)]
+        assert prefetch.settle(60)
+        assert plans[0].planes and not plans[0].skipped

@@ -397,6 +397,20 @@ def test_a_plane_whose_cut_raises_is_skipped_and_the_rest_are_cut(open_box_viewe
         _assert_drawn_is_fresh(overlay)
 
 
+def test_the_worker_cuts_nothing_while_the_ui_thread_holds_it(open_box_viewer):
+    """`prefetch.held`, as building a part of the scene uses it."""
+    viewer, overlay = open_box_viewer
+    _step_to(viewer, 2, 2.5)
+    with prefetch.held():
+        overlay.layer.visible = True
+        pump(300)
+        plan = overlay._plan
+        assert plan is not None and prefetch.busy()
+        assert plan.planes == 0
+    assert prefetch.settle(30)
+    assert plan.planes == len(_slider_positions(viewer, overlay))
+
+
 def _cached(overlay) -> tuple[int, int]:
     return len(overlay.sections.planes), len(overlay._geometry)
 

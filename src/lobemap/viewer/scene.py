@@ -11,6 +11,7 @@ import contextlib
 from dataclasses import dataclass
 
 from ..core.registry import Registry
+from . import prefetch
 from .axes import apply_axis_mode
 from .contours import ContourOverlay
 from .contours import install as install_contours
@@ -431,11 +432,13 @@ class SceneSession:
         """
         if name in self.surfaces:
             return self.surfaces[name], self.contours.get(name)
+        with prefetch.held():
+            return self._realize(name)
+
+    def _realize(self, name: str):
         part = self.pending[name]
-        # Read ahead once the space opened, if it got that far (`deferred`).
-        meshset = self.deferred.take(name) if self.deferred is not None else None
-        if meshset is None:
-            meshset = self.registry.mesh(part.asset.id)
+        # Read while the space was built (`deferred`).
+        meshset = self.registry.mesh(part.asset.id)
         stand_in = self.deferred.adopt(name) if self.deferred is not None else None
         layers = self.viewer.layers
         selected, active = list(layers.selection), layers.selection.active
@@ -658,8 +661,6 @@ class SceneSession:
         for surface in self.surfaces.values():
             surface.stop()
         stop_levels(self.images)
-        if self.deferred is not None:
-            self.deferred.stop()
         # LAYERS FIRST, then the dock. The other order crashes the process.
         #
         # Removing a dock widget relays out the window, which resizes the
