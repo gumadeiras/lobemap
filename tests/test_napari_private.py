@@ -177,3 +177,43 @@ def test_what_the_axes_and_camera_code_reaches_into(viewer):
     need(inspect.isclass(Axes), "napari._vispy.visuals.axes.Axes", "viewer.axes")
     need(hasattr(viewer.window._qt_viewer, "canvas"), "viewer.window._qt_viewer.canvas",
          "viewer.axes and viewer.view")
+
+
+def test_the_prefetch_finds_the_planes_a_step_lands_on(viewer):
+    """`Dims.set_current_step` puts the point at start + k * step, and the copied
+    transform maps it as `Layer.world_to_data` does, to the last bit: the keys
+    the prefetch cuts planes under are the ones a step looks up."""
+    from lobemap.viewer.napari_private import data_from_world
+    from lobemap.viewer.view import mirror_matrix
+
+    used = "viewer.prefetch.Plan.positions"
+    layer = viewer.add_shapes(data=[], ndim=3)
+    viewer.add_image(np.zeros((40, 30, 20), np.uint8), scale=(0.3, 0.25, 0.7))
+    layer.affine = mirror_matrix(3, 7.3, 0)
+    to_data = data_from_world(layer)
+    for axis in range(3):
+        start, _stop, step = viewer.dims.range[axis]
+        for k in (0, 3, 17, int(viewer.dims.nsteps[axis]) - 1):
+            viewer.dims.set_current_step(axis, k)
+            point = viewer.dims.point
+            need(point[axis] == start + k * step, "Dims.point after set_current_step", used)
+            got = to_data(list(np.asarray(point)))
+            need(np.array_equal(got, layer.world_to_data(point)),
+                 "Layer._transforms[1:].simplified.inverse", used)
+
+
+def test_a_step_can_be_seen_before_any_layer_is_sliced(viewer):
+    """`before_slicing` wraps `viewer._layer_slicer.submit`: the prefetch is told
+    to give way before napari slices any layer for the step."""
+    from lobemap.viewer.napari_private import before_slicing
+
+    used = "viewer.contours (the prefetch's poke)"
+    layer = viewer.add_image(np.zeros((6, 4, 4), np.uint8))
+    seen = []
+    before_slicing(viewer, lambda: seen.append("before"))
+    before_slicing(viewer, lambda: None)       # one wrapper, however many hooks
+    slice_dims = layer._slice_dims
+    layer._slice_dims = lambda *a, **k: (seen.append("slice"), slice_dims(*a, **k))[1]
+    viewer.dims.set_current_step(0, 3)
+    need(seen[:2] == ["before", "slice"], "viewer._layer_slicer.submit slicing every layer",
+         used)

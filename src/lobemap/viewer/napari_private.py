@@ -62,6 +62,41 @@ def keep_extent_while_slicing(layer) -> None:
     layer._slice_dims = _slice_dims
 
 
+def before_slicing(viewer, callback) -> None:
+    """Call `callback` whenever the viewer is about to slice its layers.
+
+    Before any layer is sliced, which no event handler can be: napari runs
+    its own handlers of a dims event first, and slicing is one of them.
+    Wraps the viewer's layer slicer once; the callback is kept for the
+    viewer's life, so it must stay cheap and must not hold on to a scene.
+    """
+    slicer = viewer._layer_slicer
+    hooks = getattr(slicer, "_lobemap_before", None)
+    if hooks is None:
+        hooks = []
+        submit = slicer.submit
+
+        def _submit(*args, **kwargs):
+            for hook in hooks:
+                hook()
+            return submit(*args, **kwargs)
+
+        slicer.submit = _submit
+        slicer._lobemap_before = hooks
+    if callback not in hooks:
+        hooks.append(callback)
+
+
+def data_from_world(layer):
+    """`layer.world_to_data` as it is now, as a function any thread can call.
+
+    Called with the layer's own coordinates -- `list(np.asarray(world)[-ndim:])`
+    -- it gives what `world_to_data` gives, to the last bit: it is the very
+    transform that method builds and applies, copied.
+    """
+    return layer._transforms[1:].simplified.inverse
+
+
 def triangulate_edge(ring):
     """napari's own stroke of a closed 2D path, for when bermuda is missing."""
     from napari.layers.shapes._shapes_utils import triangulate_edge as edge
@@ -81,6 +116,8 @@ def triangulate_face(ring):
 
 
 __all__ = [
+    "before_slicing",
+    "data_from_world",
     "gl_state",
     "keep_extent_while_slicing",
     "layer_visual",
