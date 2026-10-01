@@ -16,20 +16,30 @@ Each atlas has a napari layer for its contours, but draws them with vispy
 visuals of its own under that layer (`SliceVisual`): one mesh of outline
 and fill triangles, and one text. napari's Shapes rebuilt every shape on
 every slider step; see `ContourOverlay`.
+
+The sections and outlines of every slider plane inside a shown atlas are
+cut ahead of time off the UI thread (`viewer.prefetch`), so a step to a new
+plane only draws.
 """
 
 from __future__ import annotations
 
-from collections import OrderedDict
+import contextlib
 
 import numpy as np
 
 from ..core.meshfmt import MeshSet
-from . import napari_private
-from .sections import MeshSections
+from . import napari_private, prefetch
+from .sections import MeshSections, PlaneCache
 
 #: Slice-label point size. Was 7, which read as small against the contours.
 TEXT_SIZE = 10.5
+
+#: Bytes of outline geometry, and of the fills built on it, an overlay keeps.
+#: The outlines of every slider plane inside a shipped atlas along any axis
+#: fit: at most 55 MB, the male CNS atlas along y. With
+#: `sections.SECTION_CACHE_BYTES`, at most 96 MB an atlas.
+GEOMETRY_CACHE_BYTES = 64 * 2**20
 
 #: napari's miter limit for a path's joins: past it a join is beveled.
 MITER_LIMIT = 3.0
@@ -97,7 +107,7 @@ class _PlaneGeometry:
     """
 
     def __init__(self, sections: dict[int, list[np.ndarray]], axis: int,
-                 position: float, width: float) -> None:
+                 position: float, width: float, pause=None) -> None:
         self.axis, self.position = axis, position
         #: The two in-plane array axes, in increasing order.
         self.plane = [d for d in range(3) if d != axis]
@@ -105,7 +115,9 @@ class _PlaneGeometry:
         self.present = frozenset(sections)
         verts, faces, owners = [], [], []
         count = 0
-        for owner in sorted(sections):
+        for n, owner in enumerate(sorted(sections)):
+            if pause is not None and n % 8 == 7:
+                pause()
             for loop in sections[owner]:
                 v, f = _stroke(loop[:-1][:, self.plane], width)
                 verts.append(v)
@@ -128,6 +140,12 @@ class _PlaneGeometry:
                 count += len(v)
             self._fills[owner] = _stack(verts, faces)
         return self._fills[owner]
+
+    @property
+    def nbytes(self) -> int:
+        """What this plane holds: its outlines, and the fills built so far."""
+        return int(self.vertices.nbytes + self.faces.nbytes + self.owner.nbytes
+                   + sum(v.nbytes + f.nbytes for v, f in self._fills.values()))
 
     def on_screen(self, points: np.ndarray, displayed) -> np.ndarray:
         """In-plane points as vispy's x, y: the last displayed axis, then the other."""
@@ -258,7 +276,12 @@ class ContourOverlay:
             range(meshset.n_compartments) if selection is None else selection
         )
         self.sections = MeshSections(meshset)
-        self._geometry: OrderedDict[tuple[int, float], _PlaneGeometry] = OrderedDict()
+        self._geometry = PlaneCache(GEOMETRY_CACHE_BYTES)
+        #: What the prefetch is computing for, and its plan; see `_prefetch`.
+        self._prefetch_key = None
+        self._plan = None
+        #: Changes each time the layer's transform does, the mirror's included.
+        self._moves = 0
         #: The loops drawn now, in data coordinates, and the compartment
         #: each came from: what hover picking tests and `name_at_shape` reads.
         self.paths: list[np.ndarray] = []
@@ -293,11 +316,38 @@ class ContourOverlay:
         # contours randomly missing from the slice you were looking at, and
         # only in the hemibrain, the one space with more than one atlas.
         self.layer.events.visible.connect(self._on_visible)
+        for moved in (self.layer.events.affine, self.layer.events.scale,
+                      self.layer.events.translate):
+            moved.connect(self._on_moved)
+        # A scene torn down, or a viewer closed, removes the layer: the
+        # prefetch for it stops there.
+        viewer.layers.events.removed.connect(self._on_removed)
+
+    def _on_moved(self, event=None) -> None:
+        self._moves += 1
+
+    def _on_removed(self, event=None) -> None:
+        if getattr(event, "value", None) is self.layer:
+            self.stop()
+
+    def stop(self) -> None:
+        """Stop the prefetch for good, and stop listening for the layer's removal."""
+        if self._plan is not None:
+            self._plan.cancel()
+        self._plan = None
+        self._prefetch_key = ("stopped",)
+        with contextlib.suppress(Exception):        # already disconnected
+            self.viewer.layers.events.removed.disconnect(self._on_removed)
+
+    def _hold_prefetch(self) -> None:
+        """Hidden, or in 3D: nothing more is cut until the contours show again."""
+        if self._plan is not None:
+            self._plan.cancel()
+        if self._prefetch_key != ("stopped",):
+            self._prefetch_key = None
 
     def _on_visible(self, event=None) -> None:
-        self.visual.set_visible(self._showing())
-        if self.layer.visible:
-            self.refresh()
+        self.refresh()
 
     def _showing(self) -> bool:
         """Whether the slice visuals should be on: the layer is, in 2D.
@@ -362,13 +412,38 @@ class ContourOverlay:
         key = (int(axis), float(position))
         hit = self._geometry.get(key)
         if hit is not None:
-            self._geometry.move_to_end(key)
             return hit
-        out = _PlaneGeometry(self.sections.at(*key), *key, self.width)
-        self._geometry[key] = out
-        while len(self._geometry) > self.sections.max_planes:
-            self._geometry.popitem(last=False)
-        return out
+        made = _PlaneGeometry(self.sections.at(*key), *key, self.width)
+        return self._geometry.put(key, made, made.nbytes)
+
+    def _build(self, sections, axis: int, position: float, pause=None) -> _PlaneGeometry:
+        return _PlaneGeometry(sections, axis, position, self.width, pause)
+
+    def _prefetch(self, axis: int, position: float) -> None:
+        """Have every slider plane inside this atlas cut ahead, if not already asked.
+
+        Asked again when the axis, the slider's grid or the layer's
+        transform -- the mirror -- changes, since each moves the planes the
+        slider can land on. The positions are worked out by the worker from
+        a copy of the transform, the way `slice_position` works them out.
+        """
+        dims = self.viewer.dims
+        start, _stop, step = dims.range[axis]
+        nsteps = int(dims.nsteps[axis])
+        key = (axis, self._moves, float(start), float(step), nsteps)
+        if key == self._prefetch_key or self._prefetch_key == ("stopped",):
+            return
+        if self._plan is not None:
+            self._plan.cancel()
+        self._prefetch_key = key
+        column = self.meshset.vertices[:, axis]
+        self._plan = prefetch.Plan(
+            self.sections, self._geometry, self._build, axis,
+            napari_private.data_from_world(self.layer), dims.point,
+            (float(start), float(step), nsteps),
+            (float(column.min()), float(column.max())), position,
+        )
+        prefetch.submit(self._plan)
 
     FILL_ALPHA = 0.35
 
@@ -418,9 +493,12 @@ class ContourOverlay:
         showing = self._showing()
         self.visual.set_visible(showing)
         if not showing:
+            self._hold_prefetch()
             return
+        prefetch.poke()
         axis = self.axis
         position = self.slice_position()
+        self._prefetch(axis, position)
         state = self._state(axis, position)
         if state == self._drawn:
             return
@@ -439,6 +517,7 @@ class ContourOverlay:
         displayed = list(self.viewer.dims.displayed)
         shown = geometry.present & self.selection
         verts, faces, colors, count = [], [], [], 0
+        held = geometry.nbytes
         for owner in sorted(self.filled & shown):
             v, f = geometry.fill(owner)
             verts.append(v)
@@ -453,6 +532,8 @@ class ContourOverlay:
         verts.append(geometry.vertices)
         faces.append(stroke + np.uint32(count) if count else stroke)
         colors.append(edge_rgba[geometry.owner])
+        if geometry.nbytes > held:
+            self._geometry.grew((geometry.axis, geometry.position), geometry.nbytes - held)
         on = self._showing()
         self.visual.draw(
             geometry.on_screen(np.vstack(verts) if count else verts[0], displayed),
@@ -565,5 +646,8 @@ def install(viewer, overlays: dict[str, ContourOverlay]) -> list[tuple]:
     ]
     for event, handler in pairs:
         event.connect(handler)
+    # Before napari slices anything for a step, the prefetch is told to give
+    # way at its next pause, so the step does not wait for it.
+    napari_private.before_slicing(viewer, prefetch.poke)
     _on_display_change()
     return pairs

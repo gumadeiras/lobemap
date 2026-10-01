@@ -8,6 +8,7 @@ docstring and `tests/test_contour_sections.py` for what "the same" means.
 
 from __future__ import annotations
 
+import threading
 from collections import OrderedDict
 
 import numpy as np
@@ -24,11 +25,83 @@ ON_PLANE_TOL = 1e-8
 #: contour line is drawn 0.35 um wide, 3500 times this.
 MIN_EDGE_UM = 1e-4
 
-#: Planes whose sections an overlay keeps, so revisiting one costs no
-#: geometry. One plane of every compartment is 26-300 KB across the shipped
-#: meshes, so this holds at most about 40 MB per overlay, and only an
-#: overlay that has been drawn holds any.
-SECTION_CACHE_PLANES = 128
+#: Bytes of sections an overlay keeps, so revisiting a plane costs no
+#: geometry. This holds every slider plane inside a shipped atlas along any
+#: axis: at most 28 MB, the male CNS atlas cut along y. A neuropil set spans
+#: the brain and does not fit; its planes nearest the slice are kept.
+SECTION_CACHE_BYTES = 32 * 2**20
+
+
+class PlaneCache:
+    """Per-plane results, least recently used out first, within a byte budget.
+
+    Thread-safe: the UI thread reads and fills it on a slice step while the
+    prefetch (`viewer.prefetch`) fills it from its own thread. Only the UI
+    thread changes a value once it is in (a fill built on a plane's
+    outlines), so a reader holds no lock while it uses one.
+    """
+
+    def __init__(self, max_bytes: int) -> None:
+        self.max_bytes = int(max_bytes)
+        self.nbytes = 0
+        self._items: OrderedDict = OrderedDict()
+        self._lock = threading.Lock()
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __contains__(self, key) -> bool:
+        return key in self._items
+
+    def get(self, key):
+        with self._lock:
+            hit = self._items.get(key)
+            if hit is None:
+                return None
+            self._items.move_to_end(key)
+            return hit[0]
+
+    def put(self, key, value, nbytes: int, keep=None):
+        """Keep `value`; returns what is kept under `key`, or None if no room.
+
+        A value already kept wins over a new one: both were computed from
+        the same key, and whoever holds the first keeps it. With `keep` --
+        the prefetch's own keys -- only entries outside it are evicted to
+        make room, and if that is not enough nothing is kept.
+        """
+        nbytes = int(nbytes)
+        with self._lock:
+            hit = self._items.get(key)
+            if hit is not None:
+                self._items.move_to_end(key)
+                return hit[0]
+            if keep is not None:
+                over = self.nbytes + nbytes - self.max_bytes
+                gone = []
+                for old, (_value, size) in self._items.items():
+                    if over <= 0:
+                        break
+                    if old not in keep:
+                        gone.append(old)
+                        over -= size
+                if over > 0:
+                    return None
+                for old in gone:
+                    self.nbytes -= self._items.pop(old)[1]
+            self._items[key] = (value, nbytes)
+            self.nbytes += nbytes
+            while self.nbytes > self.max_bytes and len(self._items) > 1:
+                _key, (_value, size) = self._items.popitem(last=False)
+                self.nbytes -= size
+            return value
+
+    def grew(self, key, nbytes: int) -> None:
+        """A kept value now holds `nbytes` more: a fill built on it later."""
+        with self._lock:
+            hit = self._items.get(key)
+            if hit is not None:
+                self._items[key] = (hit[0], hit[1] + int(nbytes))
+                self.nbytes += int(nbytes)
 
 
 class MeshSections:
@@ -77,27 +150,29 @@ class MeshSections:
     the cache without touching geometry.
     """
 
-    def __init__(self, meshset: MeshSet, max_planes: int = SECTION_CACHE_PLANES) -> None:
+    def __init__(self, meshset: MeshSet, max_bytes: int = SECTION_CACHE_BYTES) -> None:
         self.meshset = meshset
-        self.max_planes = max_planes
         self._offsets = np.asarray(meshset.face_offsets)
         self._per_axis: dict[int, tuple] = {}
-        self._planes: OrderedDict[tuple[int, float], dict[int, list[np.ndarray]]] = (
-            OrderedDict()
-        )
+        self.planes = PlaneCache(max_bytes)
 
-    def at(self, axis: int, position: float) -> dict[int, list[np.ndarray]]:
-        """Compartment index -> closed polylines, for the plane x[axis] = position."""
+    def at(self, axis: int, position: float, keep=None,
+           pause=None) -> dict[int, list[np.ndarray]] | None:
+        """Compartment index -> closed polylines, for the plane x[axis] = position.
+
+        Safe from any thread: the meshes are never written, and the cache is
+        locked. With `keep` -- the prefetch's own planes -- a plane that
+        does not fit without evicting one of them is not kept, and None is
+        returned instead; see `PlaneCache.put`. `pause`, if given, is called
+        between the stages of the cut, where the prefetch gives way to the
+        UI thread.
+        """
         key = (int(axis), float(position))
-        hit = self._planes.get(key)
+        hit = self.planes.get(key)
         if hit is not None:
-            self._planes.move_to_end(key)
             return hit
-        out = self._compute(*key)
-        self._planes[key] = out
-        while len(self._planes) > self.max_planes:
-            self._planes.popitem(last=False)
-        return out
+        out = self._compute(*key, pause=pause or _go_on)
+        return self.planes.put(key, out, _nbytes(out), keep=keep)
 
     # -- geometry --------------------------------------------------------
 
@@ -118,14 +193,17 @@ class MeshSections:
             self._per_axis[axis] = (fmin, fmax, lo, hi)
         return self._per_axis[axis]
 
-    def _compute(self, axis: int, p: float) -> dict[int, list[np.ndarray]]:
+    def _compute(self, axis: int, p: float, pause=None) -> dict[int, list[np.ndarray]]:
+        pause = pause or _go_on
         fmin, fmax, lo, hi = self._extent(axis)
         # A compartment is sectioned only when the plane is inside its
         # bounds, as `contours_at` always required, so only its faces are
         # looked at: a plane crosses a fraction of an atlas.
         offsets = self._offsets
         near, owner = [], []
-        for index in np.flatnonzero((lo <= p) & (p <= hi)).tolist():
+        for n, index in enumerate(np.flatnonzero((lo <= p) & (p <= hi)).tolist()):
+            if n % 16 == 15:
+                pause()
             a, b = offsets[index], offsets[index + 1]
             hit = np.flatnonzero((fmin[a:b] <= p + ON_PLANE_TOL)
                                  & (fmax[a:b] >= p - ON_PLANE_TOL))
@@ -136,6 +214,7 @@ class MeshSections:
         near, owner = np.concatenate(near), np.concatenate(owner)
         if not len(near):
             return {}
+        pause()
         vertices = self.meshset.vertices
         # int64: an edge key is a product of two vertex ids.
         faces = self.meshset.faces[near].astype(np.int64)
@@ -178,11 +257,14 @@ class MeshSections:
         if not rows:
             return {}
 
+        pause()
         rows = np.concatenate(rows)
         keys, nodes = np.unique(np.concatenate(ends).ravel(), return_inverse=True)
         points = _node_points(vertices, keys, axis, p, n)
+        pause()
         walk, lengths, loop_owners, handed_back = _loops(
-            nodes.reshape(-1, 2), owner[rows], len(keys))
+            nodes.reshape(-1, 2), owner[rows], len(keys), pause)
+        pause()
         rings, closed = points[walk], np.ones(len(lengths), dtype=bool)
         if len(handed_back):
             # Their loops join the others, so the whole plane is cleaned at
@@ -198,7 +280,7 @@ class MeshSections:
             loop_owners = np.concatenate((loop_owners, [i for i, _loop in extra]))
             closed = np.concatenate((closed, shut))
         out: dict[int, list[np.ndarray]] = {}
-        for index, loop in _drawable(rings, lengths, closed, loop_owners):
+        for index, loop in _drawable(rings, lengths, closed, loop_owners, pause):
             out.setdefault(index, []).append(loop)
         return out
 
@@ -232,6 +314,14 @@ class MeshSections:
         return out
 
 
+def _go_on() -> None:
+    """No pause: the UI thread's own cuts run straight through."""
+
+
+def _nbytes(sections: dict[int, list[np.ndarray]]) -> int:
+    return sum(loop.nbytes for loops in sections.values() for loop in loops)
+
+
 def _rolled(faces: np.ndarray, first: np.ndarray):
     """The three vertex columns of each face, starting at column `first`."""
     r = np.arange(len(faces))
@@ -263,7 +353,7 @@ def _node_points(vertices, keys, axis: int, p: float, n: int) -> np.ndarray:
 
 
 def _drawable(rings: np.ndarray, lengths: np.ndarray, closed: np.ndarray,
-              owners: np.ndarray) -> list[tuple[int, np.ndarray]]:
+              owners: np.ndarray, pause=_go_on) -> list[tuple[int, np.ndarray]]:
     """(compartment, loop) for each loop left after dropping the points no one
     can tell apart, in compartment order.
 
@@ -327,6 +417,7 @@ def _drawable(rings: np.ndarray, lengths: np.ndarray, closed: np.ndarray,
     kept = kept[np.arange(len(kept)) - begin[of] < count[of]]
     shown = (lengths >= 3) & (count >= 3)
 
+    pause()
     # Every loop kept, in compartment order, each closed one ending on its
     # first point again: one gather, cut into loops.
     order = np.flatnonzero(shown)
@@ -343,7 +434,7 @@ def _drawable(rings: np.ndarray, lengths: np.ndarray, closed: np.ndarray,
     return list(zip(owners[order].tolist(), loops, strict=True))
 
 
-def _loops(segments: np.ndarray, owners: np.ndarray, k: int):
+def _loops(segments: np.ndarray, owners: np.ndarray, k: int, pause=_go_on):
     """Every simple loop the segments form, all compartments at once.
 
     `segments` join points 0..k-1; `owners` is each segment's compartment.
@@ -380,6 +471,7 @@ def _loops(segments: np.ndarray, owners: np.ndarray, k: int):
     if twice.any():
         return _without(segments, owners, np.unique(node_owner[twice]))
 
+    pause()
     ring_graph = csr_matrix((np.ones(2 * k), neighbor, np.arange(0, 2 * k + 1, 2)),
                             shape=(k, k))
     _n, label = connected_components(ring_graph, directed=False)
@@ -405,4 +497,4 @@ def _without(segments: np.ndarray, owners: np.ndarray, dropped: np.ndarray):
     return ids[walk], lengths, loop_owners, np.union1d(dropped, more)
 
 
-__all__ = ["MIN_EDGE_UM", "ON_PLANE_TOL", "SECTION_CACHE_PLANES", "MeshSections"]
+__all__ = ["MIN_EDGE_UM", "ON_PLANE_TOL", "SECTION_CACHE_BYTES", "MeshSections", "PlaneCache"]
