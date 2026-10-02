@@ -100,7 +100,9 @@ def build_scene(
     reaching outside the rest a stand-in, so the sliders and the view span
     the whole scene from the start. The surfaces and images are left hidden
     for `load_space` to show once the mode, the plane and the pyramid level
-    are set, so each is read once. Without it, everything is built and shown.
+    are set, so each is read once; beside another scene, the sliders are set
+    once it is gone (`SceneSession.settle_view`), and a 2D image is read
+    again there. Without it, everything is built and shown.
     """
     if space not in registry.spaces:
         raise ViewRequestError(
@@ -187,15 +189,18 @@ def build_scene(
         # or else its image. Deferred, that set is no layer yet, and a scene
         # built beside the one it replaces is not the first: so a slice axis
         # chosen right after the open landed on another plane, 26 um off on x
-        # in FAFB14. The sliders are put there, on the grid there is.
+        # in FAFB14. The sliders are put there, on this scene's own grid:
+        # beside another scene, once it is gone (`SceneSession.settle_view`).
         first = parts[0]
         bounds = (into.deferred.bounds(first.name)
                   if first.reference and into.deferred is not None else None)
         if bounds is not None:
-            center_sliders(viewer, *bounds, step=1.0)
+            into.sliders = (*bounds, 1.0)
         elif images:
             extent = viewer.layers.get_extent([images[0]])
-            center_sliders(viewer, *extent.world, step=extent.step)
+            into.sliders = (*extent.world, extent.step)
+        if len(viewer.layers) == len(into.all_layers()):
+            into.open_sliders()
 
     # Anatomical names for the dimension sliders and napari's own axis
     # overlay. No layer of our own: see `viewer/axes.py`. It shows the
@@ -282,6 +287,8 @@ class SceneSession:
         #: Whether the camera has been turned onto the anatomy yet. A scene
         #: opened in 2D is oriented the first time it enters 3D.
         self.oriented = False
+        #: Where the sliders go, as `center_sliders` takes it; see `open_sliders`.
+        self.sliders: tuple | None = None
         self._spans: dict[tuple[str, int], object] = {}
 
     def all_layers(self) -> list:
@@ -528,15 +535,38 @@ class SceneSession:
         apply_axis_mode(self.viewer, space, mirror_axis=self.reflect_axis())
         install_home_orientation(self.viewer, space, reflect_axis=self.reflect_axis)
 
+    def open_sliders(self, keep=()) -> None:
+        """Put the sliders where `build_scene` found them to go, once, but for
+        the axes in `keep`."""
+        if self.sliders is not None:
+            sliders, self.sliders = self.sliders, None
+            center_sliders(self.viewer, *sliders, keep=keep)
+
     def settle_view(self) -> None:
         """Frame this scene once it is the only one loaded.
 
         It was built beside the scene it replaces, so the plane and the fit
-        it got then were computed over both. In 2D the plane is put on this
-        scene's own slider grid and onto its atlases; in either mode the
-        view is fitted to what is left.
+        it got then were computed over both. The sliders are put where this
+        scene alone puts them (`open_sliders`), in 3D once 2D is entered. In
+        2D the plane is put on this scene's own slider grid and onto its
+        atlases; in either mode the view is fitted to what is left.
         """
         dims = self.viewer.dims
+        if self.sliders is not None and dims.ndisplay == 3:
+            # They draw nothing in 3D, and moving them draws every surface
+            # anew, 46 of 55 ms in the hemibrain: so not until 2D is entered.
+            # The plane then stays at the camera's depth, where napari puts
+            # it, and this scene's own handlers draw it after this one.
+            def _entered(event=None) -> None:
+                if dims.ndisplay == 2:
+                    dims.events.ndisplay.disconnect(_entered)
+                    self.handlers.remove((dims.events.ndisplay, _entered))
+                    self.open_sliders(keep=dims.not_displayed)
+
+            dims.events.ndisplay.connect(_entered, position="first")
+            self.handlers.append((dims.events.ndisplay, _entered))
+        else:
+            self.open_sliders()
         # Onto the grid: napari snaps an off-grid point a moment later, and
         # the contours would be drawn a second time on the neighbor plane.
         dims.current_step = tuple(dims.current_step)

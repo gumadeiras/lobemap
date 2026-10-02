@@ -232,10 +232,12 @@ def load_space(
     down only once that build has succeeded.
 
     Only the primary atlas is built; the rest of the scene is built the
-    first time it is needed (`SceneSession.realize`), from meshes read in
-    a thread while this one is built (`deferred`), and the images are
-    shown once the plane and the 3D pyramid level are set, so each is read
-    once. See `build_scene`.
+    first time it is needed (`SceneSession.realize`), from meshes a thread
+    starts reading as this build begins (`deferred`). On a cold open it is
+    done before this returns. In a switch it can still be reading then, and
+    is done by the end of the switch, or within 45 ms of it. The images are
+    shown once the plane and the 3D pyramid level are set, so a space
+    opened alone reads each once. See `build_scene`.
     """
     session = SceneSession(viewer, registry, space)
     try:

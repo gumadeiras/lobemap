@@ -165,31 +165,67 @@ def test_a_slice_axis_chosen_right_after_the_open_lands_where_it_did(monkeypatch
         assert_rows_match_drawing(session(viewer))
 
 
-#: The same, after switching to the space from FAFB14 opened in 2D, along x
-#: and y. Not z, the slice axis FAFB14 opens on: eaa535f tore the old scene
-#: down first, and a scene built beside it now lands on the grid both share.
-EAA535F_SWITCHED = {
-    "JRCFIB2018F": (137.25, 270.5),
-    "JRCFIB2022M": (435.35, 233.8),
-    "GRABE": (130.56, 87.04),
-}
-
-
-@pytest.mark.parametrize("axis", [0, 1])
-@pytest.mark.parametrize("space", list(EAA535F_SWITCHED))
+@pytest.mark.parametrize("axis", [0, 1, 2])
+@pytest.mark.parametrize(("space", "ndisplay"),
+                         [key for key in EAA535F_PLANES if key[0] != "FAFB14"])
 def test_a_slice_axis_chosen_right_after_a_switch_lands_where_it_did(monkeypatch, space,
-                                                                     axis):
-    with launched(monkeypatch, "view", "FAFB14", "--ndisplay", "2") as (code, viewer):
+                                                                     ndisplay, axis):
+    """Where it lands when the space opens: eaa535f tore the old scene down first,
+    so napari put the sliders as for a space opened alone. Switched from FAFB14
+    opened in the same mode."""
+    with launched(monkeypatch, "view", "FAFB14", "--ndisplay", ndisplay) as (code, viewer):
         assert code == 0
         switch_to(viewer, space)
         assert session(viewer).space == space
         control = switcher(viewer).slice
         control.setCurrentIndex(control.findData(axis))
         pump()
+        if ndisplay == "3":
+            viewer.dims.ndisplay = 2
+            pump()
         assert int(viewer.dims.order[0]) == axis
-        assert viewer.dims.point[axis] == pytest.approx(EAA535F_SWITCHED[space][axis],
-                                                        abs=1e-3)
+        assert viewer.dims.point[axis] == pytest.approx(
+            EAA535F_PLANES[(space, ndisplay)][axis], abs=1e-3)
         assert_rows_match_drawing(session(viewer))
+
+
+@pytest.mark.parametrize("ndisplay", ["2", "3"])
+def test_a_switch_moves_the_sliders_once_the_scene_it_replaces_is_gone(monkeypatch,
+                                                                       ndisplay):
+    """And in 3D, where they draw nothing, once 2D is entered.
+
+    Moving them slices every shown layer again, and napari draws a 3D surface
+    anew: 42 of 51 ms in a switch from FAFB14, when they were moved while it
+    was still loaded.
+    """
+    from lobemap.viewer import scene
+
+    real, moves = scene.center_sliders, []
+
+    def center_sliders(viewer, *args, **kwargs):
+        moves.append(({layer.name for layer in viewer.layers}, viewer.dims.ndisplay))
+        return real(viewer, *args, **kwargs)
+
+    monkeypatch.setattr(scene, "center_sliders", center_sliders)
+    with launched(monkeypatch, "view", "FAFB14", "--ndisplay", ndisplay) as (code, viewer):
+        assert code == 0
+        assert len(moves) == 1, "the open put the sliders where they belong"
+        old = set(layer_names(viewer))
+        switch_to(viewer, "JRCFIB2018F")
+        assert session(viewer).space == "JRCFIB2018F"
+        if ndisplay == "3":
+            assert len(moves) == 1, "the sliders moved in 3D"
+            viewer.dims.ndisplay = 2
+            pump()
+        assert len(moves) == 2
+        names, mode = moves[1]
+        assert not names & old, "the sliders moved beside the scene being replaced"
+        assert mode == 2
+        viewer.dims.ndisplay = 5 - int(ndisplay)
+        pump()
+        viewer.dims.ndisplay = int(ndisplay)
+        pump()
+        assert len(moves) == 2, "the sliders moved a second time"
 
 
 @pytest.mark.parametrize("mirror", [False, True])
