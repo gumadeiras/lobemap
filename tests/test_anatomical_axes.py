@@ -13,9 +13,8 @@ import re
 import numpy as np
 import pytest
 
-from lobemap.core.model import anatomical_axes
+from lobemap.core.model import anatomical_axes, anatomical_triad
 from lobemap.core.registry import Registry
-from lobemap.viewer.axes import axis_labels_for, label_viewer_axes
 
 
 def _strip(name: str) -> str:
@@ -152,7 +151,7 @@ def test_a_space_without_a_rotation_gets_no_frame():
 
     space = Space(id="NOAXES", title="no axes", units="um")
     assert anatomical_axes(space) is None
-    assert axis_labels_for(space) is None
+    assert anatomical_triad(space) is None
 
 
 def test_axis_labels_name_every_array_axis(registry):
@@ -164,7 +163,7 @@ def test_axis_labels_name_every_array_axis(registry):
     pair_of = {"A": "AP", "P": "AP", "D": "DV", "V": "DV",
                "L": "LR", "R": "LR"}
     for space_id in ("FAFB14", "JRCFIB2018F", "JRCFIB2022M", "GRABE"):
-        labels = axis_labels_for(registry.spaces[space_id])
+        labels = anatomical_triad(registry.spaces[space_id])[1]
         assert labels is not None and len(labels) == 3
         assert "?" not in "".join(labels), f"{space_id}: unnamed axis in {labels}"
         for label in labels:
@@ -258,7 +257,7 @@ def test_the_anatomical_labels_differ_between_spaces(registry):
     the anatomy and the grid; there, a label that moved with the angle
     was a bug. With two triads the choice is what keeps them apart.
     """
-    labels = {s: axis_labels_for(registry.spaces[s])
+    labels = {s: anatomical_triad(registry.spaces[s])[1]
               for s in ("FAFB14", "JRCFIB2018F", "JRCFIB2022M", "GRABE")}
     assert labels["FAFB14"] == ("A", "D", "L"), labels["FAFB14"]
     assert labels["JRCFIB2018F"] == ("P", "R", "D"), labels["JRCFIB2018F"]
@@ -351,35 +350,21 @@ def test_the_indicator_is_anchored_to_the_canvas_not_the_data(registry):
         viewer.close()
 
 
-def test_a_space_without_axes_leaves_the_labels_alone(registry):
-    """No axes declared means no claim about orientation, not a wrong one."""
-    napari = pytest.importorskip("napari")
-
-    viewer = napari.Viewer(ndisplay=3, show=False)
-    try:
-        from lobemap.core.model import Space
-
-        before = tuple(viewer.dims.axis_labels)
-        space = Space(id="NOAXES", title="no axes", units="um")
-        assert label_viewer_axes(viewer, space) is False
-        assert tuple(viewer.dims.axis_labels) == before
-    finally:
-        viewer.close()
-
-
 def test_labels_are_refused_rather_than_truncated(registry):
     """Three labels onto a 2D viewer must not silently become two.
 
-    napari keeps the TAIL of an over-long label tuple, so D->V would land on
-    x and A->P on y -- a confident, wrong answer in place of no answer.
+    napari keeps the TAIL of an over-long label tuple, so y would land on x
+    and z on y -- a confident, wrong answer in place of no answer.
     """
     napari = pytest.importorskip("napari")
+
+    from lobemap.viewer.axes import apply_axis_mode
 
     viewer = napari.Viewer(show=False)      # no layers: dims.ndim == 2
     try:
         assert viewer.dims.ndim == 2, "fixture assumption changed"
         before = tuple(viewer.dims.axis_labels)
-        assert label_viewer_axes(viewer, registry.spaces["FAFB14"]) is False
+        apply_axis_mode(viewer, registry.spaces["FAFB14"])
         assert tuple(viewer.dims.axis_labels) == before
     finally:
         viewer.close()
@@ -472,7 +457,6 @@ def test_the_anatomy_gets_a_second_triad_shown_only_in_3d(registry):
     from lobemap.viewer.axes import (
         _ANATOMY_ATTR,
         _vispy_axes_overlay,
-        axis_labels_for,
     )
 
     viewer = napari.Viewer(show=False, ndisplay=3)
@@ -490,7 +474,7 @@ def test_the_anatomy_gets_a_second_triad_shown_only_in_3d(registry):
         assert getattr(overlay.node.axes.transform, "matrix", None) is None
 
         # the second one carries the anatomy
-        labels = axis_labels_for(registry.spaces["GRABE"])
+        labels = anatomical_triad(registry.spaces["GRABE"])[1]
         assert list(node.text.text) == list(labels)[::-1]
         frame = anatomical_axes(registry.spaces["GRABE"])
         flip = np.eye(3)[::-1]

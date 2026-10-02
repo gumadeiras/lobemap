@@ -107,7 +107,7 @@ def anatomical_rotation_matrix(space):
 
     Its columns are the anterior, dorsal and lateral directions, so this
     is also exactly what the axis triad needs: arrow i is drawn along
-    +e_i and lands on column i, the pole `axis_labels_for` writes on it.
+    +e_i and lands on column i, the pole `anatomical_triad` names for it.
     """
     import numpy as np
 

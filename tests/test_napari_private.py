@@ -435,6 +435,7 @@ def test_the_axis_indicator_is_recolored_and_gets_a_second_triad(opened):
     redraws from it; the anatomical triad is there only if a second `Axes`,
     built with the overlay's `_font_info`, still draws in its ViewBox.
     """
+    from lobemap.core.model import anatomical_triad
     from lobemap.viewer import axes
 
     viewer = opened.viewer
@@ -481,7 +482,7 @@ def test_the_axis_indicator_is_recolored_and_gets_a_second_triad(opened):
          "viewer.axes._anatomy_triad")
     with reaching("Axes.text.text", used):
         labels = list(second.text.text)
-    need(labels == list(axes.axis_labels_for(opened.space))[::-1]
+    need(labels == list(anatomical_triad(opened.space)[1])[::-1]
          and drawn_colors(second) == table(axes.ANATOMY_COLORS),
          "Axes.set_data and Axes.text on a second Axes", used)
 
