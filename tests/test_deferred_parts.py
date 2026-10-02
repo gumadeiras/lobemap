@@ -495,31 +495,63 @@ def test_closing_the_viewer_before_the_fine_level_arrives_stops_its_read(monkeyp
 # -- the meshes, read while the space opens ---------------------------------
 
 
-def _count_loads(monkeypatch):
-    """Each mesh file read, in order, with when it started."""
+def _count_loads(monkeypatch, hold: dict | None = None):
+    """Each mesh file read, in order: its stem, the thread reading it, and
+    whether it has ended. `hold` maps a stem to what its read waits on."""
+    import threading
+    from pathlib import Path
+
     from lobemap.core.meshfmt import MeshSet
 
     real = MeshSet.load.__func__
     loads = []
 
     def load(cls, path, *args, **kwargs):
-        from pathlib import Path
-
-        loads.append((Path(path).stem, time.perf_counter()))
-        return real(cls, path, *args, **kwargs)
+        read = {"stem": Path(path).stem, "thread": threading.current_thread().name,
+                "ended": False}
+        loads.append(read)
+        (hold or {}).get(read["stem"], lambda: None)()
+        try:
+            return real(cls, path, *args, **kwargs)
+        finally:
+            read["ended"] = True
 
     monkeypatch.setattr(MeshSet, "load", classmethod(load))
     return loads
 
 
+class _Gate:
+    """Holds a read until it is opened, which another thread does a moment after
+    `open_soon`, while the UI thread waits on that read."""
+
+    def __init__(self) -> None:
+        import threading
+
+        self.started, self._open = threading.Event(), threading.Event()
+
+    def __call__(self) -> None:
+        self.started.set()
+        assert self._open.wait(10), "the gate was never opened"
+
+    def open_soon(self, seconds: float = 0.3) -> None:
+        import threading
+
+        threading.Timer(seconds, self._open.set).start()
+
+
+def _reading() -> bool:
+    import threading
+
+    return any(t.name == "lobemap-meshes" for t in threading.enumerate())
+
+
 @pytest.mark.parametrize("space", ["FAFB14", "JRCFIB2018F", "JRCFIB2022M"])
-def test_every_deferred_mesh_is_read_once_while_its_space_opens(monkeypatch, space):
+def test_every_deferred_mesh_is_read_once_by_the_thread_its_space_starts(monkeypatch,
+                                                                         space):
     """And nothing reads one after: not a slider step, and not a tab.
 
     An atlas's mesh is read with the registry, for its compartment names.
     """
-    import threading
-
     loads = _count_loads(monkeypatch)
     with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
         assert code == 0
@@ -527,10 +559,10 @@ def test_every_deferred_mesh_is_read_once_while_its_space_opens(monkeypatch, spa
         shells = [sess.parts[n].asset.path.stem for n in sess.pending
                   if sess.parts[n].reference]
         assert shells
+        assert _wait(lambda: not _reading())
         read = list(loads)
-        names = [stem for stem, _ in read]
-        assert all(names.count(stem) == 1 for stem in shells), names
-        assert not any(t.name == "lobemap-bounds" for t in threading.enumerate())
+        assert sorted((r["stem"], r["thread"]) for r in read if r["stem"] in shells) == (
+            sorted((stem, "lobemap-meshes") for stem in shells)), read
         axis = int(viewer.dims.order[0])
         for _ in range(10):
             viewer.dims.set_current_step(axis, viewer.dims.current_step[axis] + 1)
@@ -538,7 +570,104 @@ def test_every_deferred_mesh_is_read_once_while_its_space_opens(monkeypatch, spa
         for name in list(sess.pending):
             tab = _open_tab(sess.panel, name)
             assert tab is sess.panel.tabs[name]
-        assert loads == read, "a mesh was read after the space opened"
+        assert loads == read, "a mesh was read after the thread"
+
+
+def test_a_space_opens_without_its_deferred_meshes_and_a_tab_waits_for_one(monkeypatch):
+    """The open waits for the corners of its parts, not for their meshes.
+
+    A switch builds the rest of a scene fast enough that it used to wait for
+    them. A tab opened while its mesh is read waits for that read, and reads
+    none itself: not on the UI thread, and not beside the thread.
+    """
+    name = "fafb_neuropil"
+    gate = _Gate()
+    loads = _count_loads(monkeypatch, hold={name: gate})
+    with launched(monkeypatch, "view", "FAFB14", "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        sess = session(viewer)
+        assert gate.started.wait(10)
+        assert [(r["stem"], r["ended"]) for r in loads if r["stem"] == name] == [
+            (name, False)], "the open waited for the mesh"
+        # Its corners were read: it holds its place.
+        stand_in = viewer.layers[STANDIN_NAME.format(name=name)]
+
+        gate.open_soon()
+        tab = _open_tab(sess.panel, name)
+        assert tab is sess.panel.tabs[name]
+        assert tab.surface.layer is stand_in
+        assert [(r["stem"], r["thread"]) for r in loads if r["stem"] == name] == [
+            (name, "lobemap-meshes")]
+        _buttons(tab)["Show all"].click()
+        pump(300)
+        assert drawn(tab.surface, sess.contours[name]), "no outline on the plane"
+        assert_rows_match_drawing(sess)
+
+
+@pytest.mark.parametrize("reading", ["corners", "mesh"])
+def test_a_switch_that_fails_while_the_thread_reads_leaves_nothing(monkeypatch, reading):
+    """Its thread reads no further file, and has ended once the switch is undone.
+
+    It fails before the stand-ins, while the corners are read, or after them,
+    while the meshes are. The scene the user had is untouched, and nothing
+    of the failed one is left: no layer, no stand-in, no thread.
+    """
+    from lobemap.viewer import deferred, panel, scene
+
+    space, shell = "JRCFIB2018F", "neuprint_hemibrain_neuropil"
+    gate = _Gate()
+
+    def fail(message):
+        assert gate.started.wait(10)
+        gate.open_soon()
+        raise RuntimeError(message)
+
+    if reading == "corners":
+        real_bounds, real_images = deferred.mesh_bounds, scene.add_images
+
+        def mesh_bounds(registry, part):
+            if part.name == shell:
+                gate()
+            return real_bounds(registry, part)
+
+        def add_images(viewer, registry, name):
+            if name == space:
+                fail("the images broke")
+            return real_images(viewer, registry, name)
+
+        monkeypatch.setattr(deferred, "mesh_bounds", mesh_bounds)
+        monkeypatch.setattr(scene, "add_images", add_images)
+        loads = _count_loads(monkeypatch)
+        want = "the images broke"
+    else:
+        real_init = panel.CompartmentPanel.__init__
+
+        def init(self, *args, **kwargs):
+            real_init(self, *args, **kwargs)
+            if kwargs.get("space") == space:
+                fail("the panel broke")
+
+        monkeypatch.setattr(panel.CompartmentPanel, "__init__", init)
+        loads = _count_loads(monkeypatch, hold={shell: gate})
+        want = "the panel broke"
+    with launched(monkeypatch, "view", "FAFB14", "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        kept = session(viewer)
+        before = layer_names(viewer)
+        assert _wait(lambda: not _reading())
+        switch_to(viewer, space)
+        assert want in switcher(viewer).status.text()
+        assert not _reading(), "the failed scene's thread outlived it"
+        assert session(viewer) is kept
+        assert layer_names(viewer) == before
+        reads = [(r["thread"], r["ended"]) for r in loads if r["stem"] == shell]
+        if reading == "corners":
+            assert reads == [], "the torn-down scene's mesh was read"
+        else:
+            assert reads == [("lobemap-meshes", True)]
+        pump(300)
+        assert layer_names(viewer) == before
+        assert_rows_match_drawing(kept)
 
 
 def test_building_a_deferred_part_holds_the_contour_prefetch(monkeypatch):

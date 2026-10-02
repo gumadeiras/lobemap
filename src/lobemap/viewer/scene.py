@@ -242,7 +242,8 @@ def build_scene(
         into.surfaces, into.pending = surfaces, pending
         into.parts, into.styles = by_name, styles
         if later:
-            # Made first: it reads their bounds while the rest is built.
+            # Made first: its thread reads their corners while the rest is
+            # built, and then their meshes.
             into.deferred = Deferred(viewer, registry, later,
                                      show=lambda name: into.show([name]))
 
@@ -453,7 +454,10 @@ class SceneSession:
 
     def _realize(self, name: str):
         part = self.pending[name]
-        # Read while the space was built (`deferred`).
+        if self.deferred is not None:
+            # Read by the thread `build_scene` started; a read under way is
+            # waited for, so the mesh is read once and not here (`deferred`).
+            self.deferred.wait(name)
         meshset = self.registry.mesh(part.asset.id)
         stand_in = self.deferred.adopt(name) if self.deferred is not None else None
         layers = self.viewer.layers
@@ -677,6 +681,8 @@ class SceneSession:
         for surface in self.surfaces.values():
             surface.stop()
         stop_levels(self.images)
+        if self.deferred is not None:
+            self.deferred.stop()
         # LAYERS FIRST, then the dock. The other order crashes the process.
         #
         # Removing a dock widget relays out the window, which resizes the

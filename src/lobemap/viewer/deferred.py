@@ -16,15 +16,23 @@ replaced, since napari charges a layer's removal a full garbage collection,
 builds the part and shows it, as the part's own layer did when every part
 was built at open.
 
-The meshes themselves are read whole, into the registry, by a thread
-started before the rest of the scene is built, so opening a part's tab only
-builds its layers; a tab opened soon after the space used to read its mesh
-first, 74 ms for the hemibrain neuropils. `hold` waits for the thread, and
-in every space it has long finished: the hemibrain's neuropils take 74 ms
-to read, the male CNS's 37 and FAFB's 3, and `hold` comes after the primary
-atlas, the images and their contours are built. An atlas's mesh is in
-memory already, since the registry reads it for its compartment names. The
-corners come from those meshes. The thread only reads files.
+The meshes are read by a thread started before the rest of the scene is
+built, in two passes. The first reads each part's corners (`mesh_bounds`),
+and `hold` waits for that pass alone. The second reads each mesh whole,
+into the registry, so opening a part's tab only builds its layers: a tab
+opened soon after the space used to read its mesh first, 78 ms for the
+hemibrain neuropils. A tab opened while its mesh is read waits for that
+read (`wait`), so each mesh is read once, by the thread. One the thread
+could not read is read again when its tab opens, which then says why.
+
+On a cold open both passes are over before `hold`. A switch builds the
+rest of its scene faster, and `hold` used to wait for the meshes as well:
+a median of about 100 ms for the hemibrain's, in 2D. It waits for the
+corners alone, a median of 7 ms there, and the meshes are read while the
+switch goes on: done by its end, or at most 45 ms after it.
+
+The thread only reads files, and touches no layer. A teardown stops it
+after the file it is reading, and waits for that file.
 """
 
 from __future__ import annotations
@@ -38,13 +46,34 @@ import numpy as np
 STANDIN_NAME = "{name} (not opened)"
 
 
+def mesh_bounds(registry, part) -> tuple[np.ndarray, np.ndarray]:
+    """The lowest and highest vertex of a part's mesh, per axis.
+
+    An atlas's mesh is in memory already: the registry reads it for its
+    compartment names. A neuropil set's corners are read from its file's
+    vertices alone, 30 of the 78 ms its mesh takes for the hemibrain.
+    Taken column by column: NumPy reduces an (n, 3) array along its first
+    axis far slower, 19 ms against 1 for those vertices.
+    """
+    if part.reference:
+        with np.load(part.asset.path, allow_pickle=False) as z:
+            vertices = z["vertices"]
+    else:
+        vertices = registry.mesh(part.asset.id).vertices
+    if not len(vertices):
+        raise ValueError(f"{part.name} has no vertices")
+    return (np.array([column.min() for column in vertices.T]),
+            np.array([column.max() for column in vertices.T]))
+
+
 class Deferred:
     """The parts one scene left for later, their meshes and their stand-ins.
 
-    `parts` is every deferred part by scene key. Their meshes are read from
-    the moment this is made; `hold` waits for them and adds the stand-ins,
-    and `adopt` hands the part being built its stand-in. `show` is called
-    with a part's name when its stand-in is switched on.
+    `parts` is every deferred part by scene key. Their corners, then their
+    meshes, are read from the moment this is made: `hold` waits for the
+    corners and adds the stand-ins, `wait` waits for one part's mesh, and
+    `adopt` hands the part being built its stand-in. `stop` ends the reads.
+    `show` is called with a part's name when its stand-in is switched on.
     """
 
     def __init__(self, viewer, registry, parts: dict, show=None) -> None:
@@ -57,19 +86,38 @@ class Deferred:
         #: Part name -> its stand-in's eye handler.
         self._eyes: dict = {}
         self._bounds: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-        self._reader = threading.Thread(target=self._read, name="lobemap-bounds",
-                                        daemon=True)
+        #: Set once every part's corners are read: `hold` waits for this.
+        self._bounded = threading.Event()
+        #: Part name -> set once the thread is done with its mesh; see `wait`.
+        self._read = {name: threading.Event() for name in self.parts}
+        self._stopped = False
+        # The parts as made: `adopt` takes them out of `parts` meanwhile.
+        self._reader = threading.Thread(target=self._run, args=(list(self.parts.items()),),
+                                        name="lobemap-meshes", daemon=True)
         self._reader.start()
 
-    def _read(self) -> None:
-        """Read each part's mesh into the registry, and its lowest and highest
-        vertex per axis."""
-        for name, part in self.parts.items():
-            # Unreadable: no stand-in, and its tab says why when it opens.
-            with contextlib.suppress(Exception):
-                vertices = self.registry.mesh(part.asset.id).vertices
-                if len(vertices):
-                    self._bounds[name] = vertices.min(axis=0), vertices.max(axis=0)
+    def _run(self, parts) -> None:
+        """Read every part's corners, then every part's mesh into the registry."""
+        try:
+            for name, part in parts:
+                if self._stopped:
+                    return
+                # Unreadable: no stand-in, and its tab says why when it opens.
+                with contextlib.suppress(Exception):
+                    self._bounds[name] = mesh_bounds(self.registry, part)
+            self._bounded.set()
+            for name, part in parts:
+                if self._stopped:
+                    return
+                # Unreadable: read again when its tab opens, which says why.
+                with contextlib.suppress(Exception):
+                    self.registry.mesh(part.asset.id)
+                self._read[name].set()
+        finally:
+            # Stopped or failed, nothing waits for it forever.
+            self._bounded.set()
+            for done in self._read.values():
+                done.set()
 
     def layers(self) -> list:
         """The stand-ins still in the viewer: one deleted by hand holds nothing."""
@@ -80,8 +128,9 @@ class Deferred:
 
         A part inside them moves nothing when it is built, and gets none.
         Added under every layer, and the layer selection is left as it was.
+        Waits for the corners, and not for the meshes.
         """
-        self._reader.join()
+        self._bounded.wait()
         layers = self.viewer.layers
         extent = layers.get_extent(built).world if built else None
         selected, active = list(layers.selection), layers.selection.active
@@ -107,6 +156,22 @@ class Deferred:
         """The lowest and highest vertex of a part's mesh, per axis, or None if
         it could not be read. After `hold`."""
         return self._bounds.get(name)
+
+    def wait(self, name: str) -> None:
+        """Wait until the thread is done with the mesh of `name`.
+
+        It is then in the registry, unless it could not be read, so the
+        caller takes it from there instead of reading it beside the thread.
+        """
+        done = self._read.get(name)
+        if done is not None:
+            done.wait()
+
+    def stop(self) -> None:
+        """The scene is being torn down: read no further file, and wait for the
+        one being read, so that the thread does not outlive the scene."""
+        self._stopped = True
+        self._reader.join()
 
     def _on_eye(self, name: str) -> None:
         """Switched on in the layer list: build the part and show it.
@@ -143,4 +208,4 @@ class Deferred:
         return layer if layer is not None and layer in self.viewer.layers else None
 
 
-__all__ = ["STANDIN_NAME", "Deferred"]
+__all__ = ["STANDIN_NAME", "Deferred", "mesh_bounds"]
