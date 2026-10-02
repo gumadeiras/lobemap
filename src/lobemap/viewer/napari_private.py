@@ -127,6 +127,51 @@ def shown_unsliced(layer):
     return layer._block_refresh()
 
 
+def keep_volume_texture(viewer, layer) -> None:
+    """Upload `layer`'s 3D voxels to the GPU only when they change.
+
+    On every entry into 3D napari gives its volume node the 3D slice two or
+    three times -- at napari's own 3D level, at the pinned level in 2D's
+    axis order, and then in 3D's -- and vispy uploads each, although the
+    last is the very buffer the texture held when 3D was left: the stains'
+    pinned levels are 255-613 MB, and uploading them was 0.35-0.55 s of the
+    first frame. So the node takes its voxels at its next draw instead, the
+    last ones it was given, and only if they are not that buffer -- same
+    address, shape, strides and dtype -- which is kept alive meanwhile, as
+    vispy keeps it, so no other array can take its address. A contrast
+    change vispy re-uploads for is passed straight through.
+    """
+    node = layer_visual(viewer, layer)._layer_node._volume_node
+    upload, prepare = node.set_data, node._prepare_draw
+    state: dict = {"pending": None, "held": None}
+
+    def key(vol):
+        return (vol.__array_interface__["data"][0], vol.shape, vol.strides, vol.dtype.str)
+
+    def set_data(vol, clim=None, copy=True):
+        if clim is not None:
+            upload(vol, clim=clim, copy=copy)
+            state["held"] = (key(vol), vol)
+            return
+        state["pending"] = (vol, copy)
+        node.update()
+
+    def _prepare_draw(*args, **kwargs):
+        pending, state["pending"] = state["pending"], None
+        if pending is not None:
+            vol, copy = pending
+            if state["held"] is None or state["held"][0] != key(vol):
+                upload(vol, copy=copy)
+                state["held"] = (key(vol), vol)
+        return prepare(*args, **kwargs)
+
+    # vispy freezes its visuals against new attributes.
+    node.unfreeze()
+    node.set_data = set_data
+    node._prepare_draw = _prepare_draw
+    node.freeze()
+
+
 def data_from_world(layer):
     """`layer.world_to_data` as it is now, as a function any thread can call.
 
@@ -161,6 +206,7 @@ __all__ = [
     "data_from_world",
     "gl_state",
     "keep_extent_while_slicing",
+    "keep_volume_texture",
     "layer_visual",
     "no_scene_update",
     "shown_unsliced",

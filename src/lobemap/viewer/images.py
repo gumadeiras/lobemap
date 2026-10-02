@@ -14,7 +14,7 @@ import weakref
 import numpy as np
 
 from .chunkcache import cached_levels, read_whole
-from .napari_private import keep_extent_while_slicing
+from .napari_private import keep_extent_while_slicing, keep_volume_texture
 
 #: Per-role display defaults for image layers.
 #:
@@ -339,6 +339,7 @@ def add_images(viewer, registry, space: str) -> list:
             **volume.napari_kwargs(),
         )
         keep_extent_while_slicing(layer)
+        keep_volume_texture(viewer, layer)
         level = level_for_3d(data) if volume.is_multiscale else 0
         if volume.is_multiscale:
             coarse = coarse_level_for_3d(data, level)

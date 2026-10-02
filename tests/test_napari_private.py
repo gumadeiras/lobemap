@@ -63,6 +63,9 @@ CHECKED = {
     "_cmtkbin": "test_navis_says_whether_cmtk_is_installed",
     "_update_scenegraph": "test_a_mesh_is_hidden_and_shown_without_napari_redoing_it",
     "_block_refresh": "test_a_mesh_is_hidden_and_shown_without_napari_redoing_it",
+    "_layer_node": "test_a_volume_takes_its_voxels_at_its_next_draw",
+    "_volume_node": "test_a_volume_takes_its_voxels_at_its_next_draw",
+    "_prepare_draw": "test_a_volume_takes_its_voxels_at_its_next_draw",
 }
 
 #: lobemap's own private names, reached from another of its modules.
@@ -401,6 +404,43 @@ def test_a_mesh_is_hidden_and_shown_without_napari_redoing_it(viewer):
         layer.visible = True
     need(not built and node.visible, "a layer shown under _block_refresh keeping its visual",
          used)
+
+
+def test_a_volume_takes_its_voxels_at_its_next_draw(viewer, monkeypatch):
+    """What `keep_volume_texture` reaches, and what it relies on napari and vispy doing."""
+    from vispy.visuals.volume import VolumeVisual
+
+    from lobemap.viewer.napari_private import keep_volume_texture, layer_visual
+
+    used = "viewer.images, which uploads a 3D level only when it changes"
+    uploads = []
+    upload = VolumeVisual.set_data
+
+    def counted(self, vol, *args, **kwargs):
+        uploads.append(vol.shape)
+        return upload(self, vol, *args, **kwargs)
+
+    monkeypatch.setattr(VolumeVisual, "set_data", counted)
+    layer = viewer.add_image(np.arange(6 * 5 * 4, dtype=np.uint8).reshape(6, 5, 4))
+    with reaching("layer_visual(...)._layer_node._volume_node", used):
+        node = layer_visual(viewer, layer)._layer_node._volume_node
+    need(isinstance(node, VolumeVisual) and callable(getattr(node, "_prepare_draw", None)),
+         "ImageLayerNode._volume_node, a vispy Volume with _prepare_draw", used)
+    with reaching("keep_volume_texture", used):
+        keep_volume_texture(viewer, layer)
+    render = viewer.window._qt_viewer.canvas._scene_canvas.render
+    del uploads[:]
+    viewer.dims.ndisplay = 3
+    need(not uploads, "napari handing the volume node its voxels through set_data", used)
+    render()
+    need(uploads == [(6, 5, 4)], "vispy calling Volume._prepare_draw as it draws", used)
+    for ndisplay in (2, 3):
+        viewer.dims.ndisplay = ndisplay
+        render()
+    need(uploads == [(6, 5, 4)], "napari slicing the same buffer on the way back into 3D", used)
+    layer.data = np.zeros((3, 5, 4), np.uint8)
+    render()
+    need(uploads[-1] == (3, 5, 4), "a volume given new voxels taking them", used)
 
 
 def test_napari_triangulation_without_bermuda():

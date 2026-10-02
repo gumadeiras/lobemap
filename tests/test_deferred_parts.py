@@ -494,6 +494,51 @@ def test_3d_renders_the_same_pyramid_level_once_it_is_read(monkeypatch, space):
         assert _rendered(image).shape == tuple(levels[fine].shape)
 
 
+def test_3d_uploads_the_stain_level_once_and_not_on_every_entry(monkeypatch):
+    """The pinned level is 255-613 MB, and uploading it again on every entry
+    into 3D was 0.35-0.55 s of the first frame. It is uploaded when it comes,
+    and again only when other voxels do; a contrast set in 2D reaches 3D."""
+    from vispy.visuals.volume import VolumeVisual
+
+    from lobemap.viewer.images import level_for_3d
+    from lobemap.viewer.napari_private import layer_visual
+
+    uploads = []
+    upload = VolumeVisual.set_data
+
+    def counted(self, vol, *args, **kwargs):
+        uploads.append(tuple(vol.shape))
+        return upload(self, vol, *args, **kwargs)
+
+    monkeypatch.setattr(VolumeVisual, "set_data", counted)
+    with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
+        assert code == 0
+        image = session(viewer).images[0]
+        fine = level_for_3d(list(image.data))
+        shape = tuple(image.data[fine].shape)
+        render = viewer.window._qt_viewer.canvas._scene_canvas.render
+        assert _wait(lambda: image.data_level == fine), "the fine level never came"
+        render()
+        assert uploads[-1] == shape
+        del uploads[:]
+        for ndisplay in (2, 3, 2, 3):
+            viewer.dims.ndisplay = ndisplay
+            pump()
+            render()
+        assert shape not in uploads, uploads
+
+        viewer.dims.ndisplay = 2
+        pump()
+        lo, hi = image.contrast_limits
+        image.contrast_limits = (lo, (lo + hi) / 2)
+        viewer.dims.ndisplay = 3
+        pump()
+        render()
+        node = layer_visual(viewer, image).node
+        assert np.allclose(node.clim, image.contrast_limits)
+        assert shape not in uploads, uploads
+
+
 def test_a_switch_before_the_fine_level_arrives_leaves_nothing(monkeypatch):
     from lobemap.viewer import images
 
