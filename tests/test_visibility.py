@@ -189,6 +189,19 @@ def test_entering_3d_again_rebuilds_only_a_mesh_that_changed(monkeypatch):
         assert _same_as_built(tab.surface)
         assert_rows_match_drawing(sess)
 
+        # The shading too: napari gives a 2D node none, so a mesh restyled in
+        # 2D and shown as it was built came back into 3D unlit.
+        from lobemap.viewer.napari_private import layer_visual
+
+        viewer.dims.ndisplay = 2
+        pump()
+        tab.surface.layer.shading = "flat"
+        del builds[:]
+        viewer.dims.ndisplay = 3
+        pump(300)
+        assert builds == [3]
+        assert layer_visual(viewer, tab.surface.layer).node.shading == "flat"
+
 
 def test_the_layer_list_eye_is_a_selection_change(monkeypatch):
     """Hiding a layer from napari's list unchecks its rows; showing it again

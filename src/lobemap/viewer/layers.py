@@ -257,8 +257,8 @@ class AtlasSurface:
         self._built_3d = False
         self.layer.events.set_data.connect(self._on_built)
         self.layer.events.data.connect(self._on_changed)
-        for moved in ("affine", "scale", "translate", "rotate", "shear"):
-            getattr(self.layer.events, moved).connect(self._on_moved)
+        for setting in ("affine", "scale", "translate", "rotate", "shear", "shading"):
+            getattr(self.layer.events, setting).connect(self._on_set_in_2d)
 
     # -- the 3D build, kept through 2D -------------------------------------
     #
@@ -278,8 +278,10 @@ class AtlasSurface:
         if not self.layer.visible:
             self._built_3d = False
 
-    def _on_moved(self, event=None) -> None:
-        # The node's transform is computed for the displayed axes.
+    def _on_set_in_2d(self, event=None) -> None:
+        # napari sets these on the node for the displayed axes: a transform,
+        # and the shading, which a 2D node has none of, so a mesh restyled in
+        # 2D would come back into 3D unlit.
         if self.viewer.dims.ndisplay != 3:
             self._built_3d = False
 
