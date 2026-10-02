@@ -139,14 +139,13 @@ testpaths = ["tests"]
 # own attribute deprecations to the wrong frame, so a filter on lobemap's
 # module names would miss them; hence the blanket rule. The exceptions are
 # dependencies whose own internals warn and that no permitted upgrade fixes:
-# scikit-image 0.26 and vispy 0.16 (napari caps it below 0.17) set an
-# array's shape, which NumPy 2.5 deprecated, and napari's pydantic models
-# use `json_encoders`. Add one only for a warning raised inside a dependency.
+# scikit-image 0.26 sets an array's shape, which NumPy 2.5 deprecated, and
+# napari's pydantic models use `json_encoders`. Add one only for a warning
+# raised inside a dependency.
 filterwarnings = [
   "error::DeprecationWarning",
   "error::PendingDeprecationWarning",
   "error::FutureWarning",
   "default:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:skimage",
-  "default:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:vispy",
   "default::DeprecationWarning:pydantic",
 ]
