@@ -67,19 +67,22 @@ def test_verify_extent_rejects_a_wrong_declaration():
         verify_extent(extents, 1e-3, (4.0, 45.0), "nm")
 
 
-def test_the_shipped_containers_record_a_declared_scale():
+SHIPPED = (
+    "benton2025_glomeruli",
+    "neuprint_hemibrain_glomeruli",
+    "neuprint_cns_glomeruli",
+    "schlegel2021_s11_glomeruli",
+    "schlegel2021_s12_glomeruli",
+)
+
+
+@pytest.mark.requires_data(*SHIPPED)
+def test_the_shipped_containers_record_a_declared_scale(registry):
     """Every mesh container states the units it was built from."""
     from lobemap.core.meshfmt import MeshSet
 
-    names = (
-        "benton2025_glomeruli",
-        "neuprint_hemibrain_glomeruli",
-        "neuprint_cns_glomeruli",
-        "schlegel2021_s11",
-        "schlegel2021_s12",
-    )
-    for name in names:
-        meta = MeshSet.load(f"registry/data/{name}.npz").meta
+    for name in SHIPPED:
+        meta = MeshSet.load(registry.assets[name].path).meta
         units = meta.get("source_units")
         assert units, f"{name} records no source units"
         assert meta["scale_to_um"] == pytest.approx(scale_to_um(units)), (
