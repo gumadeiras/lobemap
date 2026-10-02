@@ -13,18 +13,6 @@ import contextlib
 
 import numpy as np
 
-#: A face-on view is exactly axis-aligned, which is a gimbal-lock singularity
-#: for the Euler angles napari stores its camera in. Its vispy round trip --
-#: angles to quaternion and back -- cannot recover the third angle there and
-#: zeroes it, which comes back as a NEGATED up vector: the brain renders
-#: upside down. Turning the camera a fraction of a degree off axis makes the
-#: decomposition unique and the roll survives. One degree across a 700 um
-#: brain is about 12 um of depth difference edge to edge, invisible, and it
-#: is a yaw about the dorsal axis so it reads as "very slightly turned"
-#: rather than tilted. `tests/test_default_view.py` pins the napari behavior
-#: so this can be dropped if it is ever fixed upstream.
-GIMBAL_NUDGE_DEG = 1.0
-
 #: The array axis a mirror reflects along.
 #:
 #: napari names the axes x/y/z in array order (`viewer.axes.VOXEL_LABELS`),
@@ -36,8 +24,7 @@ GIMBAL_NUDGE_DEG = 1.0
 MIRROR_AXIS = 0
 
 
-def orient_anterior(viewer, space, nudge_deg: float = GIMBAL_NUDGE_DEG,
-                    reflect_axis: int | None = None) -> bool:
+def orient_anterior(viewer, space, reflect_axis: int | None = None) -> bool:
     """Face the anterior surface of the brain, dorsal up. True if applied.
 
     Uses the space's MEASURED anatomy, so the view really is down the
@@ -64,21 +51,12 @@ def orient_anterior(viewer, space, nudge_deg: float = GIMBAL_NUDGE_DEG,
         anterior[reflect_axis] *= -1.0
         dorsal[reflect_axis] *= -1.0
 
-    # Yaw the camera slightly about the dorsal axis, off the singularity.
-    view = -anterior
-    if nudge_deg:
-        # right-handed camera basis (right, up, -view): right = view x up.
-        right = np.cross(view, dorsal)
-        theta = np.radians(nudge_deg)
-        view = view * np.cos(theta) + right * np.sin(theta)
-        view /= np.linalg.norm(view)
-
-    # napari 0.9 moved the camera; keep working on either.
     camera = viewer.scene.camera
     camera.set_view_direction(
-        view_direction=tuple(view), up_direction=tuple(dorsal)
+        view_direction=tuple(-anterior), up_direction=tuple(dorsal)
     )
-    # Up is what the round trip destroys, so that is what is checked.
+    # Up is what napari's angle round trip can lose, so that is what is
+    # checked; see `tests/test_default_view.py`.
     return bool(np.dot(np.asarray(camera.up_direction), dorsal) > 0.99)
 
 
@@ -366,7 +344,6 @@ def apply_mirror(layers, on: bool, center: float,
 
 
 __all__ = [
-    "GIMBAL_NUDGE_DEG",
     "MIRROR_AXIS",
     "apply_mirror",
     "capture_view",

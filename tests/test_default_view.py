@@ -153,31 +153,30 @@ def viewer():
 
 
 def test_orient_anterior_points_the_camera_down_the_measured_axis(viewer):
-    from lobemap.viewer.app import GIMBAL_NUDGE_DEG, orient_anterior
+    from lobemap.viewer.app import orient_anterior
 
     space = Space(id="S", title="s", units="um",
                   anatomical_rotation_axis=(0.0, 1.0, 0.0),
                   anatomical_rotation_deg=90.0)
     assert orient_anterior(viewer, space) is True
     cam = viewer.scene.camera
-    # Camera sits anterior and looks posteriorly, i.e. along +z, less the
-    # small yaw that keeps it off the gimbal singularity.
+    # Camera sits anterior and looks posteriorly, i.e. along +z: exactly
+    # axis-aligned here, which napari keeps (see the next test).
     off = np.degrees(np.arccos(np.clip(
         np.dot(np.asarray(cam.view_direction), (0, 0, 1)), -1, 1)))
-    assert off == pytest.approx(GIMBAL_NUDGE_DEG, abs=0.01)
+    assert off == pytest.approx(0.0, abs=0.01)
     assert np.dot(np.asarray(cam.up_direction), (0, 1, 0)) > 0.99
 
 
-def test_an_exactly_axis_aligned_camera_is_flipped_by_napari(viewer):
-    """Why `GIMBAL_NUDGE_DEG` exists. Pins the napari behavior.
+def test_an_exactly_axis_aligned_camera_keeps_its_up_vector(viewer):
+    """Why the home view is not turned off axis. Pins the napari behavior.
 
     At exact gimbal lock napari 0.9.1's vispy round trip -- angles to
-    quaternion and back -- cannot recover the third Euler angle and zeroes it,
-    which returns a NEGATED up vector. The brain renders upside down with no
-    error. napari 0.9.2 keeps the up vector. The nudge stays while the pin
-    allows 0.9.1, and can go once its floor is 0.9.2.
+    quaternion and back -- could not recover the third Euler angle and zeroed
+    it, which returned a NEGATED up vector: the brain rendered upside down
+    with no error, so the camera was turned one degree off axis. napari 0.9.2
+    keeps the up vector, and the pin's floor is 0.9.2.
     """
-    import napari
     from napari._vispy.camera import (
         napari_angles_to_vispy_quat as forward,
     )
@@ -185,7 +184,6 @@ def test_an_exactly_axis_aligned_camera_is_flipped_by_napari(viewer):
         vispy_quat_to_napari_angles as backward,
     )
     from napari.components.camera import Camera
-    from packaging.version import Version
 
     def round_trip(view, up):
         cam = Camera()
@@ -196,18 +194,14 @@ def test_an_exactly_axis_aligned_camera_is_flipped_by_napari(viewer):
         out.angles = tuple(angles)
         return np.asarray(out.up_direction)
 
-    up = np.dot(round_trip((0, 0, 1), (0, 1, 0)), (0, 1, 0))
-    if Version(napari.__version__) >= Version("0.9.2"):
-        assert up > 0.99, "napari 0.9.2 inverts an axis-aligned camera again"
-    else:
-        assert up < -0.99, "napari 0.9.1 no longer inverts an axis-aligned camera"
-    eps = np.tan(np.radians(1.0))
-    nudged = np.array([eps, 0.0, 1.0])
-    nudged /= np.linalg.norm(nudged)
-    assert np.dot(round_trip(tuple(nudged), (0, 1, 0)), (0, 1, 0)) > 0.99
+    for view, up in (((0, 0, 1), (0, 1, 0)), ((0, 1, 0), (1, 0, 0)),
+                     ((1, 0, 0), (0, 0, 1))):
+        assert np.dot(round_trip(view, up), up) > 0.99, (
+            f"napari inverts the camera looking along {view}; the home view "
+            "needs turning off axis again")
 
 
-def test_the_nudge_survives_the_round_trip_for_every_space(registry_root):
+def test_the_home_view_survives_the_round_trip_for_every_space(registry_root):
     from napari._vispy.camera import (
         napari_angles_to_vispy_quat as forward,
     )

@@ -38,7 +38,6 @@ from .scene import (
 )
 from .slicing import DEFAULT_SLICE_AXIS, order_for, polygon_at
 from .view import (
-    GIMBAL_NUDGE_DEG,
     MIRROR_AXIS,
     fit_view,
     install_home_orientation,
@@ -336,7 +335,6 @@ def run(
 __all__ = [
     "BASE_DISPLAY",
     "DIMS_ORDER_XYZ",
-    "GIMBAL_NUDGE_DEG",
     "MIRROR_AXIS",
     "REFERENCE_CONTOUR_COLOR",
     "ROLE_DISPLAY",
