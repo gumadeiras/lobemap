@@ -71,7 +71,7 @@ DYNAMIC = {
     ("core/resolve.py", "template"),
     ("core/spaces.py", "name"),
     ("ingest/synapse_buckets.py", "template_name"),
-    ("viewer/contours.py", "name"),
+    ("viewer/triangulate.py", "name"),
     ("viewer/layers.py", "key"),
 }
 
@@ -342,7 +342,7 @@ def test_napari_triangulation_without_bermuda():
     from lobemap.viewer.napari_private import triangulate_edge, triangulate_face
 
     square = np.array([[0, 0], [0, 1], [1, 1], [1, 0]], np.float32)
-    used = "viewer.contours outlines and fills without bermuda"
+    used = "viewer.triangulate without bermuda"
     where = "napari.layers.shapes._shapes_utils.triangulate_edge"
     with reaching(where, used):
         centers, offsets, triangles = triangulate_edge(square)
@@ -358,7 +358,7 @@ def test_napari_triangulation_without_bermuda():
 def test_bermuda_strokes_and_fills():
     bermuda = pytest.importorskip("bermuda")
     ring = np.array([[0, 0], [0, 2], [1, 3], [2, 2], [2, 0]], np.float32)
-    used = "viewer.contours outlines and fills"
+    used = "viewer.triangulate outlines and fills"
     where = "bermuda.triangulate_path_edge(ring, closed=, limit=)"
     with reaching(where, used):
         centers, offsets, triangles = bermuda.triangulate_path_edge(ring, closed=True,

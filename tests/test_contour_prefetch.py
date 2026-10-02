@@ -150,16 +150,16 @@ def test_a_plane_cut_ahead_draws_exactly_as_one_cut_on_the_spot(monkeypatch, spa
 @pytest.fixture
 def ui_fills(monkeypatch):
     """Every fill triangulated from now on: True for each on the UI thread."""
-    from lobemap.viewer import contours
+    from lobemap.viewer import triangulate
 
     calls = []
-    real = contours._fill
+    real = triangulate.fill
 
     def spy(ring):
         calls.append(threading.current_thread() is threading.main_thread())
         return real(ring)
 
-    monkeypatch.setattr(contours, "_fill", spy)
+    monkeypatch.setattr(triangulate, "fill", spy)
     return calls
 
 

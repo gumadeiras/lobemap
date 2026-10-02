@@ -281,13 +281,13 @@ def test_a_fill_never_overlaps_itself(monkeypatch, overlapping):
 
     from viewer_harness import ring_area
 
-    from lobemap.viewer import contours, napari_private
+    from lobemap.viewer import napari_private, triangulate
 
-    assert len(contours._TURNS) == 18
+    assert len(triangulate._TURNS) == 18
 
     calls = []
 
-    def triangulate(polygons):
+    def bermuda_face(polygons):
         from scipy.spatial import cKDTree
 
         (ring,) = polygons
@@ -302,10 +302,10 @@ def test_a_fill_never_overlaps_itself(monkeypatch, overlapping):
         return faces, ring
 
     monkeypatch.setitem(sys.modules, "bermuda",
-                        types.SimpleNamespace(triangulate_polygons_face=triangulate))
+                        types.SimpleNamespace(triangulate_polygons_face=bermuda_face))
     u = np.array([[0, 0], [3, 0], [3, 3], [2, 3], [2, 1], [1, 1], [1, 3], [0, 3]], float)
-    points, faces = contours._fill(u + 100.0)
-    assert len(calls) == min(overlapping + 1, len(contours._TURNS))
+    points, faces = triangulate.fill(u + 100.0)
+    assert len(calls) == min(overlapping + 1, len(triangulate._TURNS))
     assert _triangle_area(points, faces) == pytest.approx(ring_area(u), rel=1e-12)
     assert {tuple(p) for p in points[np.unique(faces)]} == {tuple(p) for p in u + 100.0}
 
@@ -318,14 +318,14 @@ def test_a_fill_covers_its_ring_where_bermuda_overlaps(registry):
     import bermuda
     from viewer_harness import ring_area
 
-    from lobemap.viewer.contours import _fill
+    from lobemap.viewer.triangulate import fill
 
     meshset = registry.mesh("benton2025_glomeruli")
     (loop,) = MeshSections(meshset).at(1, 247.0)[meshset.names.index("VP4")]
     ring = loop[:-1][:, [0, 2]]
     faces, points = bermuda.triangulate_polygons_face([np.asarray(ring, np.float32)])
     assert _triangle_area(points, faces) > 1.02 * ring_area(ring), "the case is gone"
-    points, faces = _fill(ring)
+    points, faces = fill(ring)
     assert _triangle_area(points.astype(np.float32), faces) == pytest.approx(
         ring_area(ring), rel=1e-9)
 
@@ -340,7 +340,7 @@ def test_a_ring_bermuda_panics_on_is_drawn_by_napari(monkeypatch):
 
     from viewer_harness import ring_area
 
-    from lobemap.viewer import contours, napari_private
+    from lobemap.viewer import napari_private, triangulate
 
     def panic(*args, **kwargs):
         raise PanicException("Segment not found in interval")
@@ -348,9 +348,9 @@ def test_a_ring_bermuda_panics_on_is_drawn_by_napari(monkeypatch):
     monkeypatch.setitem(sys.modules, "bermuda", types.SimpleNamespace(
         triangulate_polygons_face=panic, triangulate_path_edge=panic))
     u = np.array([[0, 0], [3, 0], [3, 3], [2, 3], [2, 1], [1, 1], [1, 3], [0, 3]], float)
-    points, faces = contours._fill(u)
+    points, faces = triangulate.fill(u)
     assert _triangle_area(points, faces) == pytest.approx(ring_area(u), rel=1e-12)
-    vertices, triangles = contours._stroke(u, 0.35)
+    vertices, triangles = triangulate.stroke(u, 0.35)
     centers, offsets, want = napari_private.triangulate_edge(u.astype(np.float32))
     np.testing.assert_array_equal(vertices, centers + 0.35 * offsets)
     np.testing.assert_array_equal(triangles, want)
@@ -362,7 +362,7 @@ def test_a_section_bermuda_panics_on_is_filled_exactly(registry):
     import bermuda
     from viewer_harness import ring_area
 
-    from lobemap.viewer.contours import _fill
+    from lobemap.viewer.triangulate import fill
 
     meshset = registry.mesh("neuprint_cns_neuropil")
     loops = MeshSections(meshset).at(1, 198.0)[meshset.names.index("LA(L)")]
@@ -370,7 +370,7 @@ def test_a_section_bermuda_panics_on_is_filled_exactly(registry):
     with pytest.raises(BaseException, match="Segment not found") as caught:
         bermuda.triangulate_polygons_face([np.asarray(ring, np.float32)])
     assert type(caught.value).__name__ == "PanicException", "the case is gone"
-    points, faces = _fill(ring)
+    points, faces = fill(ring)
     assert _triangle_area(points.astype(np.float32), faces) == pytest.approx(
         ring_area(ring), rel=1e-9)
 

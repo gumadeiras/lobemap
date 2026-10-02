@@ -1,6 +1,6 @@
 """A section bermuda overlaps triangles in is filled exactly, and fast.
 
-`contours._fill` hands a ring that is not star-shaped to bermuda, turned
+`triangulate.fill` hands a ring that is not star-shaped to bermuda, turned
 each way in `_TURNS` until one covers it, and leaves to napari's own
 pure-Python triangulation -- tens to hundreds of milliseconds a ring, on the
 UI thread when a step draws a plane the prefetch has not reached -- only a
@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from viewer_harness import ring_area
 
-from lobemap.viewer import contours, napari_private
+from lobemap.viewer import napari_private, triangulate
 from lobemap.viewer.sections import MeshSections
 
 pytest.importorskip("bermuda")
@@ -39,7 +39,7 @@ def _square_turns_overlap(ring) -> bool:
     """Whether bermuda overlaps triangles in the ring however it is reflected."""
     import bermuda
 
-    for turn in contours._SQUARE:
+    for turn in triangulate._SQUARE:
         turned = np.ascontiguousarray(ring.astype(float) @ turn.T, np.float32)
         faces, points = bermuda.triangulate_polygons_face([turned])
         if _area(points, faces) == pytest.approx(ring_area(ring), rel=1e-6):
@@ -57,7 +57,7 @@ def test_a_ring_bermuda_overlaps_however_reflected_is_filled_exactly_without_nap
     ring = np.ascontiguousarray(max(loops, key=len)[:-1][:, [d for d in range(3) if d != axis]],
                                 np.float32)
     assert _square_turns_overlap(ring), "the case is gone"
-    points, faces = contours._fill(ring)
+    points, faces = triangulate.fill(ring)
     assert _area(points, faces) == pytest.approx(ring_area(ring), rel=1e-9)
     assert {tuple(p) for p in points[np.unique(faces)]} == {tuple(p) for p in
                                                             ring.astype(float)}
@@ -74,7 +74,7 @@ def test_a_ring_that_crosses_itself_is_filled_by_bermuda_alone(no_napari, ring):
 
     ring = np.asarray(ring, np.float32) + 100.0
     faces, points = bermuda.triangulate_polygons_face([ring])
-    got_points, got_faces = contours._fill(ring)
+    got_points, got_faces = triangulate.fill(ring)
     assert _area(got_points, got_faces) == pytest.approx(_area(points, faces), rel=1e-12)
 
 
@@ -88,5 +88,5 @@ def test_the_male_cns_gng_at_z_155_is_filled_by_bermuda_alone(registry, no_napar
     ring = np.ascontiguousarray(max(loops, key=len)[:-1][:, [0, 1]], np.float32)
     faces, points = bermuda.triangulate_polygons_face([ring])
     assert len(points) > len(ring), "the case is gone"
-    got_points, got_faces = contours._fill(ring)
+    got_points, got_faces = triangulate.fill(ring)
     assert _area(got_points, got_faces) == pytest.approx(_area(points, faces), rel=1e-12)
