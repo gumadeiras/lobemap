@@ -18,8 +18,11 @@ by the same calls, so a checkout without data still checks it.
 
 `CHECKED` names the test that checks each private name, and
 `test_every_private_name_src_reaches_is_checked` scans `src/` so that a new
-one cannot go unchecked. An attribute name the scan cannot read from the
-source must be listed in `DYNAMIC`, so it cannot hide one either.
+one cannot go unchecked. Any string in `src/` that reads as a private name
+or a private module path counts as reaching it, however it is used:
+`operator.attrgetter`, `vars()`, `__dict__`, `importlib`, `sys.modules`. An
+attribute name the scan cannot read from the source must be listed in
+`DYNAMIC`, so it cannot hide one either.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import inspect
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -77,6 +81,9 @@ DYNAMIC = {
 
 _ATTR_CALLS = ("getattr", "hasattr", "setattr", "delattr")
 
+#: A string that reads as a name or a dotted module path.
+_NAMEISH = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
+
 
 def need(ok, what: str, used_by: str) -> None:
     assert ok, f"{what} is missing or has changed shape; {used_by} relies on it"
@@ -113,7 +120,9 @@ def _scan(source: str) -> tuple[list[tuple[str, int]], list[str]]:
 
     A name given to `getattr` and the like is read from a literal, from a
     module-level string constant, or from the target of a loop over literal
-    strings; any other is returned as computed.
+    strings; any other is returned as computed. Any string that reads as a
+    private name, or as a module path with a private part, counts wherever
+    it is.
     """
     tree = ast.parse(source)
     known = {}
@@ -133,10 +142,21 @@ def _scan(source: str) -> tuple[list[tuple[str, int]], list[str]]:
     def own(value) -> bool:
         return isinstance(value, ast.Name) and value.id in ("self", "cls")
 
-    found, computed = [], []
+    # A name `getattr` and the like look up on `self` is lobemap's own.
+    owned = {id(node.args[1]) for node in ast.walk(tree)
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+             and node.func.id in _ATTR_CALLS and len(node.args) >= 2
+             and own(node.args[0])}
+
+    found, computed = set(), []
     for node in ast.walk(tree):
         names = []
-        if isinstance(node, ast.Attribute) and _private(node.attr):
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and id(node) not in owned and _NAMEISH.fullmatch(node.value)
+                and any(_private(part) and part != "_"
+                        for part in node.value.split("."))):
+            names.append(node.value)
+        elif isinstance(node, ast.Attribute) and _private(node.attr):
             if not own(node.value):
                 names.append(node.attr)
         elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
@@ -157,8 +177,8 @@ def _scan(source: str) -> tuple[list[tuple[str, int]], list[str]]:
             if any(part.startswith("_") for part in node.module.split(".")):
                 names.append(node.module)
             names += [alias.name for alias in node.names if _private(alias.name)]
-        found += [(name, node.lineno) for name in names]
-    return found, computed
+        found |= {(name, node.lineno) for name in names}
+    return sorted(found), computed
 
 
 def _private_names() -> tuple[dict[str, list[str]], set[tuple[str, str]]]:
@@ -190,14 +210,24 @@ getattr(other, ATTR)
 for name in ("_looped", "public"):
     getattr(other, name)
 getattr(other, computed_at_run_time)
+operator.attrgetter("_attrgot")(other)
+vars(other)["_in_vars"]
+other.__dict__["_in_dict"]
+importlib.import_module("napari._imported")
+__import__("napari._dunder_imported")
+sys.modules["napari._in_sys_modules"]
 self._own
 getattr(self, "_own_too")
+"_ a sentence, not a name"
+"__main__"
+"a_b".split("_")
 """
     found, computed = _scan(source)
-    assert sorted(name for name, _ in found) == sorted([
+    assert sorted({name for name, _ in found}) == sorted([
         "napari._vispy.visuals", "napari._qt.qt_main_window", "napari._vispy",
         "_shapes_utils", "_attribute", "_got", "_has", "_set", "_deleted",
-        "_from_a_constant", "_looped"])
+        "_from_a_constant", "_looped", "_attrgot", "_in_vars", "_in_dict",
+        "napari._imported", "napari._dunder_imported", "napari._in_sys_modules"])
     assert computed == ["computed_at_run_time"]
 
 
