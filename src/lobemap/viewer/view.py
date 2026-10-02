@@ -297,6 +297,22 @@ def restore_view(viewer, state: dict) -> None:
     viewer.title = state["title"]
 
 
+def centre_sliders(viewer, lo, hi, step) -> None:
+    """Put every slider where napari puts it when the first layer it is given
+    spans `lo` to `hi` in steps of `step`.
+
+    That is the layer's middle step (`Dims._go_to_center_step`), put on the
+    viewer's own slider grid, where napari snapped it once more layers had
+    been added.
+    """
+    lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+    step = np.broadcast_to(np.asarray(step, float), lo.shape)
+    middle = lo + np.floor(np.floor((hi - lo) / step) / 2) * step
+    dims = viewer.dims
+    dims.current_step = tuple(round((m - r.start) / (r.step or 1))
+                              for m, r in zip(middle, dims.range, strict=True))
+
+
 def mirror_center(layers, axis: int = MIRROR_AXIS) -> float:
     """Mid-point of `layers` along one axis, in world micrometers.
 
@@ -354,6 +370,7 @@ __all__ = [
     "MIRROR_AXIS",
     "apply_mirror",
     "capture_view",
+    "centre_sliders",
     "fit_view",
     "install_home_orientation",
     "install_initial_fit",

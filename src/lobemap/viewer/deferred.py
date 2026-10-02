@@ -103,25 +103,10 @@ class Deferred:
             if active in selected:
                 layers.selection.active = active
 
-    def centre_on(self, name: str) -> None:
-        """Put every slider where napari puts it when `name` is the first layer.
-
-        napari opens each slider on the middle step of the first layer it is
-        given, counted in that layer's own steps, a Surface's being 1 data
-        unit (`Dims._go_to_center_step`). A space used to add its first
-        neuropil set first; deferred, the first layer is the image, and a
-        slice axis chosen right after the open landed on another plane, 26 um
-        off on x in FAFB14. The point is then put on the scene's slider grid,
-        as napari snapped it there once the other layers were added.
-        """
-        bounds = self._bounds.get(name)
-        if bounds is None:
-            return
-        lo, hi = (np.asarray(b, float) for b in bounds)
-        middle = lo + np.floor(np.floor(hi - lo) / 2)
-        dims = self.viewer.dims
-        dims.current_step = tuple(round((m - r.start) / (r.step or 1))
-                                  for m, r in zip(middle, dims.range, strict=True))
+    def bounds(self, name: str):
+        """The lowest and highest vertex of a part's mesh, per axis, or None if
+        it could not be read. After `hold`."""
+        return self._bounds.get(name)
 
     def _on_eye(self, name: str) -> None:
         """Switched on in the layer list: build the part and show it.

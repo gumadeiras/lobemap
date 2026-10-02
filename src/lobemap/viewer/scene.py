@@ -34,6 +34,7 @@ from .slicing import (
 from .view import (
     MIRROR_AXIS,
     apply_mirror,
+    centre_sliders,
     fit_view,
     install_home_orientation,
     mirror_center,
@@ -298,10 +299,23 @@ def build_scene(
         for surface in surfaces.values():
             surface.sync()
         show_images(images)
-    elif into.deferred is not None:
-        into.deferred.hold(into.all_layers())
-        if parts[0].reference:              # what napari centred on when built first
-            into.deferred.centre_on(parts[0].name)
+    else:
+        if into.deferred is not None:
+            into.deferred.hold(into.all_layers())
+        # napari opens the sliders mid-way along the first layer it is
+        # given, and a scene built whole adds its first neuropil set first,
+        # or else its image. Deferred, that set is no layer yet, and a scene
+        # built beside the one it replaces is not the first: so a slice axis
+        # chosen right after the open landed on another plane, 26 um off on x
+        # in FAFB14. The sliders are put there, on the grid there is.
+        first = parts[0]
+        bounds = (into.deferred.bounds(first.name)
+                  if first.reference and into.deferred is not None else None)
+        if bounds is not None:
+            centre_sliders(viewer, *bounds, step=1.0)
+        elif images:
+            extent = viewer.layers.get_extent([images[0]])
+            centre_sliders(viewer, *extent.world, step=extent.step)
 
     # Anatomical names for the dimension sliders and napari's own axis
     # overlay. No layer of our own: see `viewer/axes.py`. It shows the

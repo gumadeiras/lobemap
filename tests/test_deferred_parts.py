@@ -165,6 +165,33 @@ def test_a_slice_axis_chosen_right_after_the_open_lands_where_it_did(monkeypatch
         assert_rows_match_drawing(session(viewer))
 
 
+#: The same, after switching to the space from FAFB14 opened in 2D, along x
+#: and y. Not z, the slice axis FAFB14 opens on: eaa535f tore the old scene
+#: down first, and a scene built beside it now lands on the grid both share.
+EAA535F_SWITCHED = {
+    "JRCFIB2018F": (137.25, 270.5),
+    "JRCFIB2022M": (435.35, 233.8),
+    "GRABE": (130.56, 87.04),
+}
+
+
+@pytest.mark.parametrize("axis", [0, 1])
+@pytest.mark.parametrize("space", list(EAA535F_SWITCHED))
+def test_a_slice_axis_chosen_right_after_a_switch_lands_where_it_did(monkeypatch, space,
+                                                                     axis):
+    with launched(monkeypatch, "view", "FAFB14", "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        switch_to(viewer, space)
+        assert session(viewer).space == space
+        control = switcher(viewer).slice
+        control.setCurrentIndex(control.findData(axis))
+        pump()
+        assert int(viewer.dims.order[0]) == axis
+        assert viewer.dims.point[axis] == pytest.approx(EAA535F_SWITCHED[space][axis],
+                                                        abs=1e-3)
+        assert_rows_match_drawing(session(viewer))
+
+
 @pytest.mark.parametrize("mirror", [False, True])
 @pytest.mark.parametrize(("space", "name"), DEFERRED)
 def test_building_a_deferred_part_moves_neither_the_sliders_nor_the_plane(
