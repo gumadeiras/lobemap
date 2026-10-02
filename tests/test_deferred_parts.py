@@ -21,9 +21,10 @@ from viewer_harness import (
     hover,
     launched,
     layer_names,
-    oriented_volume,
+    node_determinant,
     pump,
     session,
+    shaded_normals,
     signed_volume,
     switch_to,
     switcher,
@@ -310,9 +311,12 @@ def test_a_part_built_under_the_mirror_is_drawn_mirrored(monkeypatch, space, nam
 
         tab = _open_tab(sess.panel, name)
         surface, contour = tab.surface, sess.contours[name]
-        for layer in (surface.layer, contour.layer):
-            np.testing.assert_allclose(layer.affine.affine_matrix,
-                                       mirror_matrix(3, center), atol=1e-9)
+        # The outlines ride the affine; the surface reflects its vertices,
+        # and so carries none, a stand-in it took over included.
+        np.testing.assert_allclose(contour.layer.affine.affine_matrix,
+                                   mirror_matrix(3, center), atol=1e-9)
+        np.testing.assert_allclose(surface.layer.affine.affine_matrix, np.eye(4), atol=1e-9)
+        assert surface.mirrored
         # The whole mesh, reflected about the scene's mirror plane.
         x = surface.meshset.vertices[:, MIRROR_AXIS]
         lo, hi = surface.layer.extent.world[:, MIRROR_AXIS]
@@ -326,13 +330,18 @@ def test_a_part_built_under_the_mirror_is_drawn_mirrored(monkeypatch, space, nam
         assert_renders_loops(contour)
         assert_rows_match_drawing(sess)
 
-        # Re-wound for the reflection, as a part built before the mirror
-        # is: its triangles face out of the mesh as the GPU draws them.
-        v, f, _ = surface.meshset.select(range(surface.meshset.n_compartments))
+        # Lit from outside, as a part built before the mirror is: read in 3D
+        # off the node vispy shades, its geometry is not inside-out and its
+        # transform is proper (`AtlasSurface._present`).
+        viewer.dims.ndisplay = 3
+        pump(300)
+        v, f, _ = surface.meshset.select(sorted(surface.selection))
         plain = signed_volume(np.asarray(v, float), np.asarray(f))
         assert plain > 0, "unmirrored normals already point inward"
-        assert oriented_volume(surface) == pytest.approx(plain, rel=1e-6), (
-            "the winding was not reversed under the mirror")
+        assert shaded_normals(viewer, surface)[0] == pytest.approx(plain, rel=1e-4), (
+            "the reflected geometry is inside-out under the mirror")
+        assert node_determinant(viewer, surface) > 0, (
+            "the surface is reflected by a transform, which lights it from inside")
 
 
 @pytest.mark.parametrize("space", STAINED)

@@ -9,16 +9,18 @@ written after breaking:
 - no anatomical arrow lands on a world arrow -- and under a mirror the
   world arrows move too, so the sign choice has to be made against where
   they are drawn rather than against +x/+y/+z;
-- the surface winding is reversed, so the triangles stay outward-facing
-  under a reflection. This does not fix the shading, which still reads as
-  lit from inside; see `AtlasSurface._oriented`.
+- the normals vispy shades with stay outward under the mirror, and the
+  surface node's transform stays PROPER: the surfaces reflect their own
+  vertices instead of riding on `layer.affine`, because a determinant -1
+  node transform flips `gl_FrontFacing`, by which vispy's smooth shading
+  negates the normal (`AtlasSurface._present`).
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
-from viewer_harness import oriented_volume
+from viewer_harness import node_determinant, shaded_normals, signed_volume
 
 from lobemap.core.model import anatomical_axes, anatomical_triad
 from lobemap.viewer.app import MIRROR_AXIS, load_space
@@ -88,46 +90,121 @@ def test_mirrored_arrows_avoid_the_reflected_world_arrows(registry):
 
 
 @pytest.mark.requires_data
-def test_mirroring_reverses_the_surface_winding(registry):
-    """Otherwise every triangle faces inward under the reflection."""
+def test_the_shaded_normals_stay_outward_under_a_mirror(registry):
+    """Neither the normals nor the facing may invert.
+
+    Read off the node in 3D, the geometry as vispy shades it. What matters
+    is that mirroring does not change it, and that the node transform stays
+    proper so `gl_FrontFacing` is not flipped underneath it.
+    """
     napari = pytest.importorskip("napari")
-    viewer = napari.Viewer(show=False)
+    viewer = napari.Viewer(show=False, ndisplay=3)
     try:
         session = load_space(viewer, registry, "GRABE", fit=False)
+        viewer.dims.ndisplay = 3
         surface = next(iter(session.surfaces.values()))
-
-        plain = oriented_volume(surface)
-        assert plain > 0, "unmirrored normals already point inward"
+        volume, outward = shaded_normals(viewer, surface)
+        assert volume > 0, "unmirrored geometry is already inside-out"
+        assert outward > 0.6, f"unmirrored normals only {outward:.1%} outward"
+        assert node_determinant(viewer, surface) > 0
 
         session.set_mirror(True)
-        assert surface.mirrored
-        mirrored = oriented_volume(surface)
-        assert mirrored > 0, (
-            "the winding was not reversed, so every triangle faces inward "
-            "under the reflection"
-        )
-        assert mirrored == pytest.approx(plain, rel=1e-6)
+        mirrored_volume, mirrored_outward = shaded_normals(viewer, surface)
+        assert mirrored_volume == pytest.approx(volume, rel=1e-4), (
+            "the reflected geometry is inside-out: the vertices were "
+            "reflected without the winding being reversed")
+        assert mirrored_outward == pytest.approx(outward, abs=0.02), (
+            f"mirroring moved the normals: {outward:.1%} -> {mirrored_outward:.1%}")
+        assert node_determinant(viewer, surface) > 0, (
+            "the surface is reflected by its affine, which flips "
+            "gl_FrontFacing and lights it from inside")
 
         session.set_mirror(False)
-        assert oriented_volume(surface) > 0
+        assert shaded_normals(viewer, surface)[0] == pytest.approx(volume, rel=1e-4)
     finally:
         viewer.close()
 
 
 @pytest.mark.requires_data
-def test_the_winding_survives_a_selection_change(registry):
-    """compact() re-uploads from the MeshSet, so it must re-wind too."""
+def test_the_mirror_reflects_vertices_and_reverses_the_winding(registry):
+    """Both, together: either one alone inverts the shading."""
     napari = pytest.importorskip("napari")
     viewer = napari.Viewer(show=False)
     try:
         session = load_space(viewer, registry, "GRABE", fit=False)
         surface = next(iter(session.surfaces.values()))
+        v0 = np.array(surface.layer.data[0], copy=True)
+        f0 = np.array(surface.layer.data[1], copy=True)
+
+        session.set_mirror(True)
+        v1 = np.asarray(surface.layer.data[0])
+        f1 = np.asarray(surface.layer.data[1])
+        assert np.array_equal(f1, f0[:, ::-1]), "the winding was not reversed"
+        other = [k for k in range(3) if k != MIRROR_AXIS]
+        assert np.allclose(v1[:, other], v0[:, other], atol=1e-4)
+        assert np.allclose(v1[:, MIRROR_AXIS] + v0[:, MIRROR_AXIS],
+                           2.0 * session.mirror_center, atol=1e-2), (
+            "the vertices were not reflected about the measured mid-plane")
+        affine = np.asarray(surface.layer.affine.affine_matrix)
+        assert np.allclose(affine, np.eye(affine.shape[0])), (
+            "the surface carries the mirror on its affine")
+    finally:
+        viewer.close()
+
+
+@pytest.mark.requires_data
+def test_the_reflection_survives_a_selection_change(registry):
+    """compact() re-uploads from the MeshSet, so it must reflect too."""
+    napari = pytest.importorskip("napari")
+    viewer = napari.Viewer(show=False, ndisplay=3)
+    try:
+        session = load_space(viewer, registry, "GRABE", fit=False)
+        viewer.dims.ndisplay = 3
+        surface = next(iter(session.surfaces.values()))
         session.set_mirror(True)
         surface.set_selection(range(0, surface.meshset.n_compartments, 2))
         surface.compact()
-        assert oriented_volume(surface) > 0, (
-            "compaction dropped the mirrored winding"
-        )
+        v, f, _ = surface.meshset.select(sorted(surface.selection))
+        assert shaded_normals(viewer, surface)[0] == pytest.approx(
+            signed_volume(np.asarray(v, float), np.asarray(f)), rel=1e-4), (
+            "compaction dropped the reflection or its winding")
+        assert np.asarray(surface.layer.data[0])[:, MIRROR_AXIS].mean() == pytest.approx(
+            2.0 * session.mirror_center - np.asarray(v, float)[:, MIRROR_AXIS].mean(),
+            abs=1e-2)
+    finally:
+        viewer.close()
+
+
+@pytest.mark.requires_data
+def test_hover_names_the_same_glomerulus_under_the_mirror(registry):
+    """A ray through a glomerulus picks it, mirrored or not.
+
+    The view ray comes in the layer's own coordinates, which the mirror
+    reflects with the vertices, and the pick tests the MeshSet's: the ray
+    has to be reflected back, or hover names the wrong side.
+    """
+    napari = pytest.importorskip("napari")
+    viewer = napari.Viewer(show=False, ndisplay=3)
+    try:
+        session = load_space(viewer, registry, "GRABE", fit=False)
+        viewer.dims.ndisplay = 3
+        surface = next(iter(session.surfaces.values()))
+        rays = []
+        for index in range(0, surface.meshset.n_compartments, 9):
+            v, _ = surface.meshset.compartment(index)
+            rays.append((np.asarray(v, float).mean(axis=0), np.array([0.3, 0.2, 0.93])))
+        plain = [surface.pick(c, d, (0, 1, 2)) for c, d in rays]
+        assert sum(hit is not None for hit in plain) >= len(rays) // 2, plain
+
+        session.set_mirror(True)
+        center = session.mirror_center
+        mirrored = []
+        for c, d in rays:
+            c, d = c.copy(), d.copy()
+            c[MIRROR_AXIS] = 2.0 * center - c[MIRROR_AXIS]
+            d[MIRROR_AXIS] = -d[MIRROR_AXIS]
+            mirrored.append(surface.pick(c, d, (0, 1, 2)))
+        assert mirrored == plain
     finally:
         viewer.close()
 
@@ -146,14 +223,16 @@ def test_mirror_moves_every_layer_and_keeps_the_data(registry):
         extent_before = viewer.layers.extent.world.copy()
 
         session.set_mirror(True)
-        for layer in layers:
+        for layer in session.affine_layers():
             affine = np.asarray(layer.affine.affine_matrix)
             assert affine[MIRROR_AXIS, MIRROR_AXIS] == pytest.approx(-1.0), (
                 f"{layer.name} was not reflected"
             )
+        for surf in session.surfaces.values():
+            assert surf.mirrored, f"{surf.name} was not reflected"
 
         assert np.array_equal(surface.meshset.compartment(0)[0], vertices), (
-            "the mirror rewrote the mesh instead of transforming the view"
+            "the mirror rewrote the MeshSet instead of what is uploaded"
         )
         # Reflecting about the data's own mid-plane leaves the scene put,
         # rather than throwing it across the origin.
@@ -165,6 +244,8 @@ def test_mirror_moves_every_layer_and_keeps_the_data(registry):
             assert np.allclose(affine, np.eye(affine.shape[0])), (
                 f"{layer.name} kept a transform after unmirroring"
             )
+        for surf in session.surfaces.values():
+            assert not surf.mirrored, f"{surf.name} stayed reflected"
     finally:
         viewer.close()
 

@@ -295,18 +295,53 @@ def assert_renders_loops(contour, tol: float = 1e-3) -> None:
 
 
 def signed_volume(vertices, faces) -> float:
-    """Positive when the winding puts the normals outward."""
+    """Positive when the winding puts the normals outward.
+
+    Summed about the mesh's own mean vertex, not the world origin: a
+    closed mesh gives the same volume about any point, and a small one far
+    from the origin otherwise loses it to cancellation, a percent for a
+    32 um3 neuropil set some hundred um out.
+    """
+    vertices = np.asarray(vertices, float)
+    vertices = vertices - vertices.mean(axis=0)
     a, b, c = (vertices[faces[:, k]] for k in range(3))
     return float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6.0)
 
 
-def oriented_volume(surface) -> float:
-    """Enclosed volume of a surface layer as the GPU sees it: its data
-    through its affine, the mirror included."""
-    v = np.asarray(surface.layer.data[0], float)
-    f = np.asarray(surface.layer.data[1])
-    affine = np.asarray(surface.layer.affine.affine_matrix)
-    return signed_volume(v @ affine[:3, :3].T + affine[:3, -1], f)
+def shaded_normals(viewer, surface) -> tuple[float, float]:
+    """(signed volume, share of outward normals) of a surface as vispy
+    shades it, read in 3D off its vispy node.
+
+    Not off the napari layer: napari reverses the winding on upload, so the
+    faces a layer holds are not the faces shaded, and in 2D the node holds a
+    flat slice whose volume is zero. The share is of the first compartment's
+    vertex normals pointing away from its centroid; glomeruli are not
+    convex, so about 77% is what outward looks like.
+    """
+    from lobemap.viewer.napari_private import layer_visual
+
+    mesh = layer_visual(viewer, surface.layer).node.mesh_data
+    v = np.asarray(mesh.get_vertices(), float)
+    f = np.asarray(mesh.get_faces())
+    n = np.asarray(mesh.get_vertex_normals(), float)
+    values = np.asarray(surface.layer.data[2])
+    assert len(values) == len(v), "the node is not in step with the layer"
+    first = (values == values[0]) & (np.linalg.norm(n, axis=1) > 1e-12)
+    center = v[first].mean(axis=0)
+    outward = float(np.mean(np.einsum("ij,ij->i", n[first], v[first] - center) > 0))
+    return signed_volume(v, f), outward
+
+
+def node_determinant(viewer, surface) -> float:
+    """Determinant of a surface node's visual-to-scene transform: negative
+    when napari reflects it, which flips `gl_FrontFacing` and so inverts
+    vispy's smooth shading (`AtlasSurface._present`)."""
+    from lobemap.viewer.napari_private import layer_visual
+
+    node = layer_visual(viewer, surface.layer).node
+    transform = node.transforms.get_transform("visual", "scene")
+    origin = np.asarray(transform.map(np.zeros((3, 3))))[:, :3]
+    return float(np.linalg.det(np.asarray(transform.map(np.eye(3)))[:, :3] - origin))
 
 
 def mode_layer(surface, contour=None):
@@ -351,16 +386,18 @@ def planes_cut(surface) -> set[int]:
     """Checked compartments the current 2D plane actually cuts.
 
     A fresh section of the atlas, sharing no cache with the viewer, at the
-    plane on screen: the slider's world point taken into the layer's data
-    through its own transform, so under the mirror too. A compartment whose
-    bounds hold the plane but whose surface does not reach it -- a tangent
-    plane, a concave side -- is not cut.
+    plane on screen: the slider's world point taken into the MeshSet's frame
+    through the contour layer's transform, which carries the mirror -- the
+    surface reflects its own vertices instead (`AtlasSurface._present`). A
+    compartment whose bounds hold the plane but whose surface does not reach
+    it -- a tangent plane, a concave side -- is not cut.
     """
     from lobemap.viewer.sections import MeshSections
 
     viewer = surface.viewer
     axis = int(viewer.dims.order[0])
-    position = float(surface.layer.world_to_data(list(viewer.dims.point))[axis])
+    frame = surface.twin.layer if surface.twin is not None else surface.layer
+    position = float(frame.world_to_data(list(viewer.dims.point))[axis])
     cut = MeshSections(surface.meshset).at(axis, position)
     return {i for i in surface.selection if cut.get(i)}
 

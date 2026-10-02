@@ -42,6 +42,9 @@ import threading
 
 import numpy as np
 
+from . import napari_private
+from .view import reflect_vertices
+
 #: What a stand-in is called: its part's name, and that it is not built.
 STANDIN_NAME = "{name} (not opened)"
 
@@ -151,6 +154,22 @@ class Deferred:
             layers.selection.update(selected)
             if active in selected:
                 layers.selection.active = active
+
+    def set_mirror(self, axis: int | None, center: float = 0.0) -> None:
+        """Reflect the stand-ins about `center` along `axis`, or stop.
+
+        By their own corners, as the surfaces reflect their vertices, rather
+        than by `layer.affine`: the surface that takes a stand-in over then
+        has the very bounds it had, and building the part moves no slider.
+        """
+        for name, layer in self.standins.items():
+            if layer not in self.viewer.layers:
+                continue
+            corners = np.stack(self._bounds[name])
+            if axis is not None:
+                corners = reflect_vertices(corners, center, axis)
+            layer.data = (corners, np.zeros((0, 3), dtype=int))
+            napari_private.clear_extent(layer)     # hidden: napari keeps the old one
 
     def bounds(self, name: str):
         """The lowest and highest vertex of a part's mesh, per axis, or None if

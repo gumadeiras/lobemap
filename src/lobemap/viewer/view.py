@@ -3,7 +3,8 @@
 None of this changes the data. The camera is turned onto each space's
 measured anatomy, the view is fitted to the canvas as the window settles,
 the home button restores the anatomical view rather than napari's array
-view, and the mirror reflects every layer by a world transform. A failed
+view, and the mirror reflects every layer, the surfaces by their own vertices
+(`AtlasSurface._present`) and the rest by a world transform. A failed
 space switch gives the view back through `capture_view` and `restore_view`.
 """
 
@@ -327,15 +328,33 @@ def mirror_matrix(ndim: int, center: float, axis: int = MIRROR_AXIS):
     return m
 
 
+def reflect_vertices(vertices, center: float, axis: int = MIRROR_AXIS) -> np.ndarray:
+    """`vertices` reflected x -> 2c - x along `axis`, as float32.
+
+    For the layers that reflect their own geometry rather than ride on
+    `layer.affine` -- the surfaces and their stand-ins (`AtlasSurface._present`).
+    Worked in float64 and rounded once, so a mesh and the stand-in holding
+    its corners get the same reflected bounds to the bit, and building the
+    part moves no slider.
+    """
+    v = np.array(vertices, dtype=np.float32, copy=True)
+    v[:, axis] = (2.0 * float(center) - v[:, axis].astype(np.float64)).astype(np.float32)
+    return v
+
+
 def apply_mirror(layers, on: bool, center: float,
                  axis: int = MIRROR_AXIS) -> None:
-    """Reflect every layer, or put them all back.
+    """Reflect layers that carry no normals, or put them back.
 
     Set on `layer.affine`, which napari applies in WORLD space after the
     layer's own scale and translate. That is what lets one matrix serve
-    meshes in micrometers and images in voxels alike: the images keep the
-    scale and translate that place them, and the reflection composes on
-    top rather than replacing it.
+    contours in micrometers and images in voxels alike: each keeps the
+    scale and translate that place it, and the reflection composes on top
+    rather than replacing it.
+
+    Not for the surfaces: napari loads the affine into the vispy node
+    transform, and a determinant -1 transform there inverts their shading
+    (`AtlasSurface._present`, which reflects their vertices instead).
     """
     for layer in layers:
         ndim = int(getattr(layer, "ndim", 3) or 3)
@@ -357,5 +376,6 @@ __all__ = [
     "mirror_center",
     "mirror_matrix",
     "orient_anterior",
+    "reflect_vertices",
     "restore_view",
 ]

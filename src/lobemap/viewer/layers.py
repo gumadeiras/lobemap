@@ -16,6 +16,8 @@ from __future__ import annotations
 import numpy as np
 
 from ..core.meshfmt import MeshSet
+from . import napari_private
+from .view import reflect_vertices
 
 
 #: A qualitative palette that stays distinguishable at ~60 entries by cycling
@@ -180,10 +182,13 @@ class AtlasSurface:
         shading: str = "smooth",
         visible: bool = True,
         layer=None,
+        mirror: tuple[int, float] | None = None,
     ) -> None:
         """`layer` is a hidden Surface layer to take over rather than add one:
         a stand-in a scene added for this mesh before it was read
-        (`deferred`). It is given everything a new layer would be."""
+        (`deferred`). It is given everything a new layer would be.
+        `mirror` is (axis, center) for a surface built while the view is
+        reflected (`set_mirror`)."""
         self.viewer = viewer
         self.meshset = meshset
         self.name = name
@@ -199,9 +204,9 @@ class AtlasSurface:
         )
         self.compact_delay_ms = compact_delay_ms
         self._timer = None
-        #: Whether the VIEW is reflected. Only the winding depends on it;
-        #: the reflection itself is a world transform on the layer.
-        self.mirrored = False
+        #: (axis, center) while the view is reflected, else None; see
+        #: `_present`.
+        self._mirror = None if mirror is None else (int(mirror[0]), float(mirror[1]))
         #: The layer that draws this selection in 2D -- the slice contours --
         #: once the display mode pairs them. See `sync`.
         self.twin = None
@@ -213,6 +218,7 @@ class AtlasSurface:
         self._syncing = False
         self._resident: list[int] = sorted(self.selection)
         v, f, vals = meshset.select(sorted(self.selection))
+        v, f = self._present(v, f)
         settings = {
             "colormap": step_colormap(self.colors, name=f"{name}-colors"),
             "contrast_limits": contrast_limits_for(n),
@@ -226,7 +232,7 @@ class AtlasSurface:
         }
         if layer is None:
             self.layer = viewer.add_surface(
-                (v, self._oriented(f), vals), name=name, **settings,
+                (v, f, vals), name=name, **settings,
                 # A scene makes its surfaces hidden and lets `sync` show each
                 # in the mode that draws it: napari slices a visible layer as
                 # it is added, so a surface made visible was sliced for nothing
@@ -238,7 +244,7 @@ class AtlasSurface:
             # reasons; a stand-in switched on is being built to be shown.
             layer.visible = False
             layer.shading = settings.pop("shading")
-            layer.data = (v, self._oriented(f), vals)
+            layer.data = (v, f, vals)
             layer.name = name
             for key, value in settings.items():
                 setattr(layer, key, value)
@@ -249,38 +255,55 @@ class AtlasSurface:
 
     # -- orientation -----------------------------------------------------
 
-    def _oriented(self, faces):
-        """Faces wound so the triangles stay outward-facing in the view.
+    def _present(self, vertices, faces):
+        """Geometry as UPLOADED: reflected, with its winding reversed, while
+        the view is reflected.
 
-        A mirror has determinant -1, which reverses the orientation of
-        every triangle, so reversing each one's vertex order is what
-        keeps its normal pointing out of the mesh instead of into it.
+        A surface reflects its own vertices rather than riding on
+        `layer.affine` as the images and contours do. napari loads the
+        affine into the vispy NODE transform, and a determinant -1 transform
+        there reverses the rasterized winding, which flips
+        `gl_FrontFacing`; vispy's smooth shading negates the normal by
+        exactly that (`normal = gl_FrontFacing ? normal : -normal`), so
+        every glomerulus came out lit from inside. Reflecting the vertices
+        keeps the node transform proper, and reversing the winding puts
+        back the orientation the reflection took away.
 
-        It does NOT fix the shading, which is why it was written: under
-        a mirror the glomeruli still read as lit from inside. So vispy
-        is not taking its lighting from this winding, and the cause is
-        unresolved. Kept because outward-facing triangles are correct
-        either way, and measured by the signed volume in
-        `tests/test_mirror.py` -- not by appearance, which it does not
-        change.
+        Re-winding ALONE, as this used to, does nothing visible: it flips
+        the normals and `gl_FrontFacing` together and they cancel. Measured
+        on GRABE in 3D, the node's signed volume and share of outward
+        normals: +2.672e+05 and 76.8% unmirrored,
+        -2.672e+05 and 23.2% under the affine mirror re-wound, +2.672e+05
+        and 76.8% with the vertices reflected.
 
-        Applied here rather than once at the toggle because `compact`
-        re-uploads geometry straight from the MeshSet on a debounce, and
-        a flip written only to the layer would be undone by the next
-        selection change.
+        Applied wherever geometry is uploaded, because `compact` re-uploads
+        straight from the MeshSet on a debounce. The MeshSet itself is never
+        touched, so the data and every measurement taken from it are not.
         """
-        return faces[:, ::-1] if self.mirrored else faces
+        if self._mirror is None:
+            return vertices, faces
+        axis, center = self._mirror
+        return (reflect_vertices(vertices, center, axis),
+                np.ascontiguousarray(faces[:, ::-1]))
 
-    def set_mirrored(self, on: bool) -> None:
-        """Re-wind for a reflected view, or back again."""
-        on = bool(on)
-        if on == self.mirrored:
+    @property
+    def mirrored(self) -> bool:
+        """Whether this surface is drawn reflected."""
+        return self._mirror is not None
+
+    def set_mirror(self, axis: int | None, center: float = 0.0) -> None:
+        """Reflect this surface about `center` along `axis`, or stop."""
+        want = None if axis is None else (int(axis), float(center))
+        if want == self._mirror:
             return
-        self.mirrored = on
+        self._mirror = want
         if not self._resident:
             return
         v, f, vals = self.meshset.select(self._resident)
-        self.layer.data = (v, self._oriented(f), vals)
+        v, f = self._present(v, f)
+        self.layer.data = (v, f, vals)
+        # Moved, not shrunk: a hidden layer would keep its old extent.
+        napari_private.clear_extent(self.layer)
 
     # -- selection -------------------------------------------------------
     #
@@ -444,7 +467,8 @@ class AtlasSurface:
         if not want or want == self._resident:
             return
         v, f, vals = self.meshset.select(want)
-        self.layer.data = (v, self._oriented(f), vals)
+        v, f = self._present(v, f)
+        self.layer.data = (v, f, vals)
         self._resident = want
         self._apply_alpha()
 
@@ -475,6 +499,12 @@ class AtlasSurface:
         if length == 0.0:
             return None
         direction /= length
+        if self._mirror is not None:
+            # The ray is in the uploaded geometry's coordinates, reflected;
+            # the boxes and triangles below are the MeshSet's (`_present`).
+            axis, center = self._mirror
+            start[axis] = 2.0 * center - start[axis]
+            direction[axis] = -direction[axis]
         lo, hi = self._boxes()
         indices = np.array(sorted(self.selection))
         with np.errstate(divide="ignore", invalid="ignore"):

@@ -16,7 +16,7 @@
 - The **Driver line** menu of an atlas tab checks the glomeruli that a sensory or projection neuron line labels, including `Orco-GAL4 & GH146-GAL4`, with the same membership as the 0.1 line presets.
 - The **Slice along** menu chooses the axis 2D steps along. Each choice is named by the nearest anatomical axis and the angle between them, for example `Anterior-Posterior (z, 17.5° off)`, and the image and the contours move together.
 - The **VFB** button opens the Virtual Fly Brain term page of the selected glomerulus.
-- The **Mirror** checkbox shows the space reflected left-right, for display only. Known limitation: under the mirror the glomeruli shade as if lit from inside.
+- The **Mirror** checkbox shows the space reflected left-right, for display only, with the glomeruli lit as they are unmirrored.
 - Hovering names the glomerulus under the cursor in the status bar, in 3D and in 2D, and selects its row.
 - In 3D the corner shows two axis indicators: napari's array axes `x`, `y` and `z`, and the anatomical axes, each labeled by the pole it points at. 2D shows only the array axes. The home button returns to the space's anatomical view, also under the mirror.
 - Each glomerulus keeps one color across the atlases of its space.

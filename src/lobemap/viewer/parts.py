@@ -90,12 +90,13 @@ def contour_styles(parts) -> dict[str, tuple[str, float]]:
 
 
 def make_surface(viewer, registry: Registry, space: str, part: ScenePart,
-                 meshset=None, layer=None) -> AtlasSurface:
+                 meshset=None, layer=None, mirror=None) -> AtlasSurface:
     """The Surface layer of one part, every compartment selected and resident.
 
     Made hidden: `AtlasSurface.sync` shows it in the mode that draws it.
-    `meshset` is the part's mesh if it has been read already, and `layer`
-    a stand-in to take over rather than add a layer (`AtlasSurface`).
+    `meshset` is the part's mesh if it has been read already, `layer` a
+    stand-in to take over rather than add a layer, and `mirror` the view's
+    (axis, center) if it is reflected (`AtlasSurface`).
     """
     if meshset is None:
         meshset = registry.mesh(part.asset.id)
@@ -105,6 +106,7 @@ def make_surface(viewer, registry: Registry, space: str, part: ScenePart,
         surface = AtlasSurface(
             viewer, meshset, name=part.asset.id + _tag(meshset), opacity=0.35,
             blending="additive", shading="none", visible=False, layer=layer,
+            mirror=mirror,
         )
     else:
         atlas = part.atlas
@@ -115,7 +117,7 @@ def make_surface(viewer, registry: Registry, space: str, part: ScenePart,
             # is exactly the atlases sharing its space.
             colors=canonical_colors(atlas.compartments, registry.vocabulary(space)),
             display_names=[c.label for c in atlas.compartments] or None,
-            visible=False, layer=layer,
+            visible=False, layer=layer, mirror=mirror,
         )
     surface.layer.metadata["lobemap"].update(
         id=part.name, asset=part.asset.id, role=part.asset.role

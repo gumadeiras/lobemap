@@ -293,11 +293,18 @@ class SceneSession:
 
     def all_layers(self) -> list:
         """Every layer this session owns."""
-        out = [s.layer for s in self.surfaces.values()]
-        out += [c.layer for c in self.contours.values()]
-        out += [layer for layer in self.images if layer not in out]
+        out = [s.layer for s in self.surfaces.values()] + self.affine_layers()
         if self.deferred is not None:
             out += self.deferred.layers()
+        return out
+
+    def affine_layers(self) -> list:
+        """The layers the mirror moves by `layer.affine`: the contours and
+        images. The surfaces and their stand-ins reflect their own vertices
+        (`AtlasSurface._present`, `Deferred.set_mirror`).
+        """
+        out = [c.layer for c in self.contours.values()]
+        out += [layer for layer in self.images if layer not in out]
         return out
 
     def reflect_axis(self) -> int | None:
@@ -350,8 +357,9 @@ class SceneSession:
         selected, active = list(layers.selection), layers.selection.active
         added = [] if stand_in is None else [stand_in]
         try:
-            surface = make_surface(self.viewer, self.registry, self.space, part, meshset,
-                                   layer=stand_in)
+            surface = make_surface(
+                self.viewer, self.registry, self.space, part, meshset, layer=stand_in,
+                mirror=(MIRROR_AXIS, self.mirror_center) if self.mirrored else None)
             if stand_in is None:
                 added.append(surface.layer)
             surface.set_selection(set())
@@ -366,9 +374,8 @@ class SceneSession:
             self._stack(surface.layer, self._rank(name))
             if contour is not None:
                 self._stack(contour.layer, self._rank(name, contour=True))
-            if self.mirrored:
-                apply_mirror(added, True, self.mirror_center)
-                surface.set_mirrored(True)
+            if self.mirrored and contour is not None:
+                apply_mirror([contour.layer], True, self.mirror_center)
         except BaseException:
             for layer in added:
                 with contextlib.suppress(Exception):
@@ -418,13 +425,16 @@ class SceneSession:
         if on and not self.mirrored:
             self._mirror_center = self.mirror_center
         self.mirrored = bool(on)
-        apply_mirror(self.all_layers(), self.mirrored, self.mirror_center)
-        # The reflection reverses every triangle's orientation, so the
-        # meshes are re-wound to keep them outward-facing. This does not
-        # correct the shading; see `AtlasSurface._oriented`.
+        # Two routes on purpose: the surfaces reflect their own vertices, so
+        # their node transform stays proper and they are lit from outside,
+        # and so do their stand-ins, to the bit; the contours and images
+        # ride on `affine`.
         for surface in self.surfaces.values():
             with contextlib.suppress(Exception):
-                surface.set_mirrored(self.mirrored)
+                surface.set_mirror(self.reflect_axis(), self.mirror_center)
+        if self.deferred is not None:
+            self.deferred.set_mirror(self.reflect_axis(), self.mirror_center)
+        apply_mirror(self.affine_layers(), self.mirrored, self.mirror_center)
         space = self.registry.spaces.get(self.space)
         if space is not None:
             apply_axis_mode(self.viewer, space, mirror_axis=self.reflect_axis())

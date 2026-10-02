@@ -72,6 +72,18 @@ def keep_extent_while_slicing(layer) -> None:
     layer.refresh = _refresh
 
 
+def clear_extent(layer) -> None:
+    """Make napari measure `layer`'s extent again from its data.
+
+    A hidden layer given new data keeps its old extent: napari's `refresh`
+    clears the extent only of a layer it slices then, and slices no hidden
+    one. For geometry that MOVED while hidden -- a surface reflected by its
+    own vertices, `AtlasSurface._present` -- the old extent is wrong, where
+    a hidden layer's extent otherwise only goes stale by shrinking.
+    """
+    layer._clear_extent()
+
+
 def before_slicing(viewer, callback) -> None:
     """Call `callback` whenever the viewer is about to slice its layers.
 
@@ -127,6 +139,7 @@ def triangulate_face(ring):
 
 __all__ = [
     "before_slicing",
+    "clear_extent",
     "data_from_world",
     "gl_state",
     "keep_extent_while_slicing",
