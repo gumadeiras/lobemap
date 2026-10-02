@@ -1,0 +1,6 @@
+id = "neuprint_hemibrain"
+title = "neuPrint hemibrain"
+native_space = "JRCFIB2018F"
+asset = "neuprint_hemibrain_glomeruli"
+citation = "Scheffer LK et al. (2020) eLife 9:e57443"
+doi = "10.7554/eLife.57443"

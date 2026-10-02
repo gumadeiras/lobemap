@@ -1,0 +1,6 @@
+id = "benton2025"
+title = "Benton 2025 (Dataset EV2)"
+native_space = "FAFB14"
+asset = "benton2025_glomeruli"
+citation = "Benton R, et al. (2025) EMBO Rep, Dataset EV2"
+doi = "10.1038/s44319-025-00476-8"

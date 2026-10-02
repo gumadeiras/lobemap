@@ -1,13 +1,30 @@
-.DS_Store
 __pycache__/
 *.py[cod]
 .venv/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-napari.log
-datasets/bates-schlegel-2020/slices/
-datasets/benton-2025/data/source/*.pdf
-datasets/comparative-atlases/data/source/*.pdf
-datasets/grabe-2015/data/source/Grabe et al. - *.pdf
-datasets/laissue-1999/data/source/*.pdf
+*.egg-info/
+build/
+dist/
+.DS_Store
+
+# local caches of bridged/derived geometry and downloaded transforms
+cache/
+data/cache/
+
+# Built assets. Everything under registry/data is derived, and now all of
+# it is fetched rather than tracked: 14 artifacts, 2.51 GB, published as
+# release assets. `registry/manifest.toml` is the source of truth for what
+# belongs here and what each file's sha256 must be; `lobemap fetch` puts it
+# on disk and verifies it.
+#
+# The eleven small ones used to be tracked so a clone could open a scene
+# without a network round trip. Splitting the rule by size meant the
+# repository and the release disagreed about where the data lived, and the
+# 76 MB it saved was not worth two answers to one question.
+registry/data/*
+!registry/data/README.md
+
+# Working notes, kept locally rather than published. data-sources.md is
+# the exception: it records where each dataset came from, which belongs
+# with the code.
+docs/*
+!docs/data-sources.md

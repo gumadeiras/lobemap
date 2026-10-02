@@ -1,0 +1,215 @@
+# Assets are geometry or images, atlas and reference alike, distinguished by
+# `role`. Paths are relative to the registry root.
+# Populated by `lobemap ingest`; entries below are added as data lands.
+
+[neuprint_hemibrain_glomeruli]
+role = "glomeruli"
+space = "JRCFIB2018F"
+kind = "meshset"
+side = "both"
+path = "data/neuprint_hemibrain_glomeruli.npz"
+[neuprint_hemibrain_glomeruli.source]
+url = "https://neuprint.janelia.org"
+doi = "10.7554/eLife.57443"
+license = "CC BY 4.0"
+
+[neuprint_hemibrain_neuropil]
+role = "neuropil"
+space = "JRCFIB2018F"
+kind = "meshset"
+side = "both"
+path = "data/neuprint_hemibrain_neuropil.npz"
+[neuprint_hemibrain_neuropil.source]
+url = "https://neuprint.janelia.org"
+
+[neuprint_cns_glomeruli]
+role = "glomeruli"
+space = "JRCFIB2022M"
+kind = "meshset"
+side = "both"
+path = "data/neuprint_cns_glomeruli.npz"
+[neuprint_cns_glomeruli.source]
+url = "https://neuprint-cns.janelia.org"
+doi = "10.1016/j.cell.2026.08.015"
+
+[neuprint_cns_neuropil]
+role = "neuropil"
+space = "JRCFIB2022M"
+kind = "meshset"
+side = "both"
+path = "data/neuprint_cns_neuropil.npz"
+[neuprint_cns_neuropil.source]
+url = "https://neuprint-cns.janelia.org"
+doi = "10.1016/j.cell.2026.08.015"
+
+# The fly's LEFT AL. The Bates 2020 masks these revise sat on FAFB's
+# image-right, which in this mirrored space is biologically left; Benton
+# inherits that. Delivered in 3D Slicer RAS, and ingest negates x and y --
+# checked when Bates was still here, which put the two centroid clouds 0.0 um
+# apart.
+[benton2025_glomeruli]
+role = "glomeruli"
+space = "FAFB14"
+kind = "meshset"
+side = "L"
+path = "data/benton2025_glomeruli.npz"
+[benton2025_glomeruli.source]
+doi = "10.1038/s44319-025-00476-8"
+url = "https://doi.org/10.1038/s44319-025-00476-8"
+
+# Both lobes: 108 meshes, 54 per side, each name carrying its own (L)/(R)
+# suffix, so the asset-level default is never consulted for this one.
+[grabe2015_glomeruli]
+role = "glomeruli"
+space = "GRABE"
+kind = "meshset"
+side = "both"
+path = "data/grabe2015_glomeruli.npz"
+[grabe2015_glomeruli.source]
+doi = "10.1002/cne.23697"
+url = "https://doi.org/10.1002/cne.23697"
+
+# NOTE ON LATERALITY: these are delivered in JRCFIB2018Fraw -- hemibrain
+# coordinates -- and hemibrain is NOT left-right inverted (see the asymmetric
+# body measurement in spaces.toml). They sit on hemibrain's image-right,
+# aligning with the neuPrint AL(R) meshes at 1.76 and 2.36 um, so they are
+# biologically RIGHT and are unaffected by the FAFB inversion.
+#
+# Schlegel 2021 supplementary files 11 and 12: the same hemibrain glomeruli
+# defined two different ways -- S11 from receptor-neuron terminals, S12 from
+# projection-neuron dendrites. Measured distinct but closely related: S11 vs
+# S12 median centroid separation 1.10 um, vs neuPrint's meshes 1.76 and 2.36 um
+# respectively. All three are kept. Delivered in JRCFIB2018Fraw 8 nm voxels;
+# scaling to um lands them within 1.8 um of the neuPrint hemibrain atlas, which
+# confirms raw -> nm is a pure scale.
+[schlegel2021_s11_glomeruli]
+role = "glomeruli"
+space = "JRCFIB2018F"
+kind = "meshset"
+side = "R"
+path = "data/schlegel2021_s11.npz"
+[schlegel2021_s11_glomeruli.source]
+doi = "10.7554/eLife.66018"
+url = "https://cdn.elifesciences.org/articles/66018/elife-66018-supp11-v2.zip"
+license = "CC BY 4.0"
+
+[schlegel2021_s12_glomeruli]
+role = "glomeruli"
+space = "JRCFIB2018F"
+kind = "meshset"
+side = "R"
+path = "data/schlegel2021_s12.npz"
+[schlegel2021_s12_glomeruli.source]
+doi = "10.7554/eLife.66018"
+url = "https://cdn.elifesciences.org/articles/66018/elife-66018-supp12-v2.zip"
+license = "CC BY 4.0"
+
+# Grabe's in vivo confocal stack: the only reference layer its island space
+# has. Voxel size read from the ImageJ TIFF metadata (0.34 x 0.34 x 0.96 um),
+# not assumed. Shares its grid with the label volume the glomeruli are
+# surfaced from, so index * voxel_size with a zero origin is exact rather than
+# fitted -- verified at 0.0001 um mean offset over 108 glomeruli.
+# Displayed like the virtual stains -- magenta, lifted gamma, depth-attenuated
+# MIP -- although its role stays `template_image`, because it is a real
+# confocal channel rather than a synthesised one.
+# The publication's own voxel-wise masks, unmodified -- the thing the meshes
+# in grabe2015_glomeruli are surfaced from, kept so the smoothing can always
+# be checked against its input. Stored as npz rather than zarr on purpose: a
+# multiscale pyramid averages neighboring voxels, and the mean of two label
+# ids is a third label.
+[grabe2015_labels]
+role = "glomeruli"
+space = "GRABE"
+kind = "labels"
+side = "both"
+path = "data/grabe2015_labels.npz"
+[grabe2015_labels.source]
+doi = "10.1002/cne.23697"
+
+[grabe2015_stack]
+role = "template_image"
+space = "GRABE"
+kind = "image"
+side = "both"
+path = "data/grabe2015_stack.npz"
+# Gray like the stains, and for the same reason: it sits under the
+# glomerulus meshes. Only gamma and attenuation are worth overriding.
+display = { colormap = "gray", gamma = 0.7, attenuation = 0.1 }
+[grabe2015_stack.source]
+doi = "10.1002/cne.23697"
+
+# FAFB AL neuropil shells, from fafbseg.get_neuropil_volumes, which returns
+# FlyWire (FAFB14.1) space; bridged here into FAFB14, the hub.
+#
+# Note that importing fafbseg registers the dedicated FlyWire<->FAFB offset
+# field as a transform edge, so the route taken is FLYWIRE -> FLYWIREraw ->
+# FAFB14raw -> FAFB14 rather than the thin-plate route a process without
+# fafbseg would pick. That field covers only the imaged volume and returns
+# NaN outside it -- 10 of 1184 shell vertices -- which resolve() fills from
+# the input coordinates, recording the count.
+#
+# All 78 neuropils fafbseg serves, not just the antennal lobes: there is no
+# whole-brain entry in `get_neuropil_volumes`, so the brain outline IS their
+# union, and keeping them separate costs nothing while making each one
+# toggleable. This replaces the whole-brain mesh that was read out of the
+# Bates Plotly file, which was the one piece of FAFB reference geometry not
+# coming from fafbseg.
+#
+# `side` is biological. Independent confirmation of the Bates laterality
+# finding: all 58 Bates centroids fall inside AL_L, none inside AL_R.
+[fafb_neuropil]
+role = "neuropil"
+space = "FAFB14"
+kind = "meshset"
+side = "both"
+path = "data/fafb_neuropil.npz"
+[fafb_neuropil.source]
+url = "https://github.com/navis-org/fafbseg-py"
+
+# The JRC2018U nc82 template image was dropped. It was never in a scene, and
+# JRC2018U has no native atlas, so the only thing it fed was a validation
+# check on a bridge into a space nothing displays. The space itself remains
+# as a bridging target.
+
+# Virtual neuropil stains: presynapse density at LM resolution, sigma 900 nm
+# on a 0.5 um grid (effective 912 nm after binning). Built from the published
+# bulk releases rather than neuPrint, because ~60% of detected synapses are
+# not assigned to proofread neurons, mostly postsynapses on fine twigs.
+#
+# Presynapses only: nc82 labels Bruchpilot at presynaptic active zones.
+# T-bars are deduplicated where a source lists synapse pairs, so a T-bar is
+# not weighted by its number of postsynaptic partners.
+
+[hemibrain_stain]
+role = "virtual_stain"
+space = "JRCFIB2018F"
+kind = "image"
+side = "both"
+path = "data/hemibrain_stain.zarr"
+[hemibrain_stain.source]
+url = "gs://neuroglancer-janelia-flyem-hemibrain/v1.2/synapses/by_id/"
+doi = "10.7554/eLife.57443"
+
+# 79,935,406 unique presynapses from 219,060,529 synapse pairs.
+[fafb_stain]
+role = "virtual_stain"
+space = "FAFB14"
+kind = "image"
+side = "both"
+path = "data/fafb_stain.zarr"
+[fafb_stain.source]
+url = "fafb_v783_princeton_synapse_table.csv.gz"
+doi = "10.1038/s41586-024-07558-y"
+
+# Cropped to brain: the VNC is excluded by the grid bounds, which drop
+# 10,418,893 of 45,656,140 presynapses. The boundary is unambiguous --
+# brain-labeled presynapses span z 101-328 um and VNC-labeled ones
+# 539-1049 um, a 210 um gap.
+[malecns_stain]
+role = "virtual_stain"
+space = "JRCFIB2022M"
+kind = "image"
+side = "both"
+path = "data/malecns_stain.zarr"
+[malecns_stain.source]
+url = "gs://flyem-male-cns/v1.0/connectome-data/flat-connectome/syn-points-male-cns-v1.0-minconf-0.5.feather"

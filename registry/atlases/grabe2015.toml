@@ -1,0 +1,6 @@
+id = "grabe2015"
+title = "Grabe 2015 (LM template)"
+native_space = "GRABE"
+asset = "grabe2015_glomeruli"
+citation = "Grabe V, Strutz A, Baschwitz A, Hansson BS, Sachse S (2015) J Comp Neurol 523(3):530-544"
+doi = "10.1002/cne.23697"

@@ -1,19 +1,27 @@
-[build-system]
-requires = ["setuptools>=77", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "lobemap"
-version = "0.1.4"
-description = "napari viewer for Drosophila antennal lobe atlases"
+version = "0.2.0"
+description = "napari viewer for Drosophila antennal lobe glomerular atlases across coordinate spaces"
 readme = "README.md"
+# MIT, and the copyright in LICENSE is Gustavo Madeira Santana's. Both
+# lines came from the original pyproject and were lost in the rewrite,
+# which shipped a package declaring no license at all.
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [
-  { name = "Gustavo Madeira Santana", email = "fromweb1@gumadeiras.com" },
-]
 requires-python = ">=3.11,<3.13"
+# Gustavo Madeira Santana originated lobemap and holds the copyright in
+# LICENSE. The viewer here is a rewrite, but the project, its name, the
+# curated nomenclature tables and the source data under registry/sources/
+# are his work, so he stays on the package metadata -- see README Lineage.
+authors = [
+  { name = "David Zimmerman" },
+  { name = "Gustavo Madeira Santana" },
+]
 keywords = ["drosophila", "napari", "neuroanatomy", "visualization"]
+# The original's list, plus the two the rewrite earns: it reads and
+# writes image formats, and it is a napari plugin-adjacent viewer. No
+# license classifier -- PEP 639 forbids one alongside `license`, and
+# setuptools refuses the build outright.
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -22,61 +30,74 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Topic :: Scientific/Engineering :: Image Processing",
   "Topic :: Scientific/Engineering :: Visualization",
-]
-dependencies = [
-  "matplotlib>=3.9",
-  "napari[pyqt6]>=0.6.0",
-  "numpy>=1.26",
-  "pandas>=2.2",
-  "qtpy>=2.4",
-  "tifffile>=2024.8.30",
+  "Framework :: napari",
 ]
 
-[project.scripts]
-lobemap = "lobemap.lobemap:main"
+# Runtime only. The data-access stack (navis, flybrains,
+# fafbseg, neuprint-python) is deliberately NOT here: the viewer must open a
+# scene from the canonical mesh format and the registry alone, with no network
+# access, no neuPrint token, and no CMTK.
+dependencies = [
+  "napari[pyqt6]>=0.6",
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "scipy>=1.13",
+  "trimesh>=4.4",       # mesh I/O plus mesh-plane intersection for slice contours
+  "qtpy>=2.4",
+  "platformdirs>=4.2",  # cache location for bridged/derived geometry
+  "tifffile>=2024.8",   # Grabe LM stack
+  "pynrrd>=1.0",        # NRRD image stacks (ingest.image_stack)
+  "zarr>=2.18",         # OME-Zarr volumes: chunked, compressed and multiscale
+  "numcodecs>=0.12",    # blosc/zstd codec for the above
+  "dask>=2024.1",       # lazy slicing: napari materialises an eager array whole
+  "rtree>=1.3",         # trimesh ray engine, for exact point-in-mesh containment
+  "pymeshfix>=0.17",    # MeshFix: watertight repair where fill_holes cannot cope
+  "py7zr>=0.21",        # Grabe 2015 ships its glomerulus OBJs in a .7z archive
+]
 
 [project.urls]
 Homepage = "https://github.com/gumadeiras/lobemap"
-Repository = "https://github.com/gumadeiras/lobemap"
-Issues = "https://github.com/gumadeiras/lobemap/issues"
+Source = "https://github.com/gumadeiras/lobemap"
+Changelog = "https://github.com/gumadeiras/lobemap/blob/main/CHANGELOG.md"
 
-[tool.setuptools]
-package-dir = { lobemap = "." }
-packages = ["lobemap"]
-include-package-data = false
-
-[tool.setuptools.package-data]
-lobemap = [
-  "lobemap",
-  "datasets/paper_pdf_sources.csv",
-  "scripts/*.py",
-  "docs/*.md",
-  "datasets/*/README.md",
-  "datasets/*/NOTES.md",
-  "datasets/*/*.py",
-  "datasets/*/scripts/*.py",
-  "datasets/reference-tables/*.csv",
-  "datasets/reference-tables/scripts/*.py",
-  "datasets/*/data/derived/**/*",
-  "datasets/*/data/validation/**/*",
-  "datasets/banc/data/source/**/*",
-  "datasets/door/data/source/**/*",
-  "datasets/edmond-fibsem/data/source/**/*",
-  "datasets/flywire-codex/data/source/**/*",
-  "datasets/flywire/data/source/**/*",
-  "datasets/grabe-2015/data/source/*.am",
-  "datasets/grabe-2015/data/source/*.csv",
-  "datasets/grabe-2015/data/source/*.png",
-  "datasets/grabe-2015/data/source/*.tif",
-  "datasets/hemibrain/data/source/**/*",
-  "datasets/jrc2018unisex/data/source/**/*",
-  "datasets/vfb/data/source/**/*",
+[dependency-groups]
+# Ingest and cache-rebuild time only.
+ingest = [
+  "navis>=1.12",          # transform engine: xform_brain, mirror_brain
+  "flybrains>=0.6",      # navis-flybrains: templates and bridging registrations
+  "fafbseg>=3.2",        # FAFB/FlyWire meshes and synapse tables
+  "neuprint-python>=0.6.3",# hemibrain / male CNS ROIs, meshes, synapses
+  "pyvista>=0.49",       # Benton 2025 3D Slicer .vtm / .vtp
+  "h5py>=3.11",          # H5 deformation fields
+  "requests>=2.32",
+  "pytz>=2024.1",        # undeclared fafbseg import; pandas 3.0 no longer supplies it
+]
+dev = [
+  "pytest>=8.2",
+  "ruff>=0.6",
 ]
 
-[tool.setuptools.exclude-package-data]
-lobemap = [
-  "**/.DS_Store",
-  "**/__pycache__/*",
-  "**/*.py[cod]",
-]
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+lobemap = "lobemap.cli:main"
+
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+default-groups = ["dev", "ingest"]
+
+[tool.ruff]
+line-length = 96
+target-version = "py311"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["RUF059", "BLE001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

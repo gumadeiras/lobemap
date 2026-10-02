@@ -1,0 +1,190 @@
+# How each built asset is derived.
+#
+# The pipelines always existed; what did not was a machine-readable record of
+# WHICH pipeline to run for which asset, and with what arguments. Those lived
+# as prose in registry/data/README.md and as Python snippets a reader had to
+# retype, so nine of the fifteen assets had no runnable path at all. Here they
+# are data, and `lobemap build` executes them.
+#
+# `source` paths are relative to the repository root. A `url` is downloaded
+# and cached under the data root's `.build/` instead.
+#
+# The three virtual stains ARE covered, at the bottom. They are expensive --
+# ~19 GB of synapse downloads, ~40 GB of scratch and hours of compute -- so
+# `lobemap build --all` skips them and they must be named explicitly.
+
+# -- Grabe 2015 -----------------------------------------------------------
+# Entirely offline: the confocal stack and the Amira label volume both ship
+# in registry/sources/. Both TIFFs are (119, 514, 513) in z, y, x, so they share a
+# grid and take the same voxel size and transpose.
+
+[grabe2015_glomeruli]
+pipeline = "label_volume"
+source = "sources/grabe-2015/Merged_2-101221a-labels_only_sure_ones_Sensillarcolors.tif"
+[grabe2015_glomeruli.params]
+materials = "sources/grabe-2015/Merged_2-101221a-labels_only_sure_ones_Sensillarcolors.am"
+voxel_um_zyx = [0.96, 0.34, 0.34]
+transpose = [2, 1, 0]
+mask_sigma_um = 1.0
+level = 0.44
+smooth = 0
+
+[grabe2015_labels]
+pipeline = "label_masks"
+source = "sources/grabe-2015/Merged_2-101221a-labels_only_sure_ones_Sensillarcolors.tif"
+[grabe2015_labels.params]
+materials = "sources/grabe-2015/Merged_2-101221a-labels_only_sure_ones_Sensillarcolors.am"
+voxel_um_zyx = [0.96, 0.34, 0.34]
+transpose = [2, 1, 0]
+
+[grabe2015_stack]
+pipeline = "image_stack"
+source = "sources/grabe-2015/invivoALstack.tif"
+[grabe2015_stack.params]
+space = "GRABE"
+voxel_um_zyx = [0.96, 0.34, 0.34]
+transpose = [2, 1, 0]
+role = "template_image"
+# Written as a single npz, not a zarr store. At 31 M voxels the whole
+# volume is 31 MB, well under the 700 M-voxel threshold at which the
+# viewer would pick a coarser pyramid level, so the three levels were
+# never used -- and a zarr store is 184 files where this is one.
+# Volume.save dispatches on the registry path's suffix.
+
+# -- FAFB atlases ---------------------------------------------------------
+# Offline; the source ships in registry/sources/.
+
+[benton2025_glomeruli]
+pipeline = "slicer_vtm"
+source = "sources/benton-2025/BentonDatasetEV2/DatasetEV2.seg.vtm"
+[benton2025_glomeruli.params]
+# VTP carries point coordinates and no units, so this is declared rather
+# than read: the segmentation is in FAFB14 nanometers, the coordinate space
+# the published scene is drawn in.
+source_units = "nm"
+# Delivered in 3D Slicer RAS; negating x and y puts its centroid cloud 0.0 um
+# from Bates.
+ras_to_lps = true
+
+# -- Schlegel 2021 --------------------------------------------------------
+# Downloaded from the eLife CDN, CC BY 4.0.
+
+# OBJ has no units field, so both declare them: these meshes are in
+# hemibrain voxel indices on the 8 nm grid the dataset is published on.
+
+[schlegel2021_s11_glomeruli]
+pipeline = "obj_archive"
+url = "https://cdn.elifesciences.org/articles/66018/elife-66018-supp11-v2.zip"
+[schlegel2021_s11_glomeruli.params]
+source_units = "px8nm"
+
+[schlegel2021_s12_glomeruli]
+pipeline = "obj_archive"
+url = "https://cdn.elifesciences.org/articles/66018/elife-66018-supp12-v2.zip"
+[schlegel2021_s12_glomeruli.params]
+source_units = "px8nm"
+
+# -- neuPrint -------------------------------------------------------------
+# Needs NEUPRINT_APPLICATION_CREDENTIALS.
+
+[neuprint_hemibrain_glomeruli]
+pipeline = "neuprint_rois"
+[neuprint_hemibrain_glomeruli.params]
+server = "neuprint.janelia.org"
+dataset = "hemibrain:v1.2.1"
+role = "glomeruli"
+
+[neuprint_hemibrain_neuropil]
+pipeline = "neuprint_rois"
+[neuprint_hemibrain_neuropil.params]
+server = "neuprint.janelia.org"
+dataset = "hemibrain:v1.2.1"
+role = "neuropil"
+
+[neuprint_cns_glomeruli]
+pipeline = "neuprint_rois"
+[neuprint_cns_glomeruli.params]
+server = "neuprint-cns.janelia.org"
+dataset = "male-cns:v1.0"
+role = "glomeruli"
+
+[neuprint_cns_neuropil]
+pipeline = "neuprint_rois"
+[neuprint_cns_neuropil.params]
+server = "neuprint-cns.janelia.org"
+dataset = "male-cns:v1.0"
+role = "neuropil"
+
+# -- FlyWire neuropils ----------------------------------------------------
+# Needs FLYWIRE_APPLICATION_CREDENTIALS. Served in FLYWIRE space and bridged
+# to FAFB14 as part of the build, because the registry declares the asset in
+# FAFB14 and an unbridged mesh would land in the wrong place.
+
+[fafb_neuropil]
+pipeline = "flywire_neuropils"
+[fafb_neuropil.params]
+bridge_to = "FAFB14"
+
+
+# -- Virtual neuropil stains ----------------------------------------------
+# Presynapse density at LM resolution: a binned Gaussian KDE over every
+# predicted presynapse in the published bulk release, at 0.25 um bins with
+# sigma 450 nm. All three sources are public and need no credentials.
+#
+# EXPENSIVE, and excluded from `--all` for that reason. At 0.25 um each grid
+# is 2-5 G voxels, far larger than the point cloud, so the build partitions
+# the points into slabs and spills them to `.stainwork`, which needs about
+# 40 GB free.
+#
+# The bounds are passed explicitly rather than derived, so a rebuild
+# reproduces the same physical box: they are the held neuropil geometry plus
+# a 5 um margin. The male CNS bounds also crop the VNC away.
+
+[hemibrain_stain]
+pipeline = "virtual_stain"
+expensive = true
+# Eight shards, fetched into one directory: the loader takes the directory.
+urls = [
+  "https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/v1.2/synapses/by_id/0.shard",
+  "https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/v1.2/synapses/by_id/1.shard",
+  "https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/v1.2/synapses/by_id/2.shard",
+  "https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/v1.2/synapses/by_id/3.shard",
+  "https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/v1.2/synapses/by_id/4.shard",
+  "https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/v1.2/synapses/by_id/5.shard",
+  "https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/v1.2/synapses/by_id/6.shard",
+  "https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/v1.2/synapses/by_id/7.shard",
+]
+into = "hemibrain_shards"
+[hemibrain_stain.params]
+bucket = "hemibrain"
+space = "JRCFIB2018F"
+voxel = 0.25
+sigma = 0.45
+bounds = [0.0, 0.0, 0.0, 275.5, 316.5, 331.5]
+# The shard format carries no confidence field to filter on.
+confidence = false
+
+[fafb_stain]
+pipeline = "virtual_stain"
+expensive = true
+url = "https://storage.googleapis.com/flywire-data/codex/data/fafb/783/fafb_v783_princeton_synapse_table.csv.gz"
+[fafb_stain.params]
+bucket = "fafb"
+space = "FAFB14"
+voxel = 0.25
+sigma = 0.45
+bounds = [192.2, 75.853, 2.007, 853.7, 398.853, 271.507]
+confidence = 0.5
+
+[malecns_stain]
+pipeline = "virtual_stain"
+expensive = true
+url = "https://storage.googleapis.com/flyem-male-cns/v1.0/connectome-data/flat-connectome/syn-points-male-cns-v1.0-minconf-0.5.feather"
+[malecns_stain.params]
+bucket = "malecns"
+space = "JRCFIB2022M"
+voxel = 0.25
+sigma = 0.45
+bounds = [37.6, 37.3, 79.8, 732.1, 421.8, 345.3]
+# The published file is already filtered to minconf 0.5.
+confidence = 0.5

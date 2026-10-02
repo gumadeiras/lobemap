@@ -1,0 +1,6 @@
+id = "neuprint_cns"
+title = "neuPrint male CNS"
+native_space = "JRCFIB2022M"
+asset = "neuprint_cns_glomeruli"
+citation = "Berg S, et al. (2026) Cell 189(18):5504-5526.e15 (male-cns:v1.0)"
+doi = "10.1016/j.cell.2026.08.015"

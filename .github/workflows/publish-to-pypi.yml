@@ -17,6 +17,11 @@ jobs:
   build:
     name: Build distribution
     runs-on: ubuntu-latest
+    # Data releases (`data-v1`, ...) publish the fetchable assets, not the
+    # package. Without this they would start a PyPI run that only fails at
+    # the tag check below, reporting a broken release every time the data
+    # is republished.
+    if: ${{ !startsWith(github.event.release.tag_name, 'data-') }}
     permissions:
       contents: read
 
