@@ -59,6 +59,10 @@ role = "template_image"
 pipeline = "slicer_vtm"
 source = "sources/benton-2025/BentonDatasetEV2/DatasetEV2.seg.vtm"
 [benton2025_glomeruli.params]
+# VTP carries point coordinates and no units, so this is declared rather
+# than read: the segmentation is in FAFB14 nanometers, the coordinate space
+# the published scene is drawn in.
+source_units = "nm"
 # Delivered in 3D Slicer RAS; negating x and y puts its centroid cloud 0.0 um
 # from Bates.
 ras_to_lps = true
@@ -66,13 +70,20 @@ ras_to_lps = true
 # -- Schlegel 2021 --------------------------------------------------------
 # Downloaded from the eLife CDN, CC BY 4.0.
 
+# OBJ has no units field, so both declare them: these meshes are in
+# hemibrain voxel indices on the 8 nm grid the dataset is published on.
+
 [schlegel2021_s11_glomeruli]
 pipeline = "obj_archive"
 url = "https://cdn.elifesciences.org/articles/66018/elife-66018-supp11-v2.zip"
+[schlegel2021_s11_glomeruli.params]
+source_units = "px8nm"
 
 [schlegel2021_s12_glomeruli]
 pipeline = "obj_archive"
 url = "https://cdn.elifesciences.org/articles/66018/elife-66018-supp12-v2.zip"
+[schlegel2021_s12_glomeruli.params]
+source_units = "px8nm"
 
 # -- neuPrint -------------------------------------------------------------
 # Needs NEUPRINT_APPLICATION_CREDENTIALS.

@@ -267,14 +267,20 @@ def _image_stack(src, params, **_):
 def _slicer(src, params, **_):
     from .ingest.slicer_vtm import ingest
 
-    return ingest(src, ras_to_lps=params.get("ras_to_lps", True)).meshset
+    return ingest(
+        src, source_units=params["source_units"],
+        ras_to_lps=params.get("ras_to_lps", True),
+    ).meshset
 
 
 @pipeline("obj_archive")
 def _obj_archive(src, params, **_):
     from .ingest.obj_archive import ingest
 
-    return ingest(src, include_side=params.get("include_side", True)).meshset
+    return ingest(
+        src, source_units=params["source_units"],
+        include_side=params.get("include_side", True),
+    ).meshset
 
 
 @pipeline("neuprint_rois")

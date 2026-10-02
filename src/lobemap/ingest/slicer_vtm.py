@@ -20,10 +20,11 @@ import numpy as np
 
 from ..core.meshfmt import MeshSet
 from ..core.meshrepair import RepairReport, repair_meshset
+from ..core.units import scale_to_um, verify_extent
 
 #: Plausible size of one glomerulus, in micrometers.
 COMPARTMENT_EXTENT_UM = (4.0, 45.0)
-UNIT_CANDIDATES = [(1e-3, "nm"), (1.0, "um")]
+#: Used to CHECK the units the recipe declares, never to choose them.
 
 #: RAS -> LPS: negate the first two axes. See module docstring.
 RAS_TO_LPS = np.array([-1.0, -1.0, 1.0])
@@ -57,23 +58,9 @@ def _triangles(poly) -> np.ndarray:
     return faces[:, 1:].astype(np.int64), np.asarray(surf.points, dtype=np.float64)
 
 
-def infer_scale(extents: np.ndarray) -> tuple[float, str]:
-    lo, hi = COMPARTMENT_EXTENT_UM
-    typical = float(np.median(extents))
-    hits = [(s, lab) for s, lab in UNIT_CANDIDATES if lo <= typical * s <= hi]
-    detail = ", ".join(f"{lab}->{typical * s:.3g}um" for s, lab in UNIT_CANDIDATES)
-    if len(hits) == 1:
-        return hits[0]
-    if not hits:
-        raise ValueError(
-            f"cannot identify units: median compartment extent {typical:g} is "
-            f"not {lo}-{hi} um under any candidate ({detail})"
-        )
-    raise ValueError(f"ambiguous units: {[h[1] for h in hits]} ({detail})")
-
-
 def ingest(
     vtm_path: str | Path,
+    source_units: str,
     ras_to_lps: bool = True,
     repair: bool = True,
 ) -> SlicerIngestResult:
@@ -123,7 +110,9 @@ def ingest(
     extents = np.array(
         [float(np.max(v.max(axis=0) - v.min(axis=0))) for _, v, _ in raw]
     )
-    scale, units = infer_scale(extents)
+    units = source_units
+    scale = scale_to_um(units)
+    verify_extent(extents, scale, COMPARTMENT_EXTENT_UM, units)
     sign = RAS_TO_LPS if ras_to_lps else np.ones(3)
 
     ms = MeshSet.from_parts(

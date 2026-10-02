@@ -23,6 +23,7 @@ import numpy as np
 
 from ..core.meshfmt import MeshSet
 from ..core.meshrepair import RepairReport, repair_meshset
+from ..core.units import scale_to_um, verify_extent
 from ._obj import parse_obj
 
 #: Filename conventions, tried in order. Each must yield a `name` group and
@@ -39,8 +40,8 @@ NAME_PATTERNS = [
 
 MESH_SUFFIXES = (".obj", ".stl")
 
+#: Used to CHECK the units the recipe declares, never to choose them.
 COMPARTMENT_EXTENT_UM = (4.0, 45.0)
-UNIT_CANDIDATES = [(1e-3, "nm"), (1.0, "um"), (8e-3, "px8nm")]
 
 SIDE_LETTER = {"left": "L", "right": "R"}
 
@@ -100,23 +101,9 @@ def parse_name(filename: str) -> tuple[str, str | None]:
     return Path(filename).stem, None
 
 
-def infer_scale(extents: np.ndarray) -> tuple[float, str]:
-    lo, hi = COMPARTMENT_EXTENT_UM
-    typical = float(np.median(extents))
-    hits = [(s, lab) for s, lab in UNIT_CANDIDATES if lo <= typical * s <= hi]
-    detail = ", ".join(f"{lab}->{typical * s:.3g}um" for s, lab in UNIT_CANDIDATES)
-    if len(hits) == 1:
-        return hits[0]
-    if not hits:
-        raise ValueError(
-            f"cannot identify units: median compartment extent {typical:g} is "
-            f"not {lo}-{hi} um under any candidate ({detail})"
-        )
-    raise ValueError(f"ambiguous units: {[h[1] for h in hits]} ({detail})")
-
-
 def ingest(
-    archive: str | Path, repair: bool = True, include_side: bool = True
+    archive: str | Path, source_units: str, repair: bool = True,
+    include_side: bool = True,
 ) -> ObjIngestResult:
     archive = Path(archive)
     raw: list[tuple[str, np.ndarray, np.ndarray]] = []
@@ -155,7 +142,9 @@ def ingest(
     extents = np.array(
         [float(np.max(v.max(axis=0) - v.min(axis=0))) for _, v, _ in raw]
     )
-    scale, units = infer_scale(extents)
+    units = source_units
+    scale = scale_to_um(units)
+    verify_extent(extents, scale, COMPARTMENT_EXTENT_UM, units)
 
     ms = MeshSet.from_parts(
         [(n, v * scale, f) for n, v, f in raw],
