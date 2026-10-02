@@ -128,6 +128,68 @@ def test_rows_and_drawing_agree_after_mode_switches(monkeypatch):
             assert_rows_match_drawing(sess)
 
 
+def _node_state(surface):
+    """What the mesh's vispy node draws: vertices, faces, values and transform."""
+    import numpy as np
+
+    from lobemap.viewer.napari_private import layer_visual
+
+    node = layer_visual(surface.viewer, surface.layer).node
+    data = node.mesh_data
+    return (np.asarray(data.get_vertices()).copy(), np.asarray(data.get_faces()).copy(),
+            np.asarray(data.get_vertex_values()).copy(), np.asarray(node.transform.matrix).copy())
+
+
+def _same_as_built(surface) -> bool:
+    """The node holds what napari builds from the layer now, in this mode."""
+    import numpy as np
+
+    kept = _node_state(surface)
+    surface.layer.refresh()
+    fresh = _node_state(surface)
+    return all(np.array_equal(a, b) for a, b in zip(kept, fresh, strict=True))
+
+
+def test_entering_3d_again_rebuilds_only_a_mesh_that_changed(monkeypatch):
+    """napari rebuilt every shown mesh on each entry into 3D, vertex normals and
+    all: 0.43 s of GRABE's 0.48 s. An unchanged mesh is shown as it was built;
+    one changed in 2D -- a row, the mirror -- is rebuilt, once."""
+    with launched(monkeypatch, "view", "GRABE", "--ndisplay", "3") as (code, viewer):
+        assert code == 0
+        sess = session(viewer)
+        tab = sess.panel.tabs["grabe2015"]
+        builds = []
+        tab.surface.layer.events.set_data.connect(lambda: builds.append(viewer.dims.ndisplay))
+        for _ in range(2):
+            viewer.dims.ndisplay = 2
+            pump()
+            viewer.dims.ndisplay = 3
+            pump()
+        assert builds == [], "an unchanged mesh was rebuilt"
+        assert _same_as_built(tab.surface)
+        assert_rows_match_drawing(sess)
+
+        viewer.dims.ndisplay = 2
+        _tick(tab, 3, False)
+        pump(400)                       # compacted while hidden
+        del builds[:]
+        viewer.dims.ndisplay = 3
+        pump(300)
+        assert builds == [3]
+        assert _same_as_built(tab.surface)
+        assert_rows_match_drawing(sess)
+
+        viewer.dims.ndisplay = 2
+        sess.set_mirror(True)
+        pump()
+        del builds[:]
+        viewer.dims.ndisplay = 3
+        pump(300)
+        assert builds == [3]
+        assert _same_as_built(tab.surface)
+        assert_rows_match_drawing(sess)
+
+
 def test_the_layer_list_eye_is_a_selection_change(monkeypatch):
     """Hiding a layer from napari's list unchecks its rows; showing it again
     gives them back, in either mode."""

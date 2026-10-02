@@ -8,6 +8,8 @@ from here as well.
 
 from __future__ import annotations
 
+import weakref
+
 import numpy as np
 
 from ..core.registry import Registry
@@ -23,6 +25,7 @@ from .images import (
     pin_level,
     show_images,
 )
+from .napari_private import before_slicing
 from .request import (
     REFERENCE_ROLES,
     MissingAssets,
@@ -116,7 +119,23 @@ def install_display_mode(viewer, surfaces, contours, images=(),
         want_order = (
             tuple(range(ndim)) if three_d or ndim != 3 else order_for(axis)
         )
+        shown_later = False
         if tuple(viewer.dims.order) != want_order:
+            if three_d and event is not None:
+                # napari announces a change of order only once every handler
+                # of this change of mode has run, and slices every visible
+                # layer again then. A mesh shown before it would be built
+                # twice, its normals computed each time: 0.22 s of GRABE's
+                # 0.48 s. So the meshes are shown once the order is in.
+                # Connected first, in case napari announces it at once.
+                shown_later = True
+
+                def _ordered(_event=None) -> None:
+                    viewer.dims.events.order.disconnect(_ordered)
+                    for surface in surfaces.values():
+                        surface.sync()
+
+                viewer.dims.events.order.connect(_ordered)
             viewer.dims.order = want_order
         space = None
         if session is not None:
@@ -129,8 +148,9 @@ def install_display_mode(viewer, surfaces, contours, images=(),
         if not three_d and session is not None:
             # Before the contours turn on, so they draw once, on this plane.
             session.populate_plane()
-        for surface in surfaces.values():
-            surface.sync()
+        if not shown_later:
+            for surface in surfaces.values():
+                surface.sync()
         if session is None:
             return
         if session.panel is not None:
@@ -143,7 +163,37 @@ def install_display_mode(viewer, surfaces, contours, images=(),
     # Applied before it is connected, so a failure here leaves nothing behind.
     _apply()
     viewer.dims.events.ndisplay.connect(_apply)
+    _meshes_of(viewer).update(surfaces.values())
     return [(viewer.dims.events.ndisplay, _apply)]
+
+
+#: Each viewer's atlas surfaces, held weakly: `_hide_meshes` runs before
+#: every slice for the viewer's life, and must not keep a scene alive.
+_MESHES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _meshes_of(viewer) -> weakref.WeakSet:
+    """The viewer's surfaces, hidden before napari slices anything for 2D.
+
+    A mesh napari slices for 2D loses its 3D build, which
+    `AtlasSurface.sync` shows again on the way back if nothing changed.
+    napari slices on a change of mode before any handler of ours runs,
+    so this goes through `before_slicing`.
+    """
+    meshes = _MESHES.get(viewer)
+    if meshes is None:
+        meshes = _MESHES[viewer] = weakref.WeakSet()
+        ref = weakref.ref(viewer)
+
+        def _hide_meshes() -> None:
+            live = ref()
+            if live is None or live.dims.ndisplay != 2:
+                return
+            for surface in list(meshes):
+                surface.hide_mesh()
+
+        before_slicing(viewer, _hide_meshes)
+    return meshes
 
 
 def install_picking(viewer, surfaces, contours, panel=None) -> list:

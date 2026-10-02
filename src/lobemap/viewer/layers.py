@@ -252,6 +252,58 @@ class AtlasSurface:
             self.layer = layer
         self.layer.metadata["lobemap"] = {"meshset": meshset, "kind": "atlas"}
         self.layer.events.visible.connect(self._on_eye)
+        #: Whether napari's vispy node still holds this layer's 3D build of
+        #: its current data; see `hide_mesh`.
+        self._built_3d = False
+        self.layer.events.set_data.connect(self._on_built)
+        self.layer.events.data.connect(self._on_changed)
+        for moved in ("affine", "scale", "translate", "rotate", "shear"):
+            getattr(self.layer.events, moved).connect(self._on_moved)
+
+    # -- the 3D build, kept through 2D -------------------------------------
+    #
+    # napari rebuilds a Surface's vispy mesh every time the layer is shown,
+    # and vispy computes its vertex normals anew for it: 0.21 s for GRABE's
+    # 1.57 M faces on every entry into 3D, for a mesh that did not change.
+    # So the mesh is hidden before napari slices it for 2D (`hide_mesh`),
+    # which leaves the node its 3D build, and is shown again without a
+    # refresh when nothing it was built from has changed since.
+
+    def _on_built(self, event=None) -> None:
+        self._built_3d = self.viewer.dims.ndisplay == 3
+
+    def _on_changed(self, event=None) -> None:
+        # A visible layer is rebuilt by napari straight after; a hidden one
+        # is not, so the node is left with the old mesh.
+        if not self.layer.visible:
+            self._built_3d = False
+
+    def _on_moved(self, event=None) -> None:
+        # The node's transform is computed for the displayed axes.
+        if self.viewer.dims.ndisplay != 3:
+            self._built_3d = False
+
+    def hide_mesh(self) -> None:
+        """Hide the mesh before napari slices it for 2D, keeping its 3D build.
+
+        Only a mesh with a twin: one without draws in 2D itself.
+        """
+        if (self.twin is None or not self.layer.visible
+                or self.layer not in self.viewer.layers):
+            return
+        self._syncing = True
+        try:
+            with napari_private.no_scene_update(self.viewer, self.layer):
+                self.layer.visible = False
+        finally:
+            self._syncing = False
+
+    def _show_mesh(self) -> None:
+        if self._built_3d and self.viewer.dims.ndisplay == 3:
+            with napari_private.shown_unsliced(self.layer):
+                self.layer.visible = True
+        else:
+            self.layer.visible = True
 
     # -- orientation -----------------------------------------------------
 
@@ -383,7 +435,10 @@ class AtlasSurface:
         self._syncing = True
         try:
             if self.layer.visible != mesh:
-                self.layer.visible = mesh
+                if mesh:
+                    self._show_mesh()
+                else:
+                    self.layer.visible = False
             twin = self.twin
             if twin is not None:
                 twin.selection = set(self.selection)

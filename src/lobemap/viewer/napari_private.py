@@ -109,6 +109,24 @@ def before_slicing(viewer, callback) -> None:
         hooks.append(callback)
 
 
+def no_scene_update(viewer, layer):
+    """A context in which hiding or showing `layer` does not redraw napari's scene.
+
+    napari updates its scene graph on every change of a layer's visibility,
+    and that syncs the viewer's camera from vispy's. Inside a change of
+    mode, vispy's camera is already the new mode's and the viewer's is not:
+    a mesh hidden there, before napari slices for 2D, set the 2D plane to
+    the 2D camera's depth, 0. The next visibility change updates it.
+    """
+    canvas = viewer.window._qt_viewer.canvas
+    return layer.events.visible.blocker(canvas._update_scenegraph)
+
+
+def shown_unsliced(layer):
+    """A context in which showing `layer` does not slice it or rebuild its visual."""
+    return layer._block_refresh()
+
+
 def data_from_world(layer):
     """`layer.world_to_data` as it is now, as a function any thread can call.
 
@@ -144,6 +162,8 @@ __all__ = [
     "gl_state",
     "keep_extent_while_slicing",
     "layer_visual",
+    "no_scene_update",
+    "shown_unsliced",
     "text_visual",
     "triangulate_edge",
     "triangulate_face",

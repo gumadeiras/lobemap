@@ -61,6 +61,8 @@ CHECKED = {
     "_layer_slicer": "test_a_step_can_be_seen_before_any_layer_is_sliced",
     "_transforms": "test_the_prefetch_finds_the_planes_a_step_lands_on",
     "_cmtkbin": "test_navis_says_whether_cmtk_is_installed",
+    "_update_scenegraph": "test_a_mesh_is_hidden_and_shown_without_napari_redoing_it",
+    "_block_refresh": "test_a_mesh_is_hidden_and_shown_without_napari_redoing_it",
 }
 
 #: lobemap's own private names, reached from another of its modules.
@@ -366,6 +368,39 @@ def test_a_slice_step_goes_through_slice_dims_and_clears_the_extent(viewer):
          "the layer slicer calling layer._slice_dims, which calls _clear_extent", used)
     need(viewer.layers.extent is not before,
          "viewer.layers recomputing its extent when a layer clears one", used)
+
+
+def test_a_mesh_is_hidden_and_shown_without_napari_redoing_it(viewer):
+    """What `no_scene_update` and `shown_unsliced` reach, and what they rely on napari doing."""
+    from lobemap.viewer.napari_private import layer_visual, no_scene_update, shown_unsliced
+
+    used = "viewer.layers.AtlasSurface, which keeps its 3D build through 2D"
+    viewer.dims.ndisplay = 3
+    vertices = np.array([[0, 0, 0], [0, 1, 0], [1, 0, 0], [0, 0, 1]], float)
+    layer = viewer.add_surface((vertices, np.array([[0, 1, 2], [0, 1, 3]])))
+    canvas = viewer.window._qt_viewer.canvas
+    need(callable(getattr(canvas, "_update_scenegraph", None)),
+         "VispyCanvas._update_scenegraph", used)
+    need(callable(getattr(layer, "_block_refresh", None)), "Layer._block_refresh", used)
+    node = layer_visual(viewer, layer).node
+    built, drawn = [], []
+    layer.events.set_data.connect(lambda: built.append(1))
+    on_draw = canvas.on_draw
+    canvas.on_draw = lambda *a, **k: (drawn.append(1), on_draw(*a, **k))[1]
+    with (reaching("layer.events.visible.blocker(canvas._update_scenegraph)", used),
+          no_scene_update(viewer, layer)):
+        layer.visible = False
+    need(not drawn and not node.visible,
+         "a visibility change reaching the vispy node but not the scene graph", used)
+    layer.visible = True
+    need(drawn and built, "a layer shown updating the scene graph and rebuilding its visual",
+         used)
+    layer.visible = False
+    del built[:]
+    with reaching("Layer._block_refresh()", used), shown_unsliced(layer):
+        layer.visible = True
+    need(not built and node.visible, "a layer shown under _block_refresh keeping its visual",
+         used)
 
 
 def test_napari_triangulation_without_bermuda():
