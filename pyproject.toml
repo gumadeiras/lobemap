@@ -137,15 +137,19 @@ target-version = "py311"
 testpaths = ["tests"]
 # No deprecated API: any deprecation is an error. napari attributes its
 # own attribute deprecations to the wrong frame, so a filter on lobemap's
-# module names would miss them; hence the blanket rule. The exceptions are
-# dependencies whose own internals warn and that no permitted upgrade fixes:
-# scikit-image 0.26 sets an array's shape, which NumPy 2.5 deprecated, and
-# napari's pydantic models use `json_encoders`. Add one only for a warning
-# raised inside a dependency.
+# module names would miss them; hence the blanket rule. A deprecation in a
+# thread surfaces as an unhandled thread exception, so that is an error too.
+# The exceptions are dependencies whose own internals warn and that no
+# permitted upgrade fixes: scikit-image 0.26 sets an array's shape, which
+# NumPy 2.5 deprecated; napari's pydantic models use `json_encoders`; and
+# npe2 0.9 declares its models with pydantic 1 options. Add one only for a
+# warning raised inside a dependency, as narrowly as it can be named.
 filterwarnings = [
   "error::DeprecationWarning",
   "error::PendingDeprecationWarning",
   "error::FutureWarning",
+  "error::pytest.PytestUnhandledThreadExceptionWarning",
   "default:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:skimage",
-  "default::DeprecationWarning:pydantic",
+  'default:`json_encoders` is deprecated:DeprecationWarning:pydantic\._internal\._generate_schema',
+  'default::DeprecationWarning:npe2\.',
 ]
