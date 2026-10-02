@@ -171,11 +171,13 @@ def test_orient_anterior_points_the_camera_down_the_measured_axis(viewer):
 def test_an_exactly_axis_aligned_camera_is_flipped_by_napari(viewer):
     """Why `GIMBAL_NUDGE_DEG` exists. Pins the napari behavior.
 
-    At exact gimbal lock napari's vispy round trip -- angles to quaternion and
-    back -- cannot recover the third Euler angle and zeroes it, which returns
-    a NEGATED up vector. The brain renders upside down with no error. If this
-    test starts failing, napari has fixed it and the nudge can go.
+    At exact gimbal lock napari 0.9.1's vispy round trip -- angles to
+    quaternion and back -- cannot recover the third Euler angle and zeroes it,
+    which returns a NEGATED up vector. The brain renders upside down with no
+    error. napari 0.9.2 keeps the up vector. The nudge stays while the pin
+    allows 0.9.1, and can go once its floor is 0.9.2.
     """
+    import napari
     from napari._vispy.camera import (
         napari_angles_to_vispy_quat as forward,
     )
@@ -183,19 +185,22 @@ def test_an_exactly_axis_aligned_camera_is_flipped_by_napari(viewer):
         vispy_quat_to_napari_angles as backward,
     )
     from napari.components.camera import Camera
+    from packaging.version import Version
 
     def round_trip(view, up):
         cam = Camera()
         cam.set_view_direction(view_direction=view, up_direction=up)
-        angles = backward(forward(np.array(cam.angles), (False,) * 3),
+        angles = backward(forward(tuple(cam.angles), (False,) * 3),
                           (False,) * 3)
         out = Camera()
         out.angles = tuple(angles)
         return np.asarray(out.up_direction)
 
-    assert np.dot(round_trip((0, 0, 1), (0, 1, 0)), (0, 1, 0)) < -0.99, (
-        "napari no longer inverts an axis-aligned camera; drop the nudge"
-    )
+    up = np.dot(round_trip((0, 0, 1), (0, 1, 0)), (0, 1, 0))
+    if Version(napari.__version__) >= Version("0.9.2"):
+        assert up > 0.99, "napari 0.9.2 inverts an axis-aligned camera again"
+    else:
+        assert up < -0.99, "napari 0.9.1 no longer inverts an axis-aligned camera"
     eps = np.tan(np.radians(1.0))
     nudged = np.array([eps, 0.0, 1.0])
     nudged /= np.linalg.norm(nudged)
@@ -221,7 +226,7 @@ def test_the_nudge_survives_the_round_trip_for_every_space(registry_root):
             dorsal = anatomical_axes(space)["D"]
             assert orient_anterior(viewer, space) is True
             cam = viewer.scene.camera
-            angles = backward(forward(np.array(cam.angles), (False,) * 3),
+            angles = backward(forward(tuple(cam.angles), (False,) * 3),
                               (False,) * 3)
             after = Camera()
             after.angles = tuple(angles)
