@@ -34,7 +34,7 @@ from .slicing import (
 from .view import (
     MIRROR_AXIS,
     apply_mirror,
-    centre_sliders,
+    center_sliders,
     fit_view,
     install_home_orientation,
     mirror_center,
@@ -312,10 +312,10 @@ def build_scene(
         bounds = (into.deferred.bounds(first.name)
                   if first.reference and into.deferred is not None else None)
         if bounds is not None:
-            centre_sliders(viewer, *bounds, step=1.0)
+            center_sliders(viewer, *bounds, step=1.0)
         elif images:
             extent = viewer.layers.get_extent([images[0]])
-            centre_sliders(viewer, *extent.world, step=extent.step)
+            center_sliders(viewer, *extent.world, step=extent.step)
 
     # Anatomical names for the dimension sliders and napari's own axis
     # overlay. No layer of our own: see `viewer/axes.py`. It shows the

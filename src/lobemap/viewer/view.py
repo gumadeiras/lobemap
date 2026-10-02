@@ -297,7 +297,7 @@ def restore_view(viewer, state: dict) -> None:
     viewer.title = state["title"]
 
 
-def centre_sliders(viewer, lo, hi, step) -> None:
+def center_sliders(viewer, lo, hi, step) -> None:
     """Put every slider where napari puts it when the first layer it is given
     spans `lo` to `hi` in steps of `step`.
 
@@ -370,7 +370,7 @@ __all__ = [
     "MIRROR_AXIS",
     "apply_mirror",
     "capture_view",
-    "centre_sliders",
+    "center_sliders",
     "fit_view",
     "install_home_orientation",
     "install_initial_fit",
