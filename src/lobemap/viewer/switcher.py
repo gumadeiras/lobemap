@@ -76,7 +76,8 @@ class SpaceSwitcher(QWidget):
         self.mirror.setToolTip(
             "Show this space reflected left-right, for display only. The "
             "data is untouched, and both axis triads follow the mirror, so "
-            "the anatomical one still names the side you are looking at."
+            "the anatomical one still names the side you are looking at. "
+            "Switching space clears it."
         )
         self.mirror.toggled.connect(self._on_mirror)
 
@@ -240,10 +241,6 @@ class SpaceSwitcher(QWidget):
         new = None
         try:
             new = self._load(want)
-            # A scene is built unmirrored, so the control has to re-assert
-            # itself onto the new one rather than the state being implicit.
-            if self.mirror.isChecked():
-                new.set_mirror(True)
             self.session = new
             self._fill_slices(keep=anatomy)
         except Exception as exc:                      # noqa: BLE001
@@ -264,6 +261,13 @@ class SpaceSwitcher(QWidget):
                 self.combo.setCurrentIndex(index)
             return
         old.teardown()
+        # The new space comes up unmirrored and the control follows it. The
+        # mirror is how one space is being looked at, not a preference:
+        # carried across, it would hand back a reflected scene nobody
+        # reflected, and the reflection is the one thing here that can make
+        # left read as right. `_busy` keeps `_on_mirror` out of it. A failed
+        # switch keeps the open scene, mirror and all, and never gets here.
+        self.mirror.setChecked(False)
         try:
             new.settle_view()
             self.settle()

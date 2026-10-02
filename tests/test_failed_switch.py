@@ -264,18 +264,19 @@ def _fail_after_hooks(monkeypatch, viewer):
 
 
 def _fail_after_the_load(monkeypatch, viewer):
-    """The scene is complete; mirroring it, the switcher's own step, fails."""
-    from lobemap.viewer.app import SceneSession
+    """The scene is complete; filling the slice menu for it, the switcher's
+    own step, fails."""
+    from lobemap.viewer.switcher import SpaceSwitcher
 
-    real = SceneSession.set_mirror
+    real = SpaceSwitcher._fill_slices
 
-    def set_mirror(self, on):
-        if self.space == TARGET:
-            raise RuntimeError("the mirror broke")
-        return real(self, on)
+    def fill_slices(self, *args, **kwargs):
+        if self.session.space == TARGET:
+            raise RuntimeError("the slice menu broke")
+        return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(SceneSession, "set_mirror", set_mirror)
-    return "the mirror broke"
+    monkeypatch.setattr(SpaceSwitcher, "_fill_slices", fill_slices)
+    return "the slice menu broke"
 
 
 FAILURES = {
@@ -350,8 +351,12 @@ def test_a_switch_that_succeeds_still_replaces_the_scene(monkeypatch):
         assert all(name.startswith(("grabe", "Grabe")) for name in layer_names(viewer)), (
             layer_names(viewer))
         assert len(docks(viewer, "Compartments")) == 1
-        # The mirror carries over; the anatomy chosen for the slice does too.
-        assert sess.mirrored
+        # The mirror does not carry over, or the new space would come up
+        # reflected with nothing clicked; the anatomy chosen for the slice
+        # does.
+        assert not sess.mirrored
+        assert not switcher(viewer).mirror.isChecked()
+        assert all(not s.mirrored for s in sess.surfaces.values())
         assert switcher(viewer).slice.currentText().startswith("Anterior-Posterior")
         # On the new scene's own grid, cutting its atlas.
         axis = int(viewer.dims.order[0])
