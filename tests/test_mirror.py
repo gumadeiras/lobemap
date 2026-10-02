@@ -267,3 +267,37 @@ def test_toggling_twice_does_not_drift(registry):
             session.set_mirror(False)
     finally:
         viewer.close()
+
+
+@pytest.mark.requires_data
+@pytest.mark.parametrize("space", SPACES)
+def test_a_mirror_toggle_in_2d_moves_no_slider(registry, space):
+    """The sliders' range and plane stay where they were, on the grid.
+
+    The surfaces reflect their own vertices and the images ride on their
+    affine, so both bounds have to come out of the same float64 arithmetic:
+    reflected in float32, the male CNS's x range came out 1.5e-6 um low,
+    under the stain's bound, and its plane 6e-6 steps off the slider grid.
+    """
+    napari = pytest.importorskip("napari")
+    viewer = napari.Viewer(show=False, ndisplay=2)
+
+    def state():
+        ranges = np.array([tuple(r) for r in viewer.dims.range], float)
+        point = np.asarray(viewer.dims.point, float)
+        steps = (point - ranges[:, 0]) / ranges[:, 2]
+        assert np.allclose(steps, np.round(steps), rtol=0, atol=1e-9), (
+            f"the plane is off the slider grid by {steps - np.round(steps)} steps")
+        return ranges, point
+
+    try:
+        session = load_space(viewer, registry, space, fit=False)
+        session.set_slice_axis(MIRROR_AXIS)
+        ranges, point = state()
+        for on in (True, False):
+            session.set_mirror(on)
+            got_ranges, got_point = state()
+            np.testing.assert_allclose(got_ranges, ranges, rtol=0, atol=1e-9)
+            np.testing.assert_allclose(got_point, point, rtol=0, atol=1e-9)
+    finally:
+        viewer.close()

@@ -329,16 +329,18 @@ def mirror_matrix(ndim: int, center: float, axis: int = MIRROR_AXIS):
 
 
 def reflect_vertices(vertices, center: float, axis: int = MIRROR_AXIS) -> np.ndarray:
-    """`vertices` reflected x -> 2c - x along `axis`, as float32.
+    """`vertices` reflected x -> 2c - x along `axis`, in float64.
 
     For the layers that reflect their own geometry rather than ride on
     `layer.affine` -- the surfaces and their stand-ins (`AtlasSurface._present`).
-    Worked in float64 and rounded once, so a mesh and the stand-in holding
-    its corners get the same reflected bounds to the bit, and building the
-    part moves no slider.
+    Kept in float64, as napari works an affine: a mesh and the stand-in
+    holding its corners then get the same reflected bounds to the bit, and
+    those bounds meet an affine-reflected image's exactly. Rounded to float32
+    instead, the male CNS's x range came out 1.5e-6 um under the stain's and
+    its plane off the slider grid. napari still uploads float32.
     """
-    v = np.array(vertices, dtype=np.float32, copy=True)
-    v[:, axis] = (2.0 * float(center) - v[:, axis].astype(np.float64)).astype(np.float32)
+    v = np.array(vertices, dtype=np.float64, copy=True)
+    v[:, axis] = 2.0 * float(center) - v[:, axis]
     return v
 
 
