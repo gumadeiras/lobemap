@@ -300,6 +300,8 @@ def build_scene(
         show_images(images)
     elif into.deferred is not None:
         into.deferred.hold(into.all_layers())
+        if parts[0].reference:              # what napari centred on when built first
+            into.deferred.centre_on(parts[0].name)
 
     # Anatomical names for the dimension sliders and napari's own axis
     # overlay. No layer of our own: see `viewer/axes.py`. It shows the

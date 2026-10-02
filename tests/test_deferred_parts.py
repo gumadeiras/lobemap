@@ -130,6 +130,41 @@ def test_a_space_opens_with_the_sliders_and_view_of_its_whole_scene(registry, sp
         whole.close()
 
 
+#: The plane eaa535f, the last revision that built every part at open, landed
+#: on along x, y and z when that slice axis was chosen right after a space
+#: opened in 2D, or opened in 3D and then went to 2D. Measured on an export
+#: of it with this data.
+EAA535F_PLANES = {
+    ("FAFB14", "2"): (490.0419, 252.5266, 46.8532),
+    ("FAFB14", "3"): (490.1573, 252.5266, 46.8532),
+    ("JRCFIB2018F", "2"): (137.25, 270.5, 210.0),
+    ("JRCFIB2018F", "3"): (137.5, 270.5, 210.0),
+    ("JRCFIB2022M", "2"): (435.35, 233.8, 109.8),
+    ("JRCFIB2022M", "3"): (435.35, 233.8, 109.8),
+    ("GRABE", "2"): (130.56, 87.04, 56.64),
+    ("GRABE", "3"): (130.56, 87.04, 56.64),
+}
+
+
+@pytest.mark.parametrize("axis", [0, 1, 2])
+@pytest.mark.parametrize(("space", "ndisplay"), list(EAA535F_PLANES))
+def test_a_slice_axis_chosen_right_after_the_open_lands_where_it_did(monkeypatch, space,
+                                                                     ndisplay, axis):
+    """Where napari put the sliders when the first neuropil set was built first."""
+    with launched(monkeypatch, "view", space, "--ndisplay", ndisplay) as (code, viewer):
+        assert code == 0
+        control = switcher(viewer).slice
+        control.setCurrentIndex(control.findData(axis))
+        pump()
+        if ndisplay == "3":
+            viewer.dims.ndisplay = 2
+            pump()
+        assert int(viewer.dims.order[0]) == axis
+        assert viewer.dims.point[axis] == pytest.approx(
+            EAA535F_PLANES[(space, ndisplay)][axis], abs=1e-3)
+        assert_rows_match_drawing(session(viewer))
+
+
 @pytest.mark.parametrize("mirror", [False, True])
 @pytest.mark.parametrize(("space", "name"), DEFERRED)
 def test_building_a_deferred_part_moves_neither_the_sliders_nor_the_plane(
