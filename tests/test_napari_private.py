@@ -431,16 +431,16 @@ def test_a_volume_takes_its_voxels_at_its_next_draw(viewer, monkeypatch):
     render = viewer.window._qt_viewer.canvas._scene_canvas.render
     del uploads[:]
     viewer.dims.ndisplay = 3
-    need(not uploads, "napari handing the volume node its voxels through set_data", used)
-    render()
-    need(uploads == [(6, 5, 4)], "vispy calling Volume._prepare_draw as it draws", used)
+    need(uploads == [(6, 5, 4)],
+         "napari handing the volume node its voxels through set_data, the first at once", used)
     for ndisplay in (2, 3):
         viewer.dims.ndisplay = ndisplay
         render()
     need(uploads == [(6, 5, 4)], "napari slicing the same buffer on the way back into 3D", used)
     layer.data = np.zeros((3, 5, 4), np.uint8)
+    need(uploads == [(6, 5, 4)], "napari handing new voxels of the same dtype to set_data", used)
     render()
-    need(uploads[-1] == (3, 5, 4), "a volume given new voxels taking them", used)
+    need(uploads[-1] == (3, 5, 4), "vispy calling Volume._prepare_draw as it draws", used)
 
 
 def test_napari_triangulation_without_bermuda():

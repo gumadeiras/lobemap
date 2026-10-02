@@ -494,6 +494,35 @@ def test_3d_renders_the_same_pyramid_level_once_it_is_read(monkeypatch, space):
         assert _rendered(image).shape == tuple(levels[fine].shape)
 
 
+@pytest.mark.parametrize("rendering", ["translucent", "iso"])
+def test_a_stain_restyled_in_2d_is_drawn_on_its_first_entry_into_3d(monkeypatch, rendering):
+    """napari computes the cutoffs of translucent and iso rendering from the
+    texture's format straight after handing the node its voxels: read from
+    the placeholder a deferred upload leaves, they came out unnormalized,
+    20 for 0.078, and the stain drew nothing."""
+    from lobemap.viewer.napari_private import layer_visual
+
+    with launched(monkeypatch, "view", "FAFB14", "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        image = session(viewer).images[0]
+        if rendering == "translucent":
+            image.blending = "translucent"
+        else:
+            image.rendering = "iso"
+        image.contrast_limits = (20, 200)
+        viewer.dims.ndisplay = 3
+        pump()
+        viewer.window._qt_viewer.canvas._scene_canvas.render()
+        node = layer_visual(viewer, image).node
+        low = node._texture.clim_normalized[0]
+        assert 0.0 < low < 1.0, f"the texture is not normalized: {low}"
+        if rendering == "translucent":
+            assert node.mip_cutoff == pytest.approx(low), (node.mip_cutoff, low)
+        else:
+            assert node.threshold == pytest.approx(image.iso_threshold / 255.0, rel=1e-3), (
+                node.threshold, image.iso_threshold)
+
+
 def test_3d_uploads_the_stain_level_once_and_not_on_every_entry(monkeypatch):
     """The pinned level is 255-613 MB, and uploading it again on every entry
     into 3D was 0.35-0.55 s of the first frame. It is uploaded when it comes,

@@ -138,8 +138,12 @@ def keep_volume_texture(viewer, layer) -> None:
     first frame. So the node takes its voxels at its next draw instead, the
     last ones it was given, and only if they are not that buffer -- same
     address, shape, strides and dtype -- which is kept alive meanwhile, as
-    vispy keeps it, so no other array can take its address. A contrast
-    change vispy re-uploads for is passed straight through.
+    vispy keeps it, so no other array can take its address. Three go
+    straight through: a contrast change vispy re-uploads for, a layer's
+    first voxels, and voxels of another dtype. napari reads the texture's
+    format straight after `set_data`, for the cutoffs of translucent and
+    iso rendering, and from vispy's float32 placeholder it computed them
+    unnormalized: on a first entry into 3D from 2D the stain drew nothing.
     """
     node = layer_visual(viewer, layer)._layer_node._volume_node
     upload, prepare = node.set_data, node._prepare_draw
@@ -149,7 +153,8 @@ def keep_volume_texture(viewer, layer) -> None:
         return (vol.__array_interface__["data"][0], vol.shape, vol.strides, vol.dtype.str)
 
     def set_data(vol, clim=None, copy=True):
-        if clim is not None:
+        if clim is not None or state["held"] is None or state["held"][1].dtype != vol.dtype:
+            state["pending"] = None
             upload(vol, clim=clim, copy=copy)
             state["held"] = (key(vol), vol)
             return
