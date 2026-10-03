@@ -65,3 +65,126 @@ def test_an_asset_colormap_reaches_its_layer(tmp_path):
         assert viewer.layers["plain"].colormap.name == "gray"
     finally:
         viewer.close()
+
+
+# -- a surface's own colormap entry --------------------------------------------
+
+
+def _menu(viewer, layer):
+    """The colormap menu napari's layer settings show for `layer`."""
+    from qtpy.QtWidgets import QComboBox
+
+    controls = viewer.window._qt_viewer.controls.widgets[layer]
+    found = [c for c in controls.findChildren(QComboBox)
+             if c.objectName() == "colormapComboBox"]
+    assert len(found) == 1, found
+    return found[0]
+
+
+def _menu_items(viewer, layer) -> list[str]:
+    menu = _menu(viewer, layer)
+    return [menu.itemData(i) for i in range(menu.count())]
+
+
+def _want(surface) -> np.ndarray:
+    """The colors a surface paints: its own, transparent where unchecked, in
+    the float32 napari keeps colors in."""
+    want = np.array(surface.colors, float)
+    want[:, 3] = [1.0 if i in surface.selection else 0.0 for i in range(len(want))]
+    return want.astype(np.float32)
+
+
+def test_toggling_rows_adds_no_colormap_and_each_layer_keeps_its_own():
+    """Two surfaces of the same colors, rows toggled a hundred times: napari's
+    colormap list and the layer settings menu stay as they were, each layer
+    paints its own selection, and a surface built after one is torn down
+    takes its entry back rather than adding one."""
+    napari = pytest.importorskip("napari")
+    import turned_harness as th
+    from napari.utils.colormaps import AVAILABLE_COLORMAPS
+    from viewer_harness import drawn, pump
+
+    from lobemap.viewer.layers import AtlasSurface
+
+    viewer = napari.Viewer(show=False, ndisplay=3)
+    try:
+        mesh = th.meshset()
+        colors = np.array([[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0],
+                           [0.0, 0.0, 1.0, 1.0]])
+        surfaces = [AtlasSurface(viewer, mesh, name, colors=colors.copy(),
+                                 compact_delay_ms=0) for name in ("one", "two")]
+        one, two = surfaces
+        assert one.layer.colormap is not two.layer.colormap
+        pump()
+        names = list(AVAILABLE_COLORMAPS)
+        menu = _menu_items(viewer, one.layer)
+        rng = np.random.default_rng(7)
+        for _ in range(100):
+            for surface in surfaces:
+                picked = {i for i in range(3) if rng.random() < 0.5} or {0}
+                surface.set_selection(picked)
+            for surface in surfaces:
+                assert np.array_equal(surface.layer.colormap.colors, _want(surface))
+                assert drawn(surface) == surface.selection
+        pump()
+        assert list(AVAILABLE_COLORMAPS) == names
+        assert _menu_items(viewer, one.layer) == menu
+
+        # Torn down, its entry is free for the next surface, which paints its
+        # own colors in it.
+        name = one.layer.colormap.name
+        one.stop()
+        viewer.layers.remove(one.layer)
+        three = AtlasSurface(viewer, mesh, "three", colors=colors[::-1].copy(),
+                             compact_delay_ms=0)
+        assert three.layer.colormap.name == name
+        assert np.array_equal(three.layer.colormap.colors, _want(three))
+        assert np.array_equal(two.layer.colormap.colors, _want(two))
+        assert list(AVAILABLE_COLORMAPS) == names
+    finally:
+        viewer.close()
+
+
+@pytest.mark.requires_data
+def test_rows_toggled_in_every_brain_add_no_colormap(monkeypatch):
+    """Through the tables, in every brain and back: after the first round,
+    neither napari's colormap list nor the layer settings menu grows, and
+    every surface paints its own checked rows."""
+    from napari.utils.colormaps import AVAILABLE_COLORMAPS
+    from viewer_harness import SPACES, launched, pump, session, switch_to
+
+    def toggle_everything() -> None:
+        sess = session(viewer)
+        for name in list(sess.parts):
+            tab = sess.panel.tab(name)
+            if tab is None:
+                continue
+            rows = tab.table.rowCount()
+            for k in range(6):
+                tab.select(range(k % 3, rows, 3))
+            tab.select(range(rows))
+        pump(300)
+        layers = {}
+        for surface in sess.surfaces.values():
+            assert np.array_equal(surface.layer.colormap.colors, _want(surface)), (
+                surface.name)
+            layers.setdefault(id(surface.layer.colormap), []).append(surface.name)
+        assert all(len(held) == 1 for held in layers.values()), layers
+
+    with launched(monkeypatch, "view", SPACES[0]) as (code, viewer):
+        assert code == 0
+        for space in (*SPACES[1:], SPACES[0]):
+            toggle_everything()
+            switch_to(viewer, space)
+        toggle_everything()
+        names = list(AVAILABLE_COLORMAPS)
+        primary = session(viewer).surfaces[
+            session(viewer).registry.primary_atlas(SPACES[0]).id].layer
+        menu = _menu_items(viewer, primary)
+        for space in (*SPACES[1:], SPACES[0]):
+            switch_to(viewer, space)
+            toggle_everything()
+        assert list(AVAILABLE_COLORMAPS) == names
+        primary = session(viewer).surfaces[
+            session(viewer).registry.primary_atlas(SPACES[0]).id].layer
+        assert _menu_items(viewer, primary) == menu

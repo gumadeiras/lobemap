@@ -13,6 +13,9 @@ index, so that value is EXACTLY the index -- identification is unambiguous.
 
 from __future__ import annotations
 
+import itertools
+import weakref
+
 import numpy as np
 
 from ..core.meshfmt import MeshSet
@@ -70,10 +73,14 @@ def _hsv_to_rgba(h: np.ndarray, s: np.ndarray, v: np.ndarray) -> np.ndarray:
 #: atlas's, and a neuropil set's. napari keeps every colormap it is given
 #: by name, for the session, and its menus are as wide as the longest:
 #: named after their layers, with ids in them, they widened the layer
-#: settings by up to 60 px. A name already kept with other colors is
-#: numbered, "Glomerulus colors (2)", so each layer keeps its own.
+#: settings by up to 60 px. Each surface holds an entry of its own,
+#: numbered after the first, "Glomerulus colors (2)"; see `_take_colormap`.
 GLOMERULUS_COLORS = "Glomerulus colors"
 NEUROPIL_COLORS = "Neuropil colors"
+
+#: Every colormap entry a surface has taken, by name, and the surface that
+#: holds it, or None once it is given back.
+_HOLDERS: dict[str, weakref.ref | None] = {}
 
 #: A surface's layer: its part's title, and what it draws.
 MESH_NAME = "{} · 3D"
@@ -102,6 +109,48 @@ def step_colormap(colors: np.ndarray, name: str = GLOMERULUS_COLORS):
         interpolation="zero",
         name=name,
     )
+
+
+def _take_colormap(holder, colors, base: str):
+    """A colormap entry of napari's that `holder` alone recolors, showing `colors`.
+
+    napari keeps every colormap it is given, by name, for the session, in
+    the one list every layer's colormap menu shows, and replaces none: a
+    colormap given under a name it holds with other colors is kept beside
+    it, numbered. Each selection used to be such a colormap, so the menu
+    gained an entry with each row toggled. Each surface takes the first
+    of `base`, "`base` (2)", ... that no live surface holds: one a surface
+    gone before it held, recolored, or a new one. It recolors that entry
+    in place from then on (`_recolor`) and gives it back when its scene is
+    torn down (`stop`). A name napari holds for anyone else is passed by.
+    Two surfaces of the same colors so never share one entry, which a
+    recolor would change under both.
+    """
+    from napari.utils.colormaps import AVAILABLE_COLORMAPS
+
+    n = max(len(colors), 2)                 # as `step_colormap` makes them
+    for k in itertools.count(1):
+        name = base if k == 1 else f"{base} ({k})"
+        if name in _HOLDERS:
+            ref = _HOLDERS[name]
+            if ref is not None and ref() is not None:
+                continue                    # a live surface's
+            entry = AVAILABLE_COLORMAPS[name]
+            if len(entry.colors) != n:
+                continue
+            _recolor(entry, colors)
+        elif name in AVAILABLE_COLORMAPS:
+            continue                        # not lobemap's
+        else:
+            entry = step_colormap(colors, name=name)
+        _HOLDERS[name] = weakref.ref(holder)
+        return entry
+
+
+def _recolor(entry, colors) -> None:
+    """Give a colormap entry `step_colormap`'s colors for `colors`, in place."""
+    colors = np.asarray(colors, dtype=float)
+    entry.colors = np.repeat(colors, 2, axis=0) if len(colors) == 1 else colors
 
 
 def direct_label_colormap(values_to_colors, name: str = GLOMERULUS_COLORS):
@@ -206,7 +255,6 @@ class AtlasSurface:
         self.meshset = meshset
         #: The part's plain title, which its layers and hover text name it by.
         self.name = name
-        self.colormap_name = colormap_name
         n = meshset.n_compartments
         #: What a reader sees for each compartment: its published name, with
         #: any doubt about it (`Compartment.label`). `meshset.names` stays the
@@ -234,8 +282,10 @@ class AtlasSurface:
         self._resident: list[int] = sorted(self.selection)
         v, f, vals = meshset.select(sorted(self.selection))
         v, f = self._present(v, f)
+        #: This surface's own entry in napari's colormaps; see `_take_colormap`.
+        self._colormap = _take_colormap(self, self.colors, colormap_name)
         settings = {
-            "colormap": step_colormap(self.colors, name=colormap_name),
+            "colormap": self._colormap,
             "contrast_limits": contrast_limits_for(n),
             "opacity": opacity,
             # Given here rather than set afterwards, so vispy never computes
@@ -507,7 +557,8 @@ class AtlasSurface:
         mask = np.zeros(len(colors), dtype=bool)
         mask[sorted(self.selection)] = True
         colors[:, 3] = np.where(mask, 1.0, 0.0)
-        self.layer.colormap = step_colormap(colors, name=self.colormap_name)
+        _recolor(self._colormap, colors)
+        self.layer.colormap = self._colormap
 
     def _schedule_compact(self) -> None:
         if self.compact_delay_ms <= 0:
@@ -524,9 +575,13 @@ class AtlasSurface:
         self._timer.start(self.compact_delay_ms)
 
     def stop(self) -> None:
-        """Cancel a pending compaction, for a scene being torn down."""
+        """Cancel a pending compaction, and give back the colormap entry,
+        for a scene being torn down."""
         if self._timer is not None:
             self._timer.stop()
+        ref = _HOLDERS.get(self._colormap.name)
+        if ref is not None and ref() is self:
+            _HOLDERS[self._colormap.name] = None
 
     def compact(self) -> None:
         """Upload only the selected compartments. Restores exact picking.
