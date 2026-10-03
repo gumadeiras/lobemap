@@ -27,6 +27,11 @@ import weakref
 LEFT_WIDTH = 330
 RIGHT_WIDTH = 440
 
+#: The spacing unit of the View dock and napari's button rows, in pixels:
+#: one between a label and its control, between controls in a row and
+#: between rows of a group, two between groups, one at the dock's edges.
+GRID = 8
+
 #: napari's own docks, by the names lobemap shows for them.
 LAYER_SETTINGS = "Layer settings"
 LAYERS = "Layers"
@@ -187,6 +192,7 @@ def _relock(layer) -> None:
 
 
 __all__ = [
+    "GRID",
     "LAYERS",
     "LAYER_SETTINGS",
     "LEFT_WIDTH",

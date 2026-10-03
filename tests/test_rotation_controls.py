@@ -93,7 +93,8 @@ def test_the_rows_are_in_view_in_both_modes_and_named_by_the_screen(monkeypatch)
         sw = switcher(viewer)
         rows = sw.rotation
         assert rows.heading.text() == "Rotate around"
-        labels = [rows.rows.labelForField(rows.box[a]).text()
+        # In the dock's own form, so they line up with its other rows.
+        labels = [sw.layout().labelForField(rows.box[a]).text()
                   for a in ("spin", "turn", "tilt")]
         assert labels == ["Line of sight", "Vertical axis", "Horizontal axis"]
         for ndisplay in (3, 2):

@@ -32,16 +32,14 @@ ZOOM = "Zoom"
 ZOOM_UNIT = " pixels per µm"
 ZOOM_TIP = (
     "How large the brain is drawn: screen pixels per micrometer of the brain. "
-    "Scrolling on the image changes it too; Fit to window sets it to fit the "
-    "brain to the window."
+    "Scrolling on the image zooms too."
 )
 #: The zoom box's range: napari's popup offers 0.01 to 100.
 ZOOM_RANGE = (0.001, 1000.0)
 PERSPECTIVE = "Perspective"
 PERSPECTIVE_TIP = (
-    "How much larger the near parts of the brain look than the far ones, as "
-    "the field of view of a camera: 0° is flat, with no perspective, and 90° "
-    "the strongest. 3D only."
+    "How much larger near parts of the brain look than far ones: a camera's "
+    "field of view, from 0°, flat, to 90°. 3D only."
 )
 FLAT = "0° (flat)"
 #: Said beside the perspective box while Slice view disables it.

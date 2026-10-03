@@ -32,8 +32,9 @@ import re
 import sys
 import traceback
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QEvent, Qt
 from qtpy.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -47,6 +48,7 @@ from qtpy.QtWidgets import (
 )
 
 from .camera_rows import PERSPECTIVE, ZOOM, CameraRows
+from .chrome import GRID
 from .request import MissingAssets, loadable_spaces
 from .rotation_rows import RotationRows
 from .slicing import AXIS_LETTERS, order_for, slice_axes
@@ -84,8 +86,7 @@ SLICE_TIP = "Show one section at a time. The slider under the image steps throug
 HOME = "Fit to window"
 HOME_TIP = (
     "Fit the brain to the window. In 3D, also turn back to the front view, "
-    "dorsal side up, with your rotation applied. The slice and the rotation "
-    "angles stay as they are."
+    "dorsal side up, with your rotation applied."
 )
 #: Said under the Sections menu while 3D disables it.
 SLICE_ONLY = "Slice view only"
@@ -191,7 +192,6 @@ class SpaceSwitcher(QWidget):
         # As wide as the longest title, which the column then makes room
         # for: cut short, "Grabe 2015 (live brain, light micro" was shown.
         self.combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self.combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._on_brain_shown()
         self.combo.currentIndexChanged.connect(self._on_change)
 
@@ -207,7 +207,9 @@ class SpaceSwitcher(QWidget):
         #: The sections the slider steps through, by array axis.
         self.slice = QComboBox()
         self.slice.setToolTip(SECTIONS_TIP)
-        self._narrow(self.slice)
+        # As wide as the longest section's name, which says the axis it
+        # steps along: none is cut short.
+        self.slice.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.slice.currentIndexChanged.connect(self._on_slice)
         self.align = QCheckBox(ALIGN)
         self.align.setToolTip(ALIGN_TIP)
@@ -237,7 +239,7 @@ class SpaceSwitcher(QWidget):
 
         #: The angles about the screen's axes; they carry across a switch,
         #: as the alignment does.
-        self.rotation = RotationRows()
+        self.rotation = RotationRows(self)
         self.rotation.changed.connect(self._on_rotation)
 
         self.legend = QLabel(ARROWS)
@@ -250,35 +252,67 @@ class SpaceSwitcher(QWidget):
         show = QHBoxLayout()
         show.addWidget(self.three_d)
         show.addWidget(self.slice_view)
-        show.addStretch(1)
+        # Fit to window changes no mode: set apart from the two that do.
+        show.addSpacing(GRID)
         show.addWidget(self.home)
         sections = QVBoxLayout()
         sections.addWidget(self.slice)
         sections.addWidget(self.align)
         sections.addWidget(self.slice_note)
-        form = QFormLayout(self)
-        form.setContentsMargins(8, 6, 8, 6)
-        # The menus take the dock's width; on macOS they kept their hint.
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        form.addRow("Brain", self.combo)
-        form.addRow("Show", show)
-        form.addRow(ZOOM, self.camera.zoom)
-        form.addRow(PERSPECTIVE, self.camera.perspective_row)
-        form.addRow("Sections", sections)
-        form.addRow(self.picture)
-        form.addRow(self.rotation)
         # In a layout of its own: a form drops the row of a hidden widget,
         # held place or not, and everything under it moved up in 2D.
         arrows = QVBoxLayout()
         arrows.addWidget(self.legend)
+        for row in (show, sections, self.picture, self.camera.perspective_row, arrows):
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(GRID)
+
+        # One grid (`chrome.GRID`): labels in one column and controls in
+        # the next, a grid unit apart; rows a grid unit apart within a
+        # group and two between groups; every control as wide as its
+        # content, no wider. Only the headings and the text that wraps run
+        # across the dock.
+        form = QFormLayout(self)
+        form.setContentsMargins(GRID, GRID, GRID, GRID)
+        form.setHorizontalSpacing(GRID)
+        form.setVerticalSpacing(GRID)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
+        form.addRow("Brain", self.combo)
+        self._gap(form)
+        form.addRow("Show", show)
+        form.addRow(ZOOM, self.camera.zoom)
+        form.addRow(PERSPECTIVE, self.camera.perspective_row)
+        self._gap(form)
+        form.addRow("Sections", sections)
+        self._gap(form)
+        form.addRow(None, self.picture)
+        self._gap(form)
+        self.rotation.add_to(form)
+        self._gap(form)
         form.addRow(arrows)
         form.addRow(self.status)
+        for control in (self.combo, self.three_d, self.slice_view, self.home, self.slice,
+                        self.align, self.mirror, self.flip, self.camera.zoom,
+                        self.camera.perspective, self.rotation.reset,
+                        *self.rotation.box.values()):
+            control.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        # napari's theme pads a push button by 4 px all round, which left
+        # its text touching the sides: a grid unit either side instead.
+        self.setStyleSheet(f"QPushButton {{ padding: 4px {GRID}px; }}")
 
         # The dock outlives every scene, so it is connected once.
         viewer.dims.events.ndisplay.connect(self._on_mode)
         viewer.dims.events.order.connect(self._on_order)
         viewer.scene.camera.events.orientation.connect(self._on_orientation)
         self._on_mode()
+
+    @staticmethod
+    def _gap(form: QFormLayout) -> None:
+        """Set two groups of rows apart: an empty row, which adds one more
+        grid unit of the form's spacing between them."""
+        gap = QWidget()
+        gap.setFixedHeight(0)
+        form.addRow(gap)
 
     @staticmethod
     def _hold_place(widget: QWidget) -> None:
@@ -293,14 +327,6 @@ class SpaceSwitcher(QWidget):
         button.setToolTip(tip)
         button.clicked.connect(lambda: setattr(self.viewer.dims, "ndisplay", ndisplay))
         return button
-
-    @staticmethod
-    def _narrow(combo: QComboBox) -> None:
-        """Let a menu be narrower than its longest item, so the column can be."""
-        combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        combo.setMinimumContentsLength(12)
-        combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
     def _title(self, space_id: str) -> str:
         space = self.registry.spaces.get(space_id)
@@ -329,9 +355,19 @@ class SpaceSwitcher(QWidget):
             self.slice.setCurrentIndex(max(0, self.slice.findData(wanted)))
         finally:
             self.slice.blockSignals(False)
+        self._fit_sections()
         self._anatomy = {c.axis: c.anatomy for c in choices}
         self._choices = choices
         self.session.slice_axis = int(self.slice.currentData())
+
+    def _fit_sections(self) -> None:
+        """Size the Sections menu to the names it holds now.
+
+        Qt measures a menu's minimum width once, from the names it held then,
+        and keeps it: the menu stayed as wide as the longest name of the
+        brain opened first. Only a change of style makes it measure again.
+        """
+        QApplication.sendEvent(self.slice, QEvent(QEvent.Type.StyleChange))
 
     def _on_slice(self, _index: int) -> None:
         axis = self.slice.currentData()
@@ -344,6 +380,7 @@ class SpaceSwitcher(QWidget):
         """Cut along the anatomy or the grid; the menu says which."""
         for i, choice in enumerate(self._choices):
             self.slice.setItemText(i, section_label(choice, on))
+        self._fit_sections()
         if self._busy:
             return
         try:

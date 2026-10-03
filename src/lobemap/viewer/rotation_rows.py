@@ -7,19 +7,15 @@ were "Z/slice", "Y/vertical" and "X/horizontal" -- and not by x, y and z:
 those name the image's own axes, which differ from the screen's once the
 slice axis changes. What the angles mean is `rotation`'s, where they are
 spin, tilt and turn.
+
+The rows are laid out in the View dock's own form (`add_to`), so their
+labels and boxes line up with the dock's other labels and controls.
 """
 
 from __future__ import annotations
 
-from qtpy.QtCore import Signal
-from qtpy.QtWidgets import (
-    QDoubleSpinBox,
-    QFormLayout,
-    QLabel,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from qtpy.QtCore import QObject, Signal
+from qtpy.QtWidgets import QDoubleSpinBox, QLabel, QPushButton, QSizePolicy
 
 HEADING = "Rotate around"
 HEADING_TIP = (
@@ -42,7 +38,7 @@ RESET = "Reset rotation"
 RESET_TIP = "Set all three angles to 0°."
 
 
-class RotationRows(QWidget):
+class RotationRows(QObject):
     """A heading, one angle box per screen axis, and a reset button.
 
     `changed` carries (spin, tilt, turn) once per edit: an arrow step, or a
@@ -56,10 +52,10 @@ class RotationRows(QWidget):
         super().__init__(parent)
         self.heading = QLabel(HEADING)
         self.heading.setToolTip(HEADING_TIP)
-        rows = QFormLayout()
-        rows.setContentsMargins(12, 0, 0, 0)
-        #: The angle boxes by the angle they set: "spin", "tilt", "turn".
+        #: The angle boxes, and their labels, by the angle they set:
+        #: "spin", "tilt", "turn".
         self.box: dict[str, QDoubleSpinBox] = {}
+        self.label: dict[str, QLabel] = {}
         for text, angle, tip in ROWS:
             box = QDoubleSpinBox()
             box.setRange(-180.0, 180.0)
@@ -73,19 +69,20 @@ class RotationRows(QWidget):
             label = QLabel(text)
             label.setToolTip(tip)
             label.setBuddy(box)
-            rows.addRow(label, box)
             self.box[angle] = box
-        self.rows = rows
+            self.label[angle] = label
         self.reset = QPushButton(RESET)
         self.reset.setToolTip(RESET_TIP)
+        self.reset.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.reset.clicked.connect(self._on_reset)
-        rows.addRow(self.reset)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
-        layout.addWidget(self.heading)
-        layout.addLayout(rows)
+    def add_to(self, form) -> None:
+        """Lay the rows out in `form`: the heading across it, each angle in
+        its label and control columns, and the reset under the boxes."""
+        form.addRow(self.heading)
+        for _text, angle, _tip in ROWS:
+            form.addRow(self.label[angle], self.box[angle])
+        form.addRow(None, self.reset)
 
     def angles(self) -> tuple[float, float, float]:
         """(spin, tilt, turn), as `SceneSession.set_rotation` takes them."""

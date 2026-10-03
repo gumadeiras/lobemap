@@ -94,8 +94,14 @@ OFF_KEYS = {
 
 def install(viewer) -> None:
     """Make napari's two button rows and their popups lobemap's; once per window."""
+    from .chrome import GRID
+
     qt_viewer = viewer.window._qt_viewer
     row, layer_row = qt_viewer.viewerButtons, qt_viewer.layerButtons
+    # On the View dock's grid: a grid unit between buttons, as between its
+    # controls. Delete stays apart, at the far end.
+    for buttons in (row, layer_row):
+        buttons.layout().setSpacing(GRID)
     for button, why in ((row.transposeDimsButton, TRANSPOSE_OFF),
                         (row.gridViewButton, GRID_OFF)):
         # Disabled, a button takes no click and opens no popup.

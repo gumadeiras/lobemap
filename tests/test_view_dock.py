@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import re
+from itertools import pairwise
 
 import numpy as np
 import pytest
@@ -207,6 +208,109 @@ def test_the_view_controls_drive_the_viewer(monkeypatch):
         layers = _dock(window, "Layers")
         for row in (qt_viewer.viewerButtons, qt_viewer.layerButtons):
             assert row.isVisible() and layers.isAncestorOf(row)
+
+
+def _rows(form) -> list[tuple[int, int, bool]]:
+    """(top, bottom, is a gap) of each row of a form, as laid out."""
+    from qtpy.QtWidgets import QFormLayout
+
+    roles = (QFormLayout.ItemRole.LabelRole, QFormLayout.ItemRole.FieldRole,
+             QFormLayout.ItemRole.SpanningRole)
+    out = []
+    for row in range(form.rowCount()):
+        rects = [form.itemAt(row, role).geometry() for role in roles
+                 if form.itemAt(row, role) is not None]
+        top = min(r.top() for r in rects)
+        bottom = max(r.top() + r.height() for r in rects)
+        out.append((top, bottom, bottom == top))
+    return out
+
+
+def _gaps(widgets, horizontal: bool) -> list[int]:
+    """The space between each widget and the next, along a row or a column."""
+    if horizontal:
+        return [b.x() - (a.x() + a.width()) for a, b in pairwise(widgets)]
+    return [b.y() - (a.y() + a.height()) for a, b in pairwise(widgets)]
+
+
+def test_the_view_dock_sits_on_one_grid(monkeypatch):
+    """Measured as laid out, in every brain, in 3D and Slice view: no push
+    button wider than its text and a grid unit either side; every other
+    control at its own size; labels ending on one column and controls
+    starting a grid unit after it; rows a grid unit apart in a group and two
+    between groups; and napari's buttons a grid unit apart."""
+    from qtpy.QtWidgets import (
+        QAbstractSpinBox,
+        QCheckBox,
+        QComboBox,
+        QFormLayout,
+        QPushButton,
+    )
+
+    from lobemap.viewer.chrome import GRID
+
+    with launched(monkeypatch, "view", "GRABE") as (code, viewer):
+        assert code == 0
+        _show(viewer)
+        sw = switcher(viewer)
+        form = sw.layout()
+        qt_viewer = viewer.window._qt_viewer
+        for space in ("FAFB14", "JRCFIB2018F", "JRCFIB2022M", "GRABE"):
+            switch_to(viewer, space)
+            for ndisplay in (3, 2):
+                viewer.dims.ndisplay = ndisplay
+                pump(200)
+                buttons = sw.findChildren(QPushButton)
+                assert {b.text() for b in buttons} >= {
+                    "3D", "Slice", "Fit to window", "Reset rotation"}
+                for button in buttons:
+                    text = button.fontMetrics().horizontalAdvance(button.text())
+                    assert button.width() <= text + 2 * GRID + 2, (
+                        space, button.text(), button.width(), text)
+                for control in sw.findChildren((QComboBox, QCheckBox, QAbstractSpinBox)):
+                    assert control.width() == control.sizeHint().width(), (
+                        space, type(control).__name__, control.width())
+                # One label column, one control column.
+                margin = form.contentsMargins()
+                assert (margin.left(), margin.top(), margin.right()) == (GRID,) * 3
+                ends, starts = set(), set()
+                for row in range(form.rowCount()):
+                    if form.itemAt(row, QFormLayout.ItemRole.SpanningRole) is not None:
+                        continue                # a heading, a gap or wrapped text
+                    label = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
+                    field = form.itemAt(row, QFormLayout.ItemRole.FieldRole)
+                    if label is not None and label.widget() is not None:
+                        widget = label.widget()
+                        ends.add(widget.x() + widget.width())
+                    if field is not None:
+                        starts.add(field.geometry().left())
+                assert len(ends) == 1 and starts == {ends.pop() + GRID}, (space, starts)
+                # Rows: a grid unit apart, two across a gap row.
+                gaps, after_gap = [], False
+                last = None
+                for top, bottom, gap in _rows(form):
+                    if gap:
+                        after_gap = True
+                        continue
+                    if last is not None:
+                        gaps.append((top - last, 2 * GRID if after_gap else GRID))
+                    last, after_gap = bottom, False
+                assert all(got == want for got, want in gaps), (space, ndisplay, gaps)
+                # Inside a row: the controls a grid unit apart, Fit to window two.
+                assert _gaps([sw.three_d, sw.slice_view, sw.home], True) == [GRID, 2 * GRID]
+                assert _gaps([sw.camera.perspective, sw.camera.note], True) == [GRID]
+                assert _gaps([sw.slice, sw.align, sw.slice_note], False) == [GRID, GRID]
+                assert _gaps([sw.mirror, sw.flip], False) == [GRID]
+                # napari's rows: a grid unit between buttons; delete at the far end.
+                viewer_row = [getattr(qt_viewer.viewerButtons, name) for name in (
+                    "consoleButton", "ndisplayButton", "rollDimsButton",
+                    "transposeDimsButton", "gridViewButton", "resetViewButton")]
+                layer_row = [getattr(qt_viewer.layerButtons, name) for name in (
+                    "newPointsButton", "newShapesButton", "newLabelsButton")]
+                assert set(_gaps(viewer_row, True)) == {GRID}
+                assert set(_gaps(layer_row, True)) == {GRID}
+                delete = qt_viewer.layerButtons.deleteButton
+                assert delete.x() + delete.width() > qt_viewer.layerButtons.width() - GRID
 
 
 def test_the_mirror_reflects_and_another_brain_clears_it(monkeypatch):
