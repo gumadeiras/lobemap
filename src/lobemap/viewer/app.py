@@ -265,6 +265,11 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
     return [_on_move]
 
 
+def window_title(registry: Registry, space: str) -> str:
+    """'lobemap — Hemibrain (female, EM)': the brain open, by its title."""
+    return f"lobemap — {registry.spaces[space].title or space}"
+
+
 def load_space(
     viewer,
     registry: Registry,
@@ -348,14 +353,14 @@ def run(
         raise ViewRequestError("need a space")
     check_request(registry, space, show, on_disk=True)
 
-    viewer = napari.Viewer(title=f"lobemap - {space}", ndisplay=ndisplay)
+    viewer = napari.Viewer(title=window_title(registry, space), ndisplay=ndisplay)
     try:
         def _load(target: str, show: tuple[str, ...] = ()):
             # Unfitted: a switch builds beside the open scene, and a fit
             # now would frame both. The switcher fits once the old one is
             # gone, and the first scene is fitted below.
             session = load_space(viewer, registry, target, show=show, fit=False)
-            viewer.title = f"lobemap - {session.space}"
+            viewer.title = window_title(registry, session.space)
             return session
 
         session = _load(space, tuple(show))
@@ -411,4 +416,5 @@ __all__ = [
     "run",
     "show_primary_atlas",
     "show_targets",
+    "window_title",
 ]

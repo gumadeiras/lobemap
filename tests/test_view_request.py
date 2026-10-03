@@ -90,7 +90,7 @@ def test_show_applies_to_the_first_scene_only(monkeypatch):
         switch_to(viewer, "GRABE")
         assert switcher(viewer).status.text() == ""
         assert session(viewer).space == "GRABE"
-        assert viewer.title == "lobemap - GRABE"
+        assert viewer.title == "lobemap — Grabe 2015 (live brain, light microscopy)"
 
         switch_to(viewer, "FAFB14")
         sess = session(viewer)
