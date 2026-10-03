@@ -42,8 +42,8 @@ def test_the_label_buttons_are_named_as_actions(registry):
     viewer, panel = _panel(registry)
     try:
         names = set(_buttons(_tab(panel)))
-        assert "Label all" in names, names
-        assert "Label none" in names, names
+        assert "Names" in names, names
+        assert "No names" in names, names
         assert "Labels" not in names
         assert "No labels" not in names
     finally:
@@ -60,14 +60,14 @@ def test_label_all_then_none_round_trips(registry):
         overlay = tab.contour
         assert overlay is not None, "the tab has no contour overlay bound"
 
-        buttons["Label all"].click()
+        buttons["Names"].click()
         assert overlay.labels, "Label all labeled nothing"
         labeled = set(overlay.labels)
 
-        buttons["Label none"].click()
+        buttons["No names"].click()
         assert not overlay.labels, "Label none left labels behind"
 
-        buttons["Label all"].click()
+        buttons["Names"].click()
         assert set(overlay.labels) == labeled, "not reproducible"
     finally:
         viewer.close()

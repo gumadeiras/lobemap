@@ -48,7 +48,7 @@ def test_hover_names_the_glomerulus_in_3d_and_2d(monkeypatch, space):
         index = surface.meshset.n_compartments // 2
         name = surface.meshset.names[index]
         # Through the table: nothing, then one row ticked.
-        next(b for b in tab.findChildren(QPushButton) if b.text() == "Show none").click()
+        next(b for b in tab.findChildren(QPushButton) if b.text() == "None").click()
         tab.table.item(tab._row_of(index), VISIBLE_COL).setCheckState(Qt.Checked)
         pump(300)
         want = f"{primary}: {name}"

@@ -57,7 +57,7 @@ def test_every_tab_draws_what_it_checks_on_open(monkeypatch, space, ndisplay):
             if name != primary:
                 # Secondary atlases and reference shells open off, and say so.
                 assert checked(tab) == set(), name
-                assert tab.count.text().startswith("0 / "), (name, tab.count.text())
+                assert tab.count.text().startswith("0 of "), (name, tab.count.text())
 
 
 def test_a_hidden_atlas_shows_exactly_the_row_ticked(monkeypatch):
@@ -79,7 +79,7 @@ def test_show_all_on_a_hidden_shell_checks_and_draws_every_row(monkeypatch):
     with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
         sess = session(viewer)
         tab = sess.panel.tabs["fafb_neuropil"]
-        _buttons(tab)["Show all"].click()
+        _buttons(tab)["All"].click()
         pump(300)
         everything = set(range(tab.surface.meshset.n_compartments))
         assert drawn(tab.surface, tab.contour) == everything
@@ -103,9 +103,9 @@ def test_rows_and_drawing_agree_after_mode_switches(monkeypatch):
     with launched(monkeypatch, "view", "JRCFIB2018F") as (code, viewer):
         sess = session(viewer)
         tab = sess.panel.tabs["neuprint_hemibrain"]
-        _buttons(tab)["Show none"].click()
+        _buttons(tab)["None"].click()
         viewer.dims.ndisplay = 2
-        _buttons(tab)["Show all"].click()
+        _buttons(tab)["All"].click()
         viewer.dims.ndisplay = 3
         pump(300)
         assert drawn(tab.surface, tab.contour) == set(range(tab.surface.meshset.n_compartments))
@@ -122,7 +122,7 @@ def test_rows_and_drawing_agree_after_mode_switches(monkeypatch):
             elif action in ("tick", "untick"):
                 _tick(tab, rng.randrange(n), action == "tick")
             else:
-                label = {"all": "Show all", "none": "Show none", "invert": "Invert"}[action]
+                label = {"all": "All", "none": "None", "invert": "Invert"}[action]
                 _buttons(tab)[label].click()
             pump(300)
             assert_rows_match_drawing(sess)
@@ -236,7 +236,7 @@ def test_the_eye_of_the_layer_the_mode_does_not_draw_means_the_atlas(monkeypatch
             pump(300)
             drawing = mode_layer(tab.surface, tab.contour)
             other = tab.contour.layer if drawing is tab.surface.layer else tab.surface.layer
-            _buttons(tab)["Show none"].click()
+            _buttons(tab)["None"].click()
             pump(300)
             assert checked(tab) == set()
             other.visible = True                      # the user's click on that eye

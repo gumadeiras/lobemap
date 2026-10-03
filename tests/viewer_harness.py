@@ -419,7 +419,7 @@ def assert_rows_match_drawing(sess) -> None:
         n = tab.table.rowCount()
         assert rows == tab.surface.selection, (name, "rows != selection")
         assert got == want, (name, sorted(got ^ want)[:8])
-        assert tab.count.text() == f"{len(rows)} / {n} shown", (name, tab.count.text())
+        assert tab.count.text() == f"{len(rows)} of {n} shown", (name, tab.count.text())
         if not rows:
             assert not tab.surface.layer.visible, name
             if contour is not None:

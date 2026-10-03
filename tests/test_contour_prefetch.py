@@ -448,8 +448,7 @@ def test_an_atlas_that_shows_nothing_gets_nothing_cut(monkeypatch):
         sess = session(viewer)
         name = "schlegel2021_s11"
         panel = sess.panel
-        panel.setCurrentIndex(next(i for i in range(panel.count())
-                                   if panel.tabText(i) == name[:20]))
+        panel.setCurrentIndex(panel.index_of(name))
         pump()
         tab = panel.currentWidget()
         overlay = sess.contours[name]
@@ -457,7 +456,7 @@ def test_an_atlas_that_shows_nothing_gets_nothing_cut(monkeypatch):
         assert not overlay.layer.visible
         assert overlay._plan is None and _cached(overlay) == (0, 0)
 
-        next(b for b in tab.findChildren(QPushButton) if b.text() == "Show all").click()
+        next(b for b in tab.findChildren(QPushButton) if b.text() == "All").click()
         pump()
         assert drawn(tab.surface, overlay)
         _assert_all_cut_ahead(viewer, overlay)

@@ -120,7 +120,7 @@ def _user_scene(viewer) -> None:
         _tick(primary, VISIBLE_COL, index, on=False)
     if two_d:                       # labels and fills are 2D controls
         cut = sorted(planes_cut(primary.surface))
-        _buttons(primary)["Label all"].click()
+        _buttons(primary)["Names"].click()
         _tick(primary, LABEL_COL, cut[0], on=False)
         for index in cut[1:4]:
             _tick(primary, FILL_COL, index)
@@ -132,12 +132,12 @@ def _user_scene(viewer) -> None:
 
     secondary = panel.tabs[SECONDARY]
     panel.setCurrentWidget(secondary)
-    _buttons(secondary)["Show all"].click()
+    _buttons(secondary)["All"].click()
     menu = secondary.lines
     menu.setCurrentIndex(next(i for i in range(menu.count())
                               if menu.itemText(i).startswith(LINE + " (")))
     if two_d:
-        _buttons(secondary)["Fill all"].click()
+        _buttons(secondary)["Fill"].click()
     secondary.filter.setText("DA")
 
     camera = viewer.scene.camera
@@ -311,7 +311,7 @@ def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, where, ndisplay
         assert before[SECONDARY]["rows"]
         assert 0 < len(before[SECONDARY]["hidden rows"]) < before[SECONDARY]["n rows"]
         assert before[NEUROPIL]["drawn"]
-        assert before["open tab"] == SECONDARY[:20]
+        assert before["open tab"] == "Schlegel (sensory)"
         if ndisplay == "2":
             assert before["order"][0] == 1
             assert before[PRIMARY]["labels drawn"]

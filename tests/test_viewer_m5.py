@@ -97,18 +97,20 @@ def test_picked_shape_maps_back_to_a_name(scene):
 
 
 def test_table_joins_canonical_names(registry, scene):
-    from lobemap.viewer.panel import CompartmentPanel
+    from lobemap.viewer.panel import SIDE_COL, CompartmentPanel
 
     surfaces, contours = scene
     panel = CompartmentPanel(None, surfaces, registry=registry, contours=contours)
     tab = panel.tabs["neuprint_hemibrain"]
     assert tab.table.rowCount() == surfaces["neuprint_hemibrain"].meshset.n_compartments
-    canonicals = [
-        tab.table.item(r, 2).text() for r in range(tab.table.rowCount())
-    ]
-    assert any(c for c in canonicals), "no canonical names joined into the table"
-    sides = {tab.table.item(r, 3).text() for r in range(tab.table.rowCount())}
-    assert sides & {"L", "R"}
+    # The standard name is in the details of the selected row.
+    canonicals = []
+    for r in range(tab.table.rowCount()):
+        tab.table.selectRow(r)
+        canonicals.append(tab.details["Standard name"].text())
+    assert any(c != "—" for c in canonicals), "no canonical names joined into the table"
+    sides = {tab.table.item(r, SIDE_COL).text() for r in range(tab.table.rowCount())}
+    assert sides & {"Left", "Right"}
 
 
 def test_table_filter_hides_rows(registry, scene):

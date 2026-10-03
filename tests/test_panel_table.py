@@ -1,5 +1,8 @@
 """The glomerulus table: sorting, the fill toggle, and the annotation join.
 
+Every tab of a kind shows the same columns; `test_panel_consistency.py`
+compares them across all four spaces, and this file drives one of each.
+
 Sorting is the risky one. Every handler used to treat the visual row as
 the compartment id -- `_set_rows`, the filter, `highlight` -- which is
 true only while the table is in insertion order. Once a header click can
@@ -35,9 +38,9 @@ def tab(core_data, registry):
 
 
 def _col(tab, name):
-    from lobemap.viewer.panel import COLUMNS
+    from lobemap.viewer.panel import GLOMERULUS_COLUMNS
 
-    return COLUMNS.index(name)
+    return GLOMERULUS_COLUMNS.index(name)
 
 
 def _click(tab, text):
@@ -70,21 +73,24 @@ def _drawn(tab) -> set[int]:
     return {round(float(v)) for v, a in zip(values, alpha) if a > 0}
 
 
-def test_it_opens_sorted_by_glomerulus(tab):
-    from lobemap.viewer.panel import NAME_COL, _natural_key
+def test_it_opens_sorted_by_glomerulus_then_side(tab):
+    from lobemap.viewer.panel import NAME_COL, SIDE_COL
 
-    names = [tab.table.item(r, NAME_COL).text()
+    shown = [(tab.table.item(r, NAME_COL).text(), tab.table.item(r, SIDE_COL).text())
              for r in range(tab.table.rowCount())]
-    assert names == sorted(names, key=_natural_key)
+    keys = [tab.rows[tab._index_of(r)].sort_key() for r in range(tab.table.rowCount())]
+    assert keys == sorted(keys)
+    # D on the left before D on the right, both before DA1.
+    assert shown[:3] == [("D", "Left"), ("D", "Right"), ("DA1", "Right")], shown[:3]
     assert tab.table.isSortingEnabled()
 
 
 def test_numbers_sort_naturally():
     """DA10 after DA9, which plain string order gets wrong."""
-    from lobemap.viewer.panel import _natural_key
+    from lobemap.viewer.panel import natural_key
 
-    assert _natural_key("DA9") < _natural_key("DA10")
-    assert sorted(["VC10", "VC2", "VC1"], key=_natural_key) == \
+    assert natural_key("DA9") < natural_key("DA10")
+    assert sorted(["VC10", "VC2", "VC1"], key=natural_key) == \
         ["VC1", "VC2", "VC10"]
 
 
@@ -111,6 +117,7 @@ def test_a_row_no_longer_means_a_compartment_index(tab):
 
 
 def test_highlight_finds_the_row_for_an_index(tab):
+    from lobemap.core.names import parse_roi
     from lobemap.viewer.panel import NAME_COL
 
     index = 7
@@ -120,15 +127,15 @@ def test_highlight_finds_the_row_for_an_index(tab):
         "highlight jumped to a row number, not to the compartment"
     )
     assert tab.table.item(row, NAME_COL).text() == \
-        tab.surface.meshset.names[index]
+        parse_roi(tab.surface.meshset.names[index])[0]
 
 
 def test_show_none_then_all_round_trips(tab):
     n = tab.table.rowCount()
-    _click(tab, "Show none")
+    _click(tab, "None")
     assert tab.surface.selection == set()
     assert _drawn(tab) == set(), "Show none left glomeruli on screen"
-    _click(tab, "Show all")
+    _click(tab, "All")
     assert tab.surface.selection == set(range(n))
     assert _drawn(tab) == set(range(n)), "Show all did not draw them all"
 
@@ -136,7 +143,7 @@ def test_show_none_then_all_round_trips(tab):
 def test_filtered_only_selects_the_right_compartments(tab):
     """The filter hides rows; the selection must be in index space."""
     tab.filter.setText("DA1")
-    _click(tab, "Filtered")
+    _click(tab, "Matches")
     chosen = {tab.surface.meshset.names[i] for i in _drawn(tab)}
     assert chosen, "nothing matched DA1"
     assert all("da1" in n.lower() for n in chosen), chosen
@@ -182,11 +189,10 @@ def test_annotation_columns_are_populated(tab):
     for r in range(tab.table.rowCount()):
         name = tab.table.item(r, NAME_COL).text()
         got[name] = tab.table.item(r, rec).text()
-    hits = [v for v in got.values() if v]
+    hits = [v for v in got.values() if v != "—"]
     assert len(hits) > 30, f"only {len(hits)} rows carry a receptor"
-    # Joined on the CANONICAL name: the published one here is `AL-DA1(R)`.
-    da1 = next(v for k, v in got.items() if "DA1(" in k.upper())
-    assert da1 == "Or67d", da1
+    # Joined on the standard name: the published one here is `DA1(R)`.
+    assert got["DA1"] == "Or67d", got["DA1"]
 
 
 @pytest.fixture
@@ -213,34 +219,30 @@ def fafb_tabs(core_data, registry):
 
 
 def _visible_headers(tab):
-    from lobemap.viewer.panel import COLUMNS
-
     return [
         tab.table.horizontalHeaderItem(i).text()
-        for i in range(len(COLUMNS))
+        for i in range(tab.table.columnCount())
         if not tab.table.isColumnHidden(i)
     ]
 
 
 def test_a_neuropil_layer_is_not_described_as_glomeruli(fafb_tabs):
-    """It has no compartments, so seven columns were blank and the header
-    claimed the table was about glomeruli while listing whole neuropils."""
+    """A neuropil has no receptor, and its details are its full name."""
     tab = fafb_tabs["fafb_neuropil"]
     assert tab.is_atlas is False
-    assert _visible_headers(tab) == ["", "neuropil", "label", "fill"]
+    assert _visible_headers(tab) == ["Show", "Neuropil", "Side", "Label", "Fill"]
+    assert tab.detail_fields == ("Full name", "Source")
 
 
 def test_an_atlas_layer_keeps_its_columns(fafb_tabs):
     tab = fafb_tabs["benton2025"]
     assert tab.is_atlas is True
-    headers = _visible_headers(tab)
-    assert headers[1] == "glomerulus"
-    for expected in ("side", "label", "fill", "Receptor", "Co-receptor"):
-        assert expected in headers
-    # `canonical` is the one conditional column: Benton agrees with FAFB's
-    # vocabulary everywhere, so it would repeat the name on all 58 rows.
-    assert tab.show_canonical is False
-    assert "canonical" not in headers
+    assert _visible_headers(tab) == [
+        "Show", "Glomerulus", "Side", "Label", "Fill", "Receptor"
+    ]
+    # The rest of the annotation is in the details, in a fixed order.
+    assert tab.detail_fields == ("Standard name", "Receptor", "Co-receptor",
+                                 "Sensory neuron", "Sensillum", "Organ")
 
 
 def test_fill_and_label_still_work_on_a_neuropil_tab(fafb_tabs):
@@ -259,23 +261,27 @@ def test_fill_and_label_still_work_on_a_neuropil_tab(fafb_tabs):
     assert index in tab.contour.labels
 
 
-def test_columns_are_sized_to_their_contents(fafb_tabs):
-    """Not a fixed width: the receptor lists vary by a factor of three."""
+def test_columns_are_sized_to_fit_the_dock(fafb_tabs):
+    """Checkboxes a fixed width, the name and side to their contents, and
+    the receptor takes what is left, shortened rather than scrolled."""
     from qtpy.QtWidgets import QHeaderView
 
-    from lobemap.viewer.panel import COLUMNS
+    from lobemap.viewer.panel import CHECK_WIDTH, FILL_COL, LABEL_COL, VISIBLE_COL
 
+    assert 36 <= CHECK_WIDTH <= 40
     tab = fafb_tabs["benton2025"]
     header = tab.table.horizontalHeader()
-    for col in range(len(COLUMNS)):
-        assert header.sectionResizeMode(col) == QHeaderView.ResizeToContents
-    widths = {
-        tab.table.horizontalHeaderItem(c).text(): tab.table.columnWidth(c)
-        for c in range(len(COLUMNS))
-    }
-    # A column holding long strings must be wider than one holding "L"/"R".
-    assert widths["Receptor"] > widths["side"], widths
-    assert len(set(widths.values())) > 3, "columns look uniformly sized"
+    modes = [header.sectionResizeMode(c) for c in range(tab.table.columnCount())]
+    assert modes == [QHeaderView.Fixed, QHeaderView.ResizeToContents,
+                     QHeaderView.ResizeToContents, QHeaderView.Fixed,
+                     QHeaderView.Fixed, QHeaderView.Stretch]
+    for col in (VISIBLE_COL, LABEL_COL, FILL_COL):
+        assert tab.table.columnWidth(col) == CHECK_WIDTH
+    # The full receptor list is in the tooltip, however short the cell.
+    rec = _col(tab, "Receptor")
+    cells = [tab.table.item(r, rec) for r in range(tab.table.rowCount())]
+    assert all(c.toolTip() == (c.text() if c.text() != "—" else "Not recorded")
+               for c in cells)
 
 
 def test_a_hex_color_spec_does_not_break_filling():
@@ -307,14 +313,14 @@ def test_fill_all_works_on_a_neuropil_layer(session):
     if tab.contour is None:
         pytest.skip("no contour overlay")
     viewer.dims.ndisplay = 2
-    _click(tab, "Show all")
+    _click(tab, "All")
     assert _drawn(tab), "the slice cuts no neuropil"
 
-    _click(tab, "Fill all")
+    _click(tab, "Fill")
     assert tab.contour.filled == set(tab.surface.selection)
     assert _fill_alphas(tab.contour) == {round(tab.contour.FILL_ALPHA, 4)}
 
-    _click(tab, "Fill none")
+    _click(tab, "No fill")
     assert tab.contour.filled == set()
     assert _fill_alphas(tab.contour) == set()
 
@@ -327,18 +333,18 @@ def test_fill_buttons_track_the_checkboxes(session):
     viewer, sess = session
     viewer.dims.ndisplay = 2
     tab = sess.panel.tabs["benton2025"]
-    _click(tab, "Fill all")
+    _click(tab, "Fill")
     states = {tab.table.item(r, FILL_COL).checkState()
               for r in range(tab.table.rowCount())}
     assert states == {Qt.Checked}, "Fill all left boxes unticked"
-    _click(tab, "Fill none")
+    _click(tab, "No fill")
     states = {tab.table.item(r, FILL_COL).checkState()
               for r in range(tab.table.rowCount())}
     assert states == {Qt.Unchecked}, "Fill none left boxes ticked"
 
 
 def test_the_buttons_are_two_aligned_rows(fafb_tabs):
-    """Each column pairs an action with its opposite, top and bottom."""
+    """A labelled row per kind of action, the buttons lined up in columns."""
     from qtpy.QtWidgets import QGridLayout
 
     tab = fafb_tabs["benton2025"]
@@ -349,10 +355,11 @@ def test_the_buttons_are_two_aligned_rows(fafb_tabs):
         placed.setdefault(row, {})[col] = grid.itemAt(i).widget().text()
 
     assert [placed[0][c] for c in sorted(placed[0])] == [
-        "Filtered", "Show all", "Label all", "Fill all"
+        "Show", "All", "None", "Matches", "Invert"
     ]
+    # In 3D, which this fixture is, the slice row says it does nothing.
     assert [placed[1][c] for c in sorted(placed[1])] == [
-        "Invert", "Show none", "Label none", "Fill none"
+        "On slice\n(Slice view only)", "Names", "No names", "Fill", "No fill"
     ]
 
 
@@ -368,100 +375,61 @@ def test_show_all_and_show_none_still_drive_visibility(fafb_tabs):
         if isinstance(grid.itemAt(i).widget(), QPushButton)
     }
     n = tab.table.rowCount()
-    by_text["Show none"].click()
+    by_text["None"].click()
     assert tab.surface.selection == set()
-    by_text["Show all"].click()
+    by_text["All"].click()
     assert tab.surface.selection == set(range(n))
 
 
-def _canonical_cells(tab):
-    from lobemap.viewer.panel import CANONICAL_COL, NAME_COL
+def _name_cells(tab):
+    from lobemap.viewer.panel import NAME_COL
 
-    return {
-        tab.table.item(r, NAME_COL).text(): tab.table.item(r, CANONICAL_COL)
-        for r in range(tab.table.rowCount())
-    }
+    return {tab.rows[tab._index_of(r)].published: tab.table.item(r, NAME_COL)
+            for r in range(tab.table.rowCount())}
 
 
-def test_a_disagreeing_canonical_is_red(tab):
-    """hemibrain carries the Schlegel rename chain: VC3l -> VC3 and so on."""
-    from lobemap.viewer.panel import DISAGREE_COLOR
+def test_a_renamed_glomerulus_is_marked_and_says_why(tab):
+    """hemibrain carries the Schlegel rename chain: VC3l -> VC3 and so on.
 
-    cells = _canonical_cells(tab)
-    red = {n: c.text() for n, c in cells.items()
-           if c.foreground().color().name() == DISAGREE_COLOR}
-    assert len(red) == 3, red
-    assert all(c.text() for c in cells.values()), "canonical went blank"
-    # And the ones that agree are left alone.
-    plain = [n for n, c in cells.items()
-             if c.foreground().color().name() != DISAGREE_COLOR]
-    assert len(plain) > 70, len(plain)
-
-
-def test_a_bare_name_matching_its_canonical_is_not_red(tab):
-    """`AL-DA1(R)` and `DA1` are one glomerulus written two ways.
-
-    Comparing the strings directly would paint every hemibrain row red
-    and so say nothing at all.
+    The mark is on the atlas's own name, and the standard name is in the
+    tooltip and the details: there is no column for it to repeat the name
+    in on every other row.
     """
-    from lobemap.viewer.panel import DISAGREE_COLOR
-
-    cells = _canonical_cells(tab)
-    da1 = next(c for n, c in cells.items() if "DA1(" in n.upper())
-    assert da1.text() == "DA1"
-    assert da1.foreground().color().name() != DISAGREE_COLOR
-
-
-@pytest.mark.requires_data
-def test_the_canonical_column_only_appears_where_it_says_something(registry):
-    """Per atlas: S12 shares a space with two that disagree but has none
-    of its own, so it does not carry the column."""
-    import napari
-
-    from lobemap.viewer.app import build_scene
-    from lobemap.viewer.panel import CANONICAL_COL, CompartmentPanel
-
-    expected = {
-        "FAFB14": {"benton2025": False},
-        "JRCFIB2018F": {"neuprint_hemibrain": True, "schlegel2021_s11": True,
-                        "schlegel2021_s12": False},
-        "JRCFIB2022M": {"neuprint_cns": False},
-        # One atlas, so its vocabulary is its own names: nothing to show.
-        "GRABE": {"grabe2015": False},
-    }
-    for space, wanted in expected.items():
-        try:
-            viewer = napari.Viewer(show=False, ndisplay=3)
-        except Exception as exc:                    # pragma: no cover
-            pytest.skip(f"no Qt display: {exc}")
-        try:
-            surfaces, contours = build_scene(viewer, registry, space)
-            panel = CompartmentPanel(viewer, surfaces, registry=registry,
-                                     contours=contours)
-            for name, want in wanted.items():
-                t = panel.tabs[name]
-                assert (not t.table.isColumnHidden(CANONICAL_COL)) == want, (
-                    f"{space}/{name}: canonical shown={not want}"
-                )
-        finally:
-            viewer.close()
+    cells = _name_cells(tab)
+    marked = {n: c.text() for n, c in cells.items() if c.text().endswith("*")}
+    assert marked == {"VC3l(R)": "VC3l*", "VC3m(R)": "VC3m*", "VC5(R)": "VC5*"}
+    assert cells["VC3l(R)"].toolTip() == (
+        "This atlas calls it VC3l; its standard name is VC3 (renamed)."
+    )
+    tab.highlight(tab.surface.meshset.names.index("VC5(R)"))
+    assert tab.details["Standard name"].text() == "VM6"
 
 
-def test_the_filter_reaches_every_text_column(tab):
-    """Not just name/canonical/side: the annotation columns too."""
+def test_a_bare_name_matching_its_standard_name_is_not_marked(tab):
+    """`DA1(R)` and `DA1` are one glomerulus written two ways."""
+    cells = _name_cells(tab)
+    assert cells["DA1(R)"].text() == "DA1"
+    assert cells["DA1(R)"].toolTip() == ""
+
+
+def test_the_search_reaches_the_annotation_and_nothing_hidden(tab):
+    """The name, as published too, and every annotation field; not the side."""
     def shown(needle):
         tab.filter.setText(needle)
-        n = sum(1 for r in range(tab.table.rowCount())
-                if not tab.table.isRowHidden(r))
+        hit = {tab.rows[tab._index_of(r)].published for r in range(tab.table.rowCount())
+               if not tab.table.isRowHidden(r)}
         tab.filter.setText("")
-        return n
+        return hit
 
-    assert shown("Or67d") == 1, "receptor column not searched"
-    assert shown("Orco") > 10, "co-receptor column not searched"
-    assert shown("antenna") > 10, "organ column not searched"
-    assert shown("Ab9A") >= 1, "sensillum column not searched"
-    assert shown("DA1") >= 1, "name column not searched"
-    assert shown("zzzz") == 0
+    assert shown("Or67d") == {"DA1(R)"}, "receptor not searched"
+    assert len(shown("Orco")) > 10, "co-receptor not searched"
+    assert len(shown("antenna")) > 10, "organ not searched"
+    assert "DP1m(R)" in shown("sacIII-d"), "sensillum not searched"
+    assert shown("ab9A") == {"D(L)", "D(R)"}, "sensory neuron not searched"
+    assert shown("DA1(R)") == {"DA1(R)"}, "the published name not searched"
+    assert "VC5(R)" in shown("VM6"), "the standard name not searched"
+    assert shown("Right") == set(), "the side is not a search field"
+    assert shown("zzzz") == set()
 
 
 @pytest.fixture
@@ -495,11 +463,11 @@ def test_showing_in_2d_draws_contours_not_meshes(session, layer):
         pytest.skip("no contour overlay")
     viewer.dims.ndisplay = 2
 
-    _click(tab, "Show all")
+    _click(tab, "All")
     assert tab.surface.layer.visible is False, "mesh switched on in 2D"
     assert tab.contour.layer.visible is True, "contours left off in 2D"
 
-    _click(tab, "Show none")
+    _click(tab, "None")
     assert tab.surface.layer.visible is False
     assert tab.contour.layer.visible is False
 
@@ -516,7 +484,7 @@ def test_a_single_checkbox_obeys_the_mode_too(session, layer):
     if tab.contour is None:
         pytest.skip("no contour overlay")
     viewer.dims.ndisplay = 2
-    _click(tab, "Show none")
+    _click(tab, "None")
 
     tab.table.item(0, VISIBLE_COL).setCheckState(Qt.Checked)
     assert tab.surface.layer.visible is False, "mesh switched on in 2D"
@@ -527,7 +495,7 @@ def test_3d_still_shows_the_mesh(session):
     viewer, sess = session
     tab = sess.panel.tabs["benton2025"]
     viewer.dims.ndisplay = 3
-    _click(tab, "Show all")
+    _click(tab, "All")
     assert tab.surface.layer.visible is True
     assert _drawn(tab) == set(range(tab.table.rowCount()))
     if tab.contour is not None:

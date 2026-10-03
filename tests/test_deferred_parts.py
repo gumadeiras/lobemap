@@ -66,8 +66,7 @@ def _buttons(tab):
 
 def _open_tab(panel, name):
     """Click the tab, as a user does."""
-    index = next(i for i in range(panel.count()) if panel.tabText(i) == name[:20])
-    panel.setCurrentIndex(index)
+    panel.setCurrentIndex(panel.index_of(name))
     pump()
     return panel.currentWidget()
 
@@ -92,12 +91,12 @@ def test_a_deferred_part_is_built_when_its_tab_opens(monkeypatch, space, name, n
         assert set(before) - set(after) <= {STANDIN_NAME.format(name=name)}
         n = tab.table.rowCount()
         assert checked(tab) == set()
-        assert tab.count.text() == f"0 / {n} shown"
+        assert tab.count.text() == f"0 of {n} shown"
         assert drawn(tab.surface, sess.contours[name]) == set()
         assert not tab.surface.layer.visible
         assert not sess.contours[name].layer.visible
 
-        _buttons(tab)["Show all"].click()
+        _buttons(tab)["All"].click()
         pump(300)
         assert checked(tab) == set(range(n))
         assert_rows_match_drawing(sess)
@@ -260,7 +259,7 @@ def test_building_a_deferred_part_moves_neither_the_sliders_nor_the_plane(
         camera = (viewer.scene.camera.zoom, viewer.scene.camera.center)
 
         tab = _open_tab(sess.panel, name)
-        _buttons(tab)["Show all"].click()
+        _buttons(tab)["All"].click()
         pump(300)
         assert name in sess.surfaces
         assert viewer.dims.range == sliders
@@ -302,7 +301,7 @@ def test_a_stand_in_deleted_by_hand_leaves_its_tab_working(monkeypatch, space, n
         assert name in sess.surfaces and name not in sess.pending
         assert tab.surface.layer in viewer.layers
         assert sess.contours[name].layer in viewer.layers
-        _buttons(tab)["Show all"].click()
+        _buttons(tab)["All"].click()
         pump(300)
         assert checked(tab) == set(range(tab.table.rowCount()))
         assert drawn(tab.surface, sess.contours[name]), "no outline on the plane"
@@ -338,7 +337,7 @@ def test_a_part_built_under_the_mirror_is_drawn_mirrored(monkeypatch, space, nam
         assert hi == pytest.approx(2 * center - x.min(), abs=1e-4)
 
         # And its outlines are drawn where that reflection puts them.
-        _buttons(tab)["Show all"].click()
+        _buttons(tab)["All"].click()
         pump(300)
         assert drawn(surface, contour), "no outline on the plane"
         assert_renders_loops(contour)
@@ -419,7 +418,7 @@ def test_the_mirror_plane_is_where_it_was(registry, space):
 def test_a_deferred_shell_is_picked_once_built(monkeypatch):
     with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
         sess = session(viewer)
-        _buttons(sess.panel.tabs["benton2025"])["Show none"].click()
+        _buttons(sess.panel.tabs["benton2025"])["None"].click()
         tab = _open_tab(sess.panel, "fafb_neuropil")
         names = tab.surface.meshset.names
         index = next(i for i, n in enumerate(names) if n.startswith("AL"))
@@ -447,7 +446,7 @@ def test_a_deferred_part_that_cannot_be_read_says_so_in_its_tab(monkeypatch):
         page = _open_tab(sess.panel, "fafb_neuropil")
         from qtpy.QtWidgets import QLabel
 
-        assert any("could not be loaded" in label.text()
+        assert any(label.text() == "Neuropils could not be opened: its data could not be read"
                    for label in page.findChildren(QLabel))
         assert layer_names(viewer) == before
         assert "fafb_neuropil" in sess.pending
@@ -735,7 +734,7 @@ def test_a_space_opens_without_its_deferred_meshes_and_a_tab_waits_for_one(monke
         assert tab.surface.layer is stand_in
         assert [(r["stem"], r["thread"]) for r in loads if r["stem"] == name] == [
             (name, "lobemap-meshes")]
-        _buttons(tab)["Show all"].click()
+        _buttons(tab)["All"].click()
         pump(300)
         assert drawn(tab.surface, sess.contours[name]), "no outline on the plane"
         assert_rows_match_drawing(sess)

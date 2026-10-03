@@ -38,14 +38,14 @@ def test_label_and_fill_are_disabled_in_3d_only(monkeypatch):
             pump()
             for name, tab in sess.panel.tabs.items():
                 buttons = _buttons(tab)
-                for label in ("Label all", "Label none", "Fill all", "Fill none"):
+                for label in ("Names", "No names", "Fill", "No fill"):
                     assert buttons[label].isEnabled() is usable, (name, label, ndisplay)
                 for col in (LABEL_COL, FILL_COL):
                     cells = {_enabled(tab.table.item(r, col))
                              for r in range(tab.table.rowCount())}
                     assert cells == {usable}, (name, col, ndisplay)
                 # The rows themselves work in both modes.
-                assert buttons["Show all"].isEnabled()
+                assert buttons["All"].isEnabled()
 
 
 # -- the dock order and the button scopes ----------------------------------
@@ -78,10 +78,9 @@ def test_the_space_picker_sits_above_the_compartments(monkeypatch):
 def test_each_bulk_button_says_which_rows_it_acts_on(monkeypatch):
     with launched(monkeypatch, "view", "JRCFIB2018F") as (code, viewer):
         for tab in session(viewer).panel.tabs.values():
-            title = tab.surface.name
+            kind = "glomer" if tab.is_atlas else "neuropil"
             for label, button in _buttons(tab).items():
-                if label.startswith("VFB"):
+                if label == "Open in Virtual Fly Brain":
                     continue
-                assert title in button.toolTip(), (label, button.toolTip())
-            for label in ("Label all", "Label none", "Fill all", "Fill none"):
-                assert "2D only" in _buttons(tab)[label].toolTip()
+                assert kind in button.toolTip(), (label, button.toolTip())
+            assert tab.on_slice.text() == "On slice\n(Slice view only)"

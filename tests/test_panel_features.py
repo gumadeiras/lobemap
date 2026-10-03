@@ -71,7 +71,7 @@ def test_a_driver_line_shows_the_glomeruli_it_labels(monkeypatch, space, atlas,
         menu.setCurrentIndex(index)
         pump(300)
         assert checked(tab) == members
-        assert tab.count.text() == f"{len(members)} / {tab.table.rowCount()} shown"
+        assert tab.count.text() == f"{len(members)} of {tab.table.rowCount()} shown"
         if ndisplay == "3":
             assert drawn(tab.surface) == members
         assert_rows_match_drawing(sess)
@@ -90,7 +90,7 @@ def test_the_intersection_preset_is_offered_where_it_applies(monkeypatch):
     with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
         menu = session(viewer).panel.tabs["benton2025"].lines
         texts = [menu.itemText(i) for i in range(menu.count())]
-        assert texts[0] == "Driver line..."
+        assert texts[0] == "Driver line: none"
         assert any(t.startswith("Orco-GAL4 & GH146-GAL4 (") for t in texts), texts
         # A neuropil tab has no glomeruli to filter, so no menu.
         assert not session(viewer).panel.tabs["fafb_neuropil"].lines.isVisibleTo(
@@ -104,24 +104,24 @@ def test_the_intersection_preset_is_offered_where_it_applies(monkeypatch):
 def test_the_vfb_button_opens_the_selected_glomerulus(monkeypatch):
     import webbrowser
 
-    from lobemap.viewer.panel import NAME_COL
-
     opened = []
     monkeypatch.setattr(webbrowser, "open", lambda url, *a, **k: opened.append(url))
     with launched(monkeypatch, "view", "JRCFIB2018F") as (code, viewer):
         tab = session(viewer).panel.tabs["neuprint_hemibrain"]
-        vfb = next(b for b in _buttons(tab).values() if b.text().startswith("VFB"))
+        vfb = _buttons(tab)["Open in Virtual Fly Brain"]
         assert not vfb.isEnabled(), "nothing is selected yet"
-        row = next(r for r in range(tab.table.rowCount())
-                   if tab.table.item(r, NAME_COL).text() == "DA1(R)")
-        tab.table.selectRow(row)
-        assert vfb.isEnabled() and vfb.text() == "VFB: DA1"
+        assert vfb.toolTip() == (
+            "Select a glomerulus with a Virtual Fly Brain term to open it"
+        )
+        index = tab.surface.meshset.names.index("DA1(R)")
+        tab.table.selectRow(tab._row_of(index))
+        assert vfb.isEnabled()
+        assert vfb.toolTip() == "Open the Virtual Fly Brain page for DA1"
         vfb.click()
         assert opened == [(
             "https://www.virtualflybrain.org/term/"
             "antennal-lobe-glomerulus-da1-fbbt_00003932/"
         )]
-        assert vfb.toolTip() == opened[0]
 
 
 def test_hovering_a_glomerulus_points_the_vfb_button_at_it(monkeypatch):
@@ -132,9 +132,11 @@ def test_hovering_a_glomerulus_points_the_vfb_button_at_it(monkeypatch):
     with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
         tab = session(viewer).panel.tabs["benton2025"]
         index = tab.surface.meshset.names.index("DA1")
-        _buttons(tab)["Show none"].click()
+        _buttons(tab)["None"].click()
         tab.table.item(tab._row_of(index), VISIBLE_COL).setCheckState(Qt.Checked)
         pump(300)
         assert hover(viewer, tab.surface.meshset.centroid(index)) == "benton2025: DA1"
-        vfb = next(b for b in _buttons(tab).values() if b.text().startswith("VFB"))
-        assert vfb.text() == "VFB: DA1"
+        vfb = _buttons(tab)["Open in Virtual Fly Brain"]
+        assert vfb.isEnabled()
+        assert vfb.toolTip() == "Open the Virtual Fly Brain page for DA1"
+        assert tab.detail_title.text() == "DA1, Left"

@@ -64,7 +64,7 @@ def test_show_accepts_asset_ids_atlas_ids_and_roles(monkeypatch, space, name,
         everything = set(range(surface.meshset.n_compartments))
         assert surface.selection == everything
         tab = sess.panel.tabs[shown]
-        assert tab.count.text() == f"{len(everything)} / {len(everything)} shown"
+        assert tab.count.text() == f"{len(everything)} of {len(everything)} shown"
         if ndisplay == "3":
             assert drawn(surface) == everything
         else:

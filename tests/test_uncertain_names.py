@@ -52,12 +52,16 @@ def test_the_viewer_shows_the_doubt_where_it_names_the_glomerulus(monkeypatch):
 
         # The table, with the reason as its tooltip; a neighbor is unchanged.
         cell = tab.table.item(tab._row_of(vp2), NAME_COL)
-        assert cell.text() == "VP2(L) (VM6?)"
-        assert "VM6andVC6" in cell.toolTip()
-        assert tab.table.item(tab._row_of(da1), NAME_COL).text() == "DA1(L)"
+        assert cell.text() == "VP2 (VM6?)"
+        assert cell.toolTip() == (
+            "Grabe 2015 labels this region 'VP2_left_VM6andVC6'. When the atlas is "
+            "aligned to the male CNS and to Schlegel (projection), it sits where "
+            "VM6 is, not VP2."
+        )
+        assert tab.table.item(tab._row_of(da1), NAME_COL).text() == "DA1"
 
         # The slice label: VP2 alone, labeled, on a plane through it.
-        next(b for b in tab.findChildren(QPushButton) if b.text() == "Show none").click()
+        next(b for b in tab.findChildren(QPushButton) if b.text() == "None").click()
         tab.table.item(tab._row_of(vp2), VISIBLE_COL).setCheckState(Qt.Checked)
         tab.table.item(tab._row_of(vp2), LABEL_COL).setCheckState(Qt.Checked)
         axis = int(viewer.dims.order[0])
