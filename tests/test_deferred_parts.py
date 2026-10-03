@@ -45,6 +45,18 @@ DEFERRED = [
 ]
 STAINED = ("FAFB14", "JRCFIB2018F", "JRCFIB2022M")
 
+#: Each EM space's virtual stain, which CI does not fetch. Its extent sets
+#: the sliders' range and grid, so a test whose numbers come from a scene with
+#: it asks for it.
+STAIN = {"FAFB14": "fafb_stain", "JRCFIB2018F": "hemibrain_stain",
+         "JRCFIB2022M": "malecns_stain"}
+
+
+def _stained(*values, space, also=()):
+    """`values` as a parameter set asking for `space`'s stain, and `also`."""
+    wanted = [*also, *([STAIN[space]] if space in STAIN else [])]
+    return pytest.param(*values, marks=[pytest.mark.requires_data(*wanted)] if wanted else [])
+
 
 def _buttons(tab):
     from qtpy.QtWidgets import QPushButton
@@ -148,7 +160,8 @@ EAA535F_PLANES = {
 
 
 @pytest.mark.parametrize("axis", [0, 1, 2])
-@pytest.mark.parametrize(("space", "ndisplay"), list(EAA535F_PLANES))
+@pytest.mark.parametrize(("space", "ndisplay"),
+                         [_stained(*key, space=key[0]) for key in EAA535F_PLANES])
 def test_a_slice_axis_chosen_right_after_the_open_lands_where_it_did(monkeypatch, space,
                                                                      ndisplay, axis):
     """Where napari put the sliders when the first neuropil set was built first."""
@@ -168,7 +181,8 @@ def test_a_slice_axis_chosen_right_after_the_open_lands_where_it_did(monkeypatch
 
 @pytest.mark.parametrize("axis", [0, 1, 2])
 @pytest.mark.parametrize(("space", "ndisplay"),
-                         [key for key in EAA535F_PLANES if key[0] != "FAFB14"])
+                         [_stained(*key, space=key[0], also=("fafb_stain",))
+                          for key in EAA535F_PLANES if key[0] != "FAFB14"])
 def test_a_slice_axis_chosen_right_after_a_switch_lands_where_it_did(monkeypatch, space,
                                                                      ndisplay, axis):
     """Where it lands when the space opens: eaa535f tore the old scene down first,
@@ -461,7 +475,7 @@ def _rendered(layer) -> np.ndarray:
     return np.asarray(layer._slice.image.raw)
 
 
-@pytest.mark.parametrize("space", STAINED)
+@pytest.mark.parametrize("space", [_stained(space, space=space) for space in STAINED])
 def test_3d_renders_the_same_pyramid_level_once_it_is_read(monkeypatch, space):
     from lobemap.viewer.images import coarse_level_for_3d, level_for_3d
 
@@ -494,6 +508,7 @@ def test_3d_renders_the_same_pyramid_level_once_it_is_read(monkeypatch, space):
         assert _rendered(image).shape == tuple(levels[fine].shape)
 
 
+@pytest.mark.requires_data("fafb_stain")
 @pytest.mark.parametrize("rendering", ["translucent", "iso"])
 def test_a_stain_restyled_in_2d_is_drawn_on_its_first_entry_into_3d(monkeypatch, rendering):
     """napari computes the cutoffs of translucent and iso rendering from the
@@ -523,6 +538,7 @@ def test_a_stain_restyled_in_2d_is_drawn_on_its_first_entry_into_3d(monkeypatch,
                 node.threshold, image.iso_threshold)
 
 
+@pytest.mark.requires_data("fafb_stain")
 def test_3d_uploads_the_stain_level_once_and_not_on_every_entry(monkeypatch):
     """The pinned level is 255-613 MB, and uploading it again on every entry
     into 3D was 0.35-0.55 s of the first frame. It is uploaded when it comes,
@@ -568,6 +584,7 @@ def test_3d_uploads_the_stain_level_once_and_not_on_every_entry(monkeypatch):
         assert shape not in uploads, uploads
 
 
+@pytest.mark.requires_data("fafb_stain")
 def test_a_switch_before_the_fine_level_arrives_leaves_nothing(monkeypatch):
     from lobemap.viewer import images
 
@@ -583,6 +600,7 @@ def test_a_switch_before_the_fine_level_arrives_leaves_nothing(monkeypatch):
         assert_rows_match_drawing(session(viewer))
 
 
+@pytest.mark.requires_data("fafb_stain")
 def test_closing_the_viewer_before_the_fine_level_arrives_stops_its_read(monkeypatch):
     """Nothing is swapped into the closed viewer's layer, and the read ends."""
     import threading
