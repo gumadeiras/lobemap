@@ -1,4 +1,7 @@
-"""Curated per-glomerulus annotation: receptors, sensilla, sensory organ.
+"""Curated annotation: per glomerulus, and the full names of neuropils.
+
+The neuropil names are a small cited table of their own; see
+`neuropil_names`. The rest of this module is about the glomeruli.
 
 `registry/reference/glomerulus_ground_truth.csv` is the upstream reference
 table. Its cells pool several publications into one string, so the same
@@ -254,6 +257,30 @@ def lines(registry_root) -> dict[str, frozenset[str]]:
     return {line: frozenset(names) for line, names in out.items()}
 
 
+def neuropil_path(registry_root) -> Path:
+    return Path(registry_root) / "reference" / "neuropil_names.csv"
+
+
+def neuropil_names(registry_root) -> dict[str, tuple[str, str]]:
+    """Neuropil name without its side -> (full name, the source giving it).
+
+    Keyed on every spelling the neuropil sets use, so FlyWire's `MB_PED`
+    and neuPrint's `PED` are two rows naming one structure. A name the
+    sources do not give has no row. A missing file is not an error: the
+    full names simply come back empty. `registry/reference/README.md` cites
+    the sources.
+    """
+    path = neuropil_path(registry_root)
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8", newline="") as fh:
+        return {
+            row["name"].strip(): (row["full_name"].strip(), row["source"].strip())
+            for row in csv.DictReader(fh)
+            if row["name"].strip() and row["full_name"].strip()
+        }
+
+
 __all__ = [
     "FIELDS",
     "INTERSECTIONS",
@@ -263,6 +290,8 @@ __all__ = [
     "default_path",
     "lines",
     "load",
+    "neuropil_names",
+    "neuropil_path",
     "normalize",
     "terms",
     "vfb_url",
