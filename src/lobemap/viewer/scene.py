@@ -8,6 +8,7 @@ switch can tear it down again without touching anything else.
 from __future__ import annotations
 
 import contextlib
+import re
 
 from ..core.registry import Registry
 from . import prefetch
@@ -67,6 +68,9 @@ from .view import (
 #:
 #: So: outlines, and a Shapes layer beside every Surface layer.
 USE_SLICE_CONTOURS = True
+
+#: The number napari puts after a layer name another layer already has.
+_NUMBERED = re.compile(r" \[\d+\]$")
 
 
 def build_scene(
@@ -613,6 +617,19 @@ class SceneSession:
         if self.sliders is not None:
             sliders, self.sliders = self.sliders, None
             center_sliders(self.viewer, *sliders, keep=keep)
+
+    def take_names(self) -> None:
+        """Give each layer back the name napari numbered, once the scene it
+        was built beside is gone.
+
+        napari keeps layer names unique, and the next scene is built while
+        the open one is still there: a name both have -- "Neuropil stain
+        (from synapses)", "neuPrint · 3D" -- came out "... [1]".
+        """
+        for layer in self.all_layers():
+            name = _NUMBERED.sub("", layer.name)
+            if name != layer.name:
+                layer.name = name
 
     def settle_view(self) -> None:
         """Frame this scene once it is the only one loaded.

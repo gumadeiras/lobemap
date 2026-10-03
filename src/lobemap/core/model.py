@@ -361,6 +361,9 @@ class Asset:
     #: "Schlegel et al. 2021, eLife, file 11: glomeruli defined from
     #: sensory neurons".
     about: str = ""
+    #: The project the data come from, when the title does not say:
+    #: "FlyWire" for the FAFB neuropils. A layer's name adds it.
+    origin: str = ""
 
 
 @dataclass(frozen=True)

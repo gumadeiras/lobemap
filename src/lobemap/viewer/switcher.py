@@ -384,6 +384,7 @@ class SpaceSwitcher(QWidget):
                 self.combo.setCurrentIndex(index)
             return
         old.teardown()
+        new.take_names()
         # The new space comes up unmirrored and the control follows it. The
         # mirror is how one space is being looked at, not a preference:
         # carried across, it would hand back a reflected scene nobody

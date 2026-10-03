@@ -9,8 +9,10 @@ layers by napari's own layer state, not by any widget's text.
 
 from __future__ import annotations
 
+import contextlib
 import re
 
+import numpy as np
 import pytest
 from viewer_harness import SPACES, launched, pump, session, switch_to, switcher
 
@@ -28,10 +30,9 @@ TITLES = {
 PANEL = "Glomeruli and neuropils"
 #: The narrowest canvas the layout may leave at 1440 px. The left column
 #: can be no narrower than napari's layer settings, whose colormap menus
-#: list every colormap a session has registered: lobemap's are named after
-#: their layers, so after a few brains the column is 416 px and the canvas
-#: 558. Shorter layer names give the canvas that back.
-MIN_CANVAS = 550
+#: list every colormap a session has registered. Named after their layers,
+#: lobemap's made the column 416 px after a few brains, and the canvas 558.
+MIN_CANVAS = 560
 
 
 def _show(viewer, width: int = 1440, height: int = 900):
@@ -211,8 +212,12 @@ def test_the_mirror_reflects_and_another_brain_clears_it(monkeypatch):
         assert not session(viewer).mirrored and not sw.mirror.isChecked()
 
 
-def test_the_main_layer_is_active_and_outlines_cannot_be_drawn_in(monkeypatch):
-    """By napari's layer state: what is active, what is editable, what mode."""
+def test_the_main_layer_is_active_and_no_layer_of_lobemaps_can_be_edited(monkeypatch):
+    """By napari's layer state: what is active, what is editable, what mode.
+
+    napari's transform tool, key 2 on a surface, moved a mesh off the image
+    it is registered to; its drawing tools drew into the outline layers.
+    """
     with launched(monkeypatch, "view", "JRCFIB2018F", "--ndisplay", "2") as (code, viewer):
         assert code == 0
         sess = session(viewer)
@@ -220,35 +225,74 @@ def test_the_main_layer_is_active_and_outlines_cannot_be_drawn_in(monkeypatch):
         assert viewer.layers.selection.active is main
         assert set(viewer.layers.selection) == {main}
 
-        # An outline built later, its tab opened, is locked too.
-        sess.panel.tab("neuprint_hemibrain_neuropil")
+        # A part built later, its tab opened, is locked too.
+        tab = sess.panel.tab("neuprint_hemibrain_neuropil")
         pump()
-        outlines = [layer for layer in viewer.layers
-                    if layer.metadata.get("lobemap", {}).get("kind") == "contours"]
-        assert len(outlines) == 2, [layer.name for layer in outlines]
+        ours = list(viewer.layers)
+        kinds = {layer.metadata["lobemap"]["kind"] for layer in ours}
+        assert {"atlas", "contours"} <= kinds, kinds
+        placed = {layer.name: np.asarray(layer.affine.affine_matrix) for layer in ours}
 
         def assert_locked() -> None:
-            for layer in outlines:
+            for layer in ours:
                 assert layer.editable is False, layer.name
                 assert layer.help == "", layer.name
-                layer.mode = "add_rectangle"
-                assert layer.mode == "pan_zoom", layer.name
+                for mode in ("transform", "add_rectangle", "paint"):
+                    with contextlib.suppress(ValueError):   # not this layer's mode
+                        layer.mode = mode
+                    assert layer.mode == "pan_zoom", (layer.name, mode)
+                assert np.array_equal(layer.affine.affine_matrix, placed[layer.name])
 
         assert_locked()
-        # napari makes a Shapes layer editable again on entering 2D.
+        # napari makes a layer editable again on entering 2D, and a surface
+        # whenever it is given new data, as a row ticked on gives it.
+        tab.select(range(tab.table.rowCount()))
+        pump(400)
         for ndisplay in (3, 2):
             viewer.dims.ndisplay = ndisplay
             pump()
             assert_locked()
-        viewer.layers.selection.active = outlines[0]
-        pump()
-        assert viewer.help == ""
+        for layer in ours:
+            viewer.layers.selection.active = layer
+            pump()
+            assert viewer.help == "", layer.name
 
-        # A Shapes layer of the user's own can still be drawn in.
+        # A layer of the user's own can still be drawn in and moved.
         mine = viewer.add_shapes(ndim=3)
         pump()
         mine.mode = "add_rectangle"
         assert mine.editable and mine.mode == "add_rectangle"
+        mine.mode = "transform"
+        assert mine.mode == "transform"
+
+
+def test_the_canvas_keeps_its_width_through_every_brain(monkeypatch):
+    """Short colormap names keep napari's layer settings, and so the left
+    column, narrow; each surface keeps its own colors under them."""
+    from lobemap.viewer.layers import step_colormap
+
+    names = re.compile(r"^(Glomerulus|Neuropil) colors( \(\d+\))?$")
+    with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
+        assert code == 0
+        _show(viewer)
+        for space in ("JRCFIB2018F", "JRCFIB2022M", "GRABE", "FAFB14"):
+            switch_to(viewer, space)
+            sess = session(viewer)
+            for name in list(sess.parts):
+                tab = sess.panel.tab(name)
+                if tab is not None:
+                    # Each selection is a colormap napari keeps by name.
+                    tab.select(range(0, tab.table.rowCount(), 2))
+                    tab.select(range(tab.table.rowCount()))
+            for ndisplay in (2, 3):
+                viewer.dims.ndisplay = ndisplay
+                pump(300)
+                _assert_layout(viewer)
+            for surface in sess.surfaces.values():
+                cmap = surface.layer.colormap
+                assert names.match(cmap.name), cmap.name
+                want = step_colormap(surface.colors, name="want").colors
+                assert np.allclose(cmap.colors, want), (surface.name, cmap.name)
 
 
 def test_the_view_dock_says_everything_in_words(monkeypatch):

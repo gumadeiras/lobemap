@@ -191,6 +191,7 @@ class Registry:
                 ),
                 title=body.get("title", ""),
                 about=body.get("about", ""),
+                origin=body.get("origin", ""),
             )
 
     def _load_atlases(self) -> None:

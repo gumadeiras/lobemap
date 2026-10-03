@@ -138,6 +138,23 @@ def _standard_note(bare: str, comp) -> str:
             + (f" ({how})." if how else "."))
 
 
+def hover_line(row: Row, title: str) -> str:
+    """What the status bar says under the cursor: 'VA3 (left) — Benton 2025'.
+
+    A doubt joins the side, 'VP2 (VM6?, left)', and a neuropil gives its
+    full name: 'AL, antennal lobe (right) — Neuropils (FlyWire)'.
+    """
+    name = row.name
+    full = row.details.get(FULL_NAME, MISSING)
+    if full != MISSING:
+        name = f"{name}, {full}"
+    if row.side != MISSING:
+        side = row.side.lower()
+        # A name ends in a parenthesis only with a doubt: its side went.
+        name = f"{name[:-1]}, {side})" if name.endswith(")") else f"{name} ({side})"
+    return f"{name} — {title}"
+
+
 def glomerulus_rows(names, compartments, annotation) -> list[Row]:
     """The rows of an atlas tab, one per mesh name, in mesh order.
 
@@ -207,6 +224,7 @@ __all__ = [
     "STANDARD_NAME",
     "Row",
     "glomerulus_rows",
+    "hover_line",
     "natural_key",
     "neuropil_rows",
 ]

@@ -558,6 +558,11 @@ class AtlasTab(QWidget):
 
     # -- picking ---------------------------------------------------------
 
+    def describe(self, index: int) -> str:
+        """The status bar's words for a compartment under the cursor."""
+        row = self.rows.get(index)
+        return R.hover_line(row, self.surface.name) if row is not None else ""
+
     def highlight(self, index: int) -> None:
         """Select and scroll to the row for a compartment picked in the canvas.
 

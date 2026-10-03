@@ -324,7 +324,7 @@ def add_images(viewer, registry, space: str) -> list:
             # colormap/gamma/rendering defaults apply.
             layer = viewer.add_labels(
                 np.asarray(volume.data),
-                name=asset.id,
+                name=asset.title or asset.id,
                 visible=False,
                 opacity=0.6,
                 **volume.napari_kwargs(),
@@ -354,7 +354,7 @@ def add_images(viewer, registry, space: str) -> list:
         layer = viewer.add_image(
             data,
             multiscale=volume.is_multiscale,
-            name=asset.id,
+            name=asset.title or asset.id,
             visible=False,
             **display_for(asset.role, asset.colormap, asset.display),
             **volume.napari_kwargs(),

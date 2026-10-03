@@ -12,9 +12,9 @@ So such a part holds its place from the start with a stand-in: a hidden
 Surface layer of two vertices, the corners of the part's mesh, which
 becomes the part's mesh layer when it is built -- taken over rather than
 replaced, since napari charges a layer's removal a full garbage collection,
-50-70 ms. It is named for the part, and switching it on in the layer list
-builds the part and shows it, as the part's own layer did when every part
-was built at open.
+50-70 ms. It is named for the part, "Neuropils (FlyWire) · not loaded
+yet", and switching it on in the layer list builds the part and shows it,
+as the part's own layer did when every part was built at open.
 
 The meshes are read by a thread started before the rest of the scene is
 built, in two passes. The first reads each part's corners (`mesh_bounds`),
@@ -43,10 +43,11 @@ import threading
 import numpy as np
 
 from . import napari_private
+from .parts import part_title
 from .view import reflect_vertices
 
-#: What a stand-in is called: its part's name, and that it is not built.
-STANDIN_NAME = "{name} (not opened)"
+#: What a stand-in is called: its part's plain title, and that it is not built.
+STANDIN_NAME = "{title} · not loaded yet"
 
 
 def mesh_bounds(registry, part) -> tuple[np.ndarray, np.ndarray]:
@@ -142,7 +143,8 @@ class Deferred:
                 continue
             layer = self.viewer.add_surface(
                 (np.stack([lo, hi]), np.zeros((0, 3), dtype=int)),
-                name=STANDIN_NAME.format(name=name), visible=False, shading="none",
+                name=STANDIN_NAME.format(title=part_title(self.registry, self.parts[name])),
+                visible=False, shading="none",
             )
             layer.metadata["lobemap"] = {"kind": "stand-in", "part": name}
             layers.move(layers.index(layer), 0)

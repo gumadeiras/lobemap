@@ -307,7 +307,7 @@ def test_hover_names_the_compartment_under_the_cursor_while_turned(viewer, regis
             owner = contour._shape_index[i]
             inside = np.asarray(loop, float).mean(axis=0)
             got = hover(viewer, contour.layer.data_to_world(inside))
-            assert got == f"synthetic: {names[owner]}", (spin, got)
+            assert got == f"{names[owner]} — synthetic", (spin, got)
             seen.add(owner)
         assert seen
     viewer.dims.ndisplay = 3
@@ -318,7 +318,7 @@ def test_hover_names_the_compartment_under_the_cursor_while_turned(viewer, regis
             surface.set_selection({i})
             th.settle_canvas(viewer)
             got = hover(viewer, surface.layer.data_to_world(surface.meshset.centroid(i)))
-            assert got == f"synthetic: {names[i]}", (angles, got)
+            assert got == f"{names[i]} — synthetic", (angles, got)
 
 
 def test_rest_and_teardown_leave_nothing_of_the_turn_installed(viewer, registry):

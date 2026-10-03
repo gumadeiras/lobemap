@@ -9,7 +9,9 @@
 #
 # `title` is the plain name a reader sees for the asset, and the only place
 # it is written; `about` is one line under it, a short citation and then
-# what the asset is. Neither may be an id.
+# what the asset is. Neither may be an id. `origin`, where given, names the
+# project the data come from when the title does not, and a layer's name
+# adds it: "Neuropils (FlyWire) · 3D".
 
 [neuprint_hemibrain_glomeruli]
 title = "neuPrint"
@@ -27,6 +29,7 @@ license_url = "https://www.janelia.org/project-team/flyem/hemibrain"
 
 [neuprint_hemibrain_neuropil]
 title = "Neuropils"
+origin = "neuPrint"
 about = "Scheffer et al. 2020, eLife: hemibrain neuropils from neuPrint"
 role = "neuropil"
 space = "JRCFIB2018F"
@@ -55,6 +58,7 @@ license_url = "https://male-cns.janelia.org/download/"
 
 [neuprint_cns_neuropil]
 title = "Neuropils"
+origin = "neuPrint"
 about = "Berg et al. 2026, Cell: male CNS brain neuropils from neuPrint"
 role = "neuropil"
 space = "JRCFIB2022M"
@@ -167,7 +171,7 @@ license_url = "https://elifesciences.org/articles/66018"
 # multiscale pyramid averages neighboring voxels, and the mean of two label
 # ids is a third label.
 [grabe2015_labels]
-title = "Grabe 2015 masks"
+title = "Glomerulus label volume (Grabe 2015)"
 about = "Grabe et al. 2015, J Comp Neurol: the published glomerulus masks, one value per glomerulus"
 role = "glomeruli"
 space = "GRABE"
@@ -181,7 +185,7 @@ license = "none stated; reproduced from the paper"
 license_url = "https://www.ice.mpg.de/232714/vivo-3d-atlas"
 
 [grabe2015_stack]
-title = "Confocal image"
+title = "Confocal image (Grabe 2015)"
 about = "Grabe et al. 2015, J Comp Neurol: the in vivo confocal image the atlas was drawn on"
 role = "template_image"
 space = "GRABE"
@@ -219,6 +223,7 @@ license_url = "https://www.ice.mpg.de/232714/vivo-3d-atlas"
 # finding: all 58 Bates centroids fall inside AL_L, none inside AL_R.
 [fafb_neuropil]
 title = "Neuropils"
+origin = "FlyWire"
 about = "Dorkenwald et al. 2024, Nature: FAFB brain neuropils from FlyWire"
 role = "neuropil"
 space = "FAFB14"
@@ -247,7 +252,7 @@ license_url = "https://flywire.ai/guidelines"
 # not weighted by its number of postsynaptic partners.
 
 [hemibrain_stain]
-title = "Neuropil stain"
+title = "Neuropil stain (from synapses)"
 about = "Scheffer et al. 2020, eLife: hemibrain presynapse density, shown like an nc82 stain"
 role = "virtual_stain"
 space = "JRCFIB2018F"
@@ -268,7 +273,7 @@ license_url = "https://www.janelia.org/project-team/flyem/hemibrain"
 # published artifact's own metadata says `confidence_threshold: 0.5`, which
 # the build recorded but never used. FlyWire data, so CC BY-NC 4.0.
 [fafb_stain]
-title = "Neuropil stain"
+title = "Neuropil stain (from synapses)"
 about = "Yu et al. 2025, bioRxiv: FlyWire presynapse density, shown like an nc82 stain"
 role = "virtual_stain"
 space = "FAFB14"
@@ -286,7 +291,7 @@ license_url = "https://flywire.ai/guidelines"
 # brain-labeled presynapses span z 101-328 um and VNC-labeled ones
 # 539-1049 um, a 210 um gap.
 [malecns_stain]
-title = "Neuropil stain"
+title = "Neuropil stain (from synapses)"
 about = "Berg et al. 2026, Cell: male CNS presynapse density, shown like an nc82 stain"
 role = "virtual_stain"
 space = "JRCFIB2022M"

@@ -272,7 +272,7 @@ def test_hover_names_the_compartment_on_an_oblique_section(viewer, registry):
             owner = contour._shape_index[i]
             inside = np.asarray(loop, float).mean(axis=0)
             got = hover(viewer, contour.layer.data_to_world(inside))
-            assert got == f"synthetic: {names[owner]}", (angles, got)
+            assert got == f"{names[owner]} — synthetic", (angles, got)
 
 
 def test_nothing_of_the_oblique_path_stays_at_rest(viewer, registry):

@@ -10,6 +10,7 @@ built whole by `build_scene`, the way every scene used to open.
 from __future__ import annotations
 
 import time
+import weakref
 
 import numpy as np
 import pytest
@@ -26,11 +27,10 @@ from viewer_harness import (
     session,
     shaded_normals,
     signed_volume,
+    stand_in_name,
     switch_to,
     switcher,
 )
-
-from lobemap.viewer.deferred import STANDIN_NAME
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
@@ -88,7 +88,7 @@ def test_a_deferred_part_is_built_when_its_tab_opens(monkeypatch, space, name, n
         after = layer_names(viewer)
         assert set(after) - set(before) == {tab.surface.layer.name,
                                             sess.contours[name].layer.name}
-        assert set(before) - set(after) <= {STANDIN_NAME.format(name=name)}
+        assert set(before) - set(after) <= {stand_in_name(sess, name)}
         n = tab.table.rowCount()
         assert checked(tab) == set()
         assert tab.count.text() == f"0 of {n} shown"
@@ -217,14 +217,15 @@ def test_a_switch_moves_the_sliders_once_the_scene_it_replaces_is_gone(monkeypat
     real, moves = scene.center_sliders, []
 
     def center_sliders(viewer, *args, **kwargs):
-        moves.append(({layer.name for layer in viewer.layers}, viewer.dims.ndisplay))
+        moves.append((list(viewer.layers), viewer.dims.ndisplay))
         return real(viewer, *args, **kwargs)
 
     monkeypatch.setattr(scene, "center_sliders", center_sliders)
     with launched(monkeypatch, "view", "FAFB14", "--ndisplay", ndisplay) as (code, viewer):
         assert code == 0
         assert len(moves) == 1, "the open put the sliders where they belong"
-        old = set(layer_names(viewer))
+        # By identity: both scenes have a "Neuropil stain (from synapses)".
+        old = weakref.WeakSet(viewer.layers)
         switch_to(viewer, "JRCFIB2018F")
         assert session(viewer).space == "JRCFIB2018F"
         if ndisplay == "3":
@@ -232,8 +233,9 @@ def test_a_switch_moves_the_sliders_once_the_scene_it_replaces_is_gone(monkeypat
             viewer.dims.ndisplay = 2
             pump()
         assert len(moves) == 2
-        names, mode = moves[1]
-        assert not names & old, "the sliders moved beside the scene being replaced"
+        layers, mode = moves[1]
+        assert not any(layer in old for layer in layers), (
+            "the sliders moved beside the scene being replaced")
         assert mode == 2
         viewer.dims.ndisplay = 5 - int(ndisplay)
         pump()
@@ -273,14 +275,14 @@ def test_switching_a_stand_in_on_builds_its_part_and_shows_it(monkeypatch):
     with launched(monkeypatch, "view", "FAFB14", "--ndisplay", "2") as (code, viewer):
         assert code == 0
         sess = session(viewer)
-        stand_in = viewer.layers[STANDIN_NAME.format(name="fafb_neuropil")]
+        stand_in = viewer.layers[stand_in_name(sess, "fafb_neuropil")]
         assert not stand_in.visible
         stand_in.visible = True
         pump(300)
         tab = sess.panel.tabs["fafb_neuropil"]
         # It became the part's mesh layer: no stand-in is left.
         assert tab.surface.layer is stand_in
-        assert not [layer for layer in viewer.layers if "(not opened)" in layer.name]
+        assert not [layer for layer in viewer.layers if layer.name.endswith("not loaded yet")]
         assert checked(tab) == set(range(tab.table.rowCount()))
         assert drawn(tab.surface, sess.contours["fafb_neuropil"])
         assert_rows_match_drawing(sess)
@@ -293,7 +295,7 @@ def test_a_stand_in_deleted_by_hand_leaves_its_tab_working(monkeypatch, space, n
     with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
         assert code == 0
         sess = session(viewer)
-        viewer.layers.remove(viewer.layers[STANDIN_NAME.format(name=name)])
+        viewer.layers.remove(viewer.layers[stand_in_name(sess, name)])
         pump()
 
         tab = _open_tab(sess.panel, name)
@@ -424,8 +426,9 @@ def test_a_deferred_shell_is_picked_once_built(monkeypatch):
         index = next(i for i, n in enumerate(names) if n.startswith("AL"))
         tab.select([index])
         pump(300)
-        assert hover(viewer, tab.surface.meshset.centroid(index)).startswith(
-            "fafb_neuropil:")
+        said = hover(viewer, tab.surface.meshset.centroid(index))
+        assert said.startswith("AL, antennal lobe (") and said.endswith(
+            ") — Neuropils (FlyWire)"), said
 
 
 def test_a_deferred_part_that_cannot_be_read_says_so_in_its_tab(monkeypatch):
@@ -595,7 +598,8 @@ def test_a_switch_before_the_fine_level_arrives_leaves_nothing(monkeypatch):
         # Long enough for the read to finish; its result is dropped.
         pump(3000)
         assert fine.array is None
-        assert all(name.startswith(("grabe", "Grabe")) for name in layer_names(viewer))
+        # Only the open scene's layers are left.
+        assert set(viewer.layers) == set(session(viewer).all_layers()), layer_names(viewer)
         assert_rows_match_drawing(session(viewer))
 
 
@@ -726,7 +730,7 @@ def test_a_space_opens_without_its_deferred_meshes_and_a_tab_waits_for_one(monke
         assert [(r["stem"], r["ended"]) for r in loads if r["stem"] == name] == [
             (name, False)], "the open waited for the mesh"
         # Its corners were read: it holds its place.
-        stand_in = viewer.layers[STANDIN_NAME.format(name=name)]
+        stand_in = viewer.layers[stand_in_name(sess, name)]
 
         gate.open_soon()
         tab = _open_tab(sess.panel, name)

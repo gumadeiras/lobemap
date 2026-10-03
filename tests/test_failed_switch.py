@@ -357,8 +357,8 @@ def test_a_switch_that_succeeds_still_replaces_the_scene(monkeypatch):
         sess = session(viewer)
         assert sess.space == TARGET
         assert switcher(viewer).status.text() == ""
-        assert all(name.startswith(("grabe", "Grabe")) for name in layer_names(viewer)), (
-            layer_names(viewer))
+        # Only the open scene's layers are left.
+        assert set(viewer.layers) == set(session(viewer).all_layers()), layer_names(viewer)
         assert len(docks(viewer, "Glomeruli and neuropils")) == 1
         # The mirror does not carry over, or the new space would come up
         # reflected with nothing clicked; the anatomy chosen for the slice

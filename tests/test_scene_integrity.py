@@ -112,13 +112,17 @@ def test_handlers_stay_flat_across_repeated_switches(monkeypatch):
         assert len(docks(viewer, "Glomeruli and neuropils")) == 1
 
 
-def test_a_bridged_asset_says_so_in_its_layer_name(monkeypatch):
-    """`_tag` existed and was never called, so the tag went missing."""
+def test_layers_are_named_by_title_and_say_whose_they_are(monkeypatch):
+    """A layer's name is its part's title and what it draws; a neuropil
+    set's says where its data come from. No id, and no tag in brackets."""
     with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
         assert code == 0
+        names = layer_names(viewer)
+        assert "Neuropils (FlyWire) · not loaded yet" in names, names
         session(viewer).panel.tab("fafb_neuropil")   # built when its tab opens
         names = layer_names(viewer)
-        assert "fafb_neuropil [bridged]" in names, names
-        assert "fafb_neuropil [bridged] [contours]" in names, names
-        # Native atlases are not tagged.
-        assert "Benton 2025 (Dataset EV2)" in names, names
+        assert names == sorted([
+            "Benton 2025 · 3D", "Benton 2025 · outlines",
+            "Neuropils (FlyWire) · 3D", "Neuropils (FlyWire) · outlines",
+            *(["Neuropil stain (from synapses)"] if session(viewer).images else []),
+        ]), names

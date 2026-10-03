@@ -51,7 +51,13 @@ def test_hover_names_the_glomerulus_in_3d_and_2d(monkeypatch, space):
         next(b for b in tab.findChildren(QPushButton) if b.text() == "None").click()
         tab.table.item(tab._row_of(index), VISIBLE_COL).setCheckState(Qt.Checked)
         pump(300)
-        want = f"{primary}: {name}"
+        # The row's name and side, and whose it is, in words.
+        from lobemap.core.names import parse_roi
+
+        bare, suffix = parse_roi(name)
+        side = sess.registry.atlases[primary].compartments[index].side or suffix
+        title = sess.registry.asset_of(primary).title
+        want = f"{bare} ({ {'L': 'left', 'R': 'right'}[side]}) — {title}"
 
         # First open, 3D: nothing selected in the layer list by us.
         assert hover(viewer, surface.meshset.centroid(index)) == want

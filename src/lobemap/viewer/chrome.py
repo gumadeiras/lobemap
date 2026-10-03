@@ -1,10 +1,10 @@
 """napari's own window as lobemap lays it out: its docks, buttons and drawing tools.
 
 napari opens with controls for making and editing data: new and delete
-layer buttons, a console, grid, roll and transpose buttons, and sixteen
-drawing tools for the outline layers. None of them changes what a lobemap
-scene shows, and three -- 2D/3D, roll and transpose -- do what the View
-dock does without its bookkeeping. So the buttons are hidden, the outline
+layer buttons, a console, grid, roll and transpose buttons, sixteen
+drawing tools for the outline layers, and a transform tool on every layer.
+None of them changes what a lobemap scene shows, and three -- 2D/3D, roll and transpose -- do what the View
+dock does without its bookkeeping. So the buttons are hidden, lobemap's
 layers are made non-editable, and the window is arranged as lobemap's: the
 View dock tabbed with napari's layer settings above the layer list on the
 left, and the compartment tables alone on the right.
@@ -12,7 +12,7 @@ left, and the compartment tables alone on the right.
 napari has no public API for its buttons, its own docks, or a dock with no
 close button. These go through `Window._qt_viewer`, `Window._qt_window`
 and napari's dock widget class, and `tests/test_napari_private.py` checks
-each. The outline layers use napari's public `editable`.
+each. lobemap's layers are locked by napari's public `editable`.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ RIGHT_WIDTH = 440
 LAYER_SETTINGS = "Layer settings"
 LAYERS = "Layers"
 
-#: The viewers whose outline layers are kept locked; see `lock_outlines`.
+#: The viewers whose own layers are kept locked; see `lock_layers`.
 _LOCKING: weakref.WeakSet = weakref.WeakSet()
 
 
@@ -115,23 +115,26 @@ def _retitle(dock, name: str) -> None:
     dock.title.title.setText(name)
 
 
-def lock_outlines(viewer) -> None:
-    """Keep lobemap's outline layers out of napari's drawing modes.
+def lock_layers(viewer) -> None:
+    """Keep lobemap's own layers out of napari's editing modes.
 
-    An outline layer is a napari Shapes layer that lobemap draws itself, so
-    a shape drawn into it is lost at the next slice. napari's `editable` is
-    the public switch for that: off, its drawing tools are disabled and no
-    mode but pan and zoom can be entered. Its key help, which lists those
-    modes, is cleared too.
+    lobemap draws its layers itself, and napari's modes edit them behind
+    its back: a shape drawn into an outline layer is lost at the next
+    slice, and the transform tool, on key 2 for a surface, moved a mesh
+    away from the image it was registered to, with nothing to put it back.
+    napari's `editable` is the public switch for both: off, the drawing
+    and transform tools are disabled and no mode but pan and zoom can be
+    entered. Its key help, which lists those modes, is cleared too.
 
-    An outline layer is known by the `lobemap` metadata `ContourOverlay`
-    writes, which is there only once napari has added the layer. So each
-    Shapes layer added is looked at again as soon as the event loop turns,
-    and the outlines present now are locked at once. napari turns
-    `editable` back on whenever a Shapes layer enters 2D, so it is turned
-    off again each time. A Shapes layer the user adds is left alone.
+    A layer of lobemap's is known by the `lobemap` metadata its maker
+    writes, which some write only once napari has added the layer. So each
+    layer added is looked at again as soon as the event loop turns, and
+    the layers present now are locked at once. napari turns `editable`
+    back on whenever it resets a layer -- a Shapes layer entering 2D, a
+    surface given new data -- so it is turned off again each time. A layer
+    the user adds is left alone.
 
-    Installed once per viewer; later calls only lock the outlines present.
+    Installed once per viewer; later calls only lock the layers present.
     """
     if viewer not in _LOCKING:
         _LOCKING.add(viewer)
@@ -143,17 +146,15 @@ def lock_outlines(viewer) -> None:
 
 
 def _watch(layer) -> None:
-    from napari.layers import Shapes
     from qtpy.QtCore import QTimer
 
-    if isinstance(layer, Shapes):
-        lock = functools.partial(_lock, layer)
-        layer.events.editable.connect(lock)
-        QTimer.singleShot(0, lock)
+    lock = functools.partial(_lock, layer)
+    layer.events.editable.connect(lock)
+    QTimer.singleShot(0, lock)
 
 
 def _lock(layer) -> None:
-    if layer.metadata.get("lobemap", {}).get("kind") != "contours":
+    if "lobemap" not in layer.metadata:
         return
     if layer.editable:
         layer.editable = False
@@ -167,6 +168,6 @@ __all__ = [
     "LEFT_WIDTH",
     "RIGHT_WIDTH",
     "add_dock",
-    "lock_outlines",
+    "lock_layers",
     "tidy",
 ]

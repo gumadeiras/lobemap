@@ -71,7 +71,7 @@ def test_the_viewer_shows_the_doubt_where_it_names_the_glomerulus(monkeypatch):
 
         # The hover status, in 2D and in 3D.
         path = max((loop for _owner, loop in contour_loops(overlay)), key=len)
-        assert hover(viewer, path.mean(axis=0)) == "grabe2015: VP2(L) (VM6?)"
+        assert hover(viewer, path.mean(axis=0)) == "VP2 (VM6?, left) — Grabe 2015"
         viewer.dims.ndisplay = 3
         pump()
-        assert hover(viewer, surface.meshset.centroid(vp2)) == "grabe2015: VP2(L) (VM6?)"
+        assert hover(viewer, surface.meshset.centroid(vp2)) == "VP2 (VM6?, left) — Grabe 2015"

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from ..core.registry import Registry
 from .contours import ContourOverlay
-from .layers import AtlasSurface, canonical_colors
+from .layers import GLOMERULUS_COLORS, NEUROPIL_COLORS, AtlasSurface, canonical_colors
 from .request import REFERENCE_ROLES
 
 #: Distinct flat colors for contour overlays, one per atlas, so two atlases
@@ -30,24 +30,6 @@ REFERENCE_CONTOUR_COLOR = "#9aa0a6"
 REFERENCE_CONTOUR_WIDTH = 0.2
 
 
-def _tag(meshset) -> str:
-    """Mark bridged, degraded and mirrored layers in their name.
-
-    Only ingest-time bridging reaches this now: an asset transformed into
-    the space it is declared in, such as the FlyWire neuropils bridged
-    FLYWIRE -> FAFB14. The viewer no longer bridges atlases across spaces.
-    """
-    params = meshset.meta.get("derivation", {}).get("params", {})
-    if not params:
-        return ""
-    bits = ["bridged"]
-    if params.get("degraded"):
-        bits.append("DEGRADED")
-    if params.get("mirror"):
-        bits.append("mirrored")
-    return " [" + ", ".join(bits) + "]"
-
-
 @dataclass(frozen=True)
 class ScenePart:
     """One mesh a space shows: a neuropil or brain shell, or an atlas."""
@@ -61,6 +43,17 @@ class ScenePart:
     @property
     def reference(self) -> bool:
         return self.atlas is None
+
+
+def part_title(registry: Registry, part: ScenePart) -> str:
+    """The plain title a part's layers are named by, from its asset.
+
+    The title the panel's tab shows, and the project the data come from
+    when the title does not say: "Benton 2025", "Neuropils (FlyWire)".
+    """
+    asset = registry.asset_of(part.name) or part.asset
+    title = asset.title or part.name
+    return f"{title} ({asset.origin})" if asset.origin else title
 
 
 def scene_parts(registry: Registry, space: str) -> list[ScenePart]:
@@ -100,18 +93,19 @@ def make_surface(viewer, registry: Registry, space: str, part: ScenePart,
     """
     if meshset is None:
         meshset = registry.mesh(part.asset.id)
+    title = part_title(registry, part)
     if part.reference:
         # Additive, not translucent: a translucent shell writes depth and so
         # hides the very glomeruli it is meant to give context to.
         surface = AtlasSurface(
-            viewer, meshset, name=part.asset.id + _tag(meshset), opacity=0.35,
-            blending="additive", shading="none", visible=False, layer=layer,
-            mirror=mirror,
+            viewer, meshset, name=title, opacity=0.35, blending="additive",
+            shading="none", visible=False, layer=layer, mirror=mirror,
+            colormap_name=NEUROPIL_COLORS,
         )
     else:
         atlas = part.atlas
         surface = AtlasSurface(
-            viewer, meshset, name=(atlas.title or atlas.id) + _tag(meshset),
+            viewer, meshset, name=title, colormap_name=GLOMERULUS_COLORS,
             # The SPACE's vocabulary, not a global one: a glomerulus is
             # one color across the atlases it can be compared with, which
             # is exactly the atlases sharing its space.
@@ -151,5 +145,6 @@ __all__ = [
     "contour_styles",
     "make_contour",
     "make_surface",
+    "part_title",
     "scene_parts",
 ]

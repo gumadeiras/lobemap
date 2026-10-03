@@ -258,7 +258,8 @@ def test_a_switch_during_the_prefetch_stops_it(monkeypatch, held_back):
         held = (len(old.sections.planes), len(old._geometry))
         pump(300)
         assert (len(old.sections.planes), len(old._geometry)) == held
-        assert all(name.startswith(("grabe", "Grabe")) for name in layer_names(viewer))
+        # Only the open scene's layers are left.
+        assert set(viewer.layers) == set(session(viewer).all_layers()), layer_names(viewer)
         _assert_all_cut_ahead(viewer, _primary(viewer))
         _assert_drawn_is_fresh(_primary(viewer))
 

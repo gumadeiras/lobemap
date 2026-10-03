@@ -14,7 +14,7 @@ import numpy as np
 
 from ..core.registry import Registry
 from .axes import apply_axis_mode
-from .chrome import add_dock, lock_outlines, tidy
+from .chrome import add_dock, lock_layers, tidy
 from .images import (
     BASE_DISPLAY,
     ROLE_DISPLAY,
@@ -226,7 +226,8 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
     shape at all. Drags are skipped: they rotate or pan the view.
 
     The dicts are read on every move, so a part the session builds later
-    (`SceneSession.realize`) is picked too.
+    (`SceneSession.realize`) is picked too. The status bar says what the
+    panel's row says, and whose it is: "VA3 (left) — Benton 2025".
     """
 
     def _on_move(_viewer, event):
@@ -262,8 +263,10 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
                 label = overlay.name_at_shape(shape)
                 index = overlay.meshset.names.index(label) if label else None
             if label:
+                tab = panel.tabs.get(name) if panel is not None else None
                 shown_as = surface.display_names[index] if index is not None else label
-                viewer.status = f"{name}: {shown_as}"
+                said = tab.describe(index) if tab is not None and index is not None else ""
+                viewer.status = said or f"{shown_as} — {surface.name}"
                 if panel is not None and index is not None:
                     panel.highlight(name, index)
                 return
@@ -339,7 +342,7 @@ def load_space(
             session.show(show)
         install_home_orientation(viewer, registry.spaces[space],
                                  reflect_axis=session.reflect_axis)
-        lock_outlines(viewer)
+        lock_layers(viewer)
         show_main_layer(viewer, registry, session)
     except BaseException:
         session.teardown()

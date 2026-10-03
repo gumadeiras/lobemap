@@ -66,7 +66,20 @@ def _hsv_to_rgba(h: np.ndarray, s: np.ndarray, v: np.ndarray) -> np.ndarray:
     return np.stack([r, g, b, np.ones_like(r)], axis=1)
 
 
-def step_colormap(colors: np.ndarray, name: str = "compartments"):
+#: What a surface's colormap is called in napari's layer settings: an
+#: atlas's, and a neuropil set's. napari keeps every colormap it is given
+#: by name, for the session, and its menus are as wide as the longest:
+#: named after their layers, with ids in them, they widened the layer
+#: settings by up to 60 px. A name already kept with other colors is
+#: numbered, "Glomerulus colors (2)", so each layer keeps its own.
+GLOMERULUS_COLORS = "Glomerulus colors"
+NEUROPIL_COLORS = "Neuropil colors"
+
+#: A surface's layer: its part's title, and what it draws.
+MESH_NAME = "{} · 3D"
+
+
+def step_colormap(colors: np.ndarray, name: str = GLOMERULUS_COLORS):
     """A napari Colormap mapping value i to colors[i] with no blending.
 
     With 'zero' interpolation napari wants one more control point than color:
@@ -91,7 +104,7 @@ def step_colormap(colors: np.ndarray, name: str = "compartments"):
     )
 
 
-def direct_label_colormap(values_to_colors, name: str = "labels"):
+def direct_label_colormap(values_to_colors, name: str = GLOMERULUS_COLORS):
     """A napari colormap painting each label value with a given RGBA.
 
     Labels are a segmentation, so they need a value->color dict rather than
@@ -150,9 +163,7 @@ def match_label_colors(layer, surfaces) -> int:
     mapping = {int(v): palette[n] for v, n in names.items() if n in palette}
     if not mapping:
         return 0
-    layer.colormap = direct_label_colormap(
-        mapping, name=f"{layer.name}-colors"
-    )
+    layer.colormap = direct_label_colormap(mapping)
     return len(mapping)
 
 
@@ -183,15 +194,19 @@ class AtlasSurface:
         visible: bool = True,
         layer=None,
         mirror: tuple[int, float] | None = None,
+        colormap_name: str = GLOMERULUS_COLORS,
     ) -> None:
-        """`layer` is a hidden Surface layer to take over rather than add one:
+        """`name` is the part's plain title; the layer is `MESH_NAME` of it.
+        `layer` is a hidden Surface layer to take over rather than add one:
         a stand-in a scene added for this mesh before it was read
         (`deferred`). It is given everything a new layer would be.
         `mirror` is (axis, center) for a surface built while the view is
         reflected (`set_mirror`)."""
         self.viewer = viewer
         self.meshset = meshset
+        #: The part's plain title, which its layers and hover text name it by.
         self.name = name
+        self.colormap_name = colormap_name
         n = meshset.n_compartments
         #: What a reader sees for each compartment: its published name, with
         #: any doubt about it (`Compartment.label`). `meshset.names` stays the
@@ -220,7 +235,7 @@ class AtlasSurface:
         v, f, vals = meshset.select(sorted(self.selection))
         v, f = self._present(v, f)
         settings = {
-            "colormap": step_colormap(self.colors, name=f"{name}-colors"),
+            "colormap": step_colormap(self.colors, name=colormap_name),
             "contrast_limits": contrast_limits_for(n),
             "opacity": opacity,
             # Given here rather than set afterwards, so vispy never computes
@@ -232,7 +247,7 @@ class AtlasSurface:
         }
         if layer is None:
             self.layer = viewer.add_surface(
-                (v, f, vals), name=name, **settings,
+                (v, f, vals), name=MESH_NAME.format(name), **settings,
                 # A scene makes its surfaces hidden and lets `sync` show each
                 # in the mode that draws it: napari slices a visible layer as
                 # it is added, so a surface made visible was sliced for nothing
@@ -245,7 +260,7 @@ class AtlasSurface:
             layer.visible = False
             layer.shading = settings.pop("shading")
             layer.data = (v, f, vals)
-            layer.name = name
+            layer.name = MESH_NAME.format(name)
             for key, value in settings.items():
                 setattr(layer, key, value)
             layer.visible = visible
@@ -492,7 +507,7 @@ class AtlasSurface:
         mask = np.zeros(len(colors), dtype=bool)
         mask[sorted(self.selection)] = True
         colors[:, 3] = np.where(mask, 1.0, 0.0)
-        self.layer.colormap = step_colormap(colors, name=f"{self.name}-colors")
+        self.layer.colormap = step_colormap(colors, name=self.colormap_name)
 
     def _schedule_compact(self) -> None:
         if self.compact_delay_ms <= 0:

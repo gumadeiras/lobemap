@@ -208,18 +208,16 @@ def test_a_space_opens_showing_its_primary_atlas(registry, ndisplay):
                 continue
             viewer.layers.clear()
             load_space(viewer, registry, space_id, fit=False)
-            wanted = primary.title or primary.id
-            if ndisplay == 2:
-                wanted += " [contours]"
+            what = " · outlines" if ndisplay == 2 else " · 3D"
+            wanted = registry.asset_of(primary.id).title + what
             assert viewer.layers[wanted].visible, (
                 f"{space_id} in {ndisplay}D: {wanted} is off"
             )
             # And exactly one atlas is drawn, whatever the mode.
+            atlases = {registry.asset_of(a).title for a in registry.atlases}
             drawn = [
                 layer.name for layer in viewer.layers
-                if layer.visible and layer.name.removesuffix(" [contours]")
-                in {(registry.atlases[a].title or a)
-                    for a in registry.atlases}
+                if layer.visible and layer.name.rpartition(" · ")[0] in atlases
             ]
             assert drawn == [wanted], (space_id, ndisplay, drawn)
     finally:

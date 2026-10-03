@@ -135,7 +135,7 @@ def test_hovering_a_glomerulus_points_the_vfb_button_at_it(monkeypatch):
         _buttons(tab)["None"].click()
         tab.table.item(tab._row_of(index), VISIBLE_COL).setCheckState(Qt.Checked)
         pump(300)
-        assert hover(viewer, tab.surface.meshset.centroid(index)) == "benton2025: DA1"
+        assert hover(viewer, tab.surface.meshset.centroid(index)) == "DA1 (left) — Benton 2025"
         vfb = _buttons(tab)["Open in Virtual Fly Brain"]
         assert vfb.isEnabled()
         assert vfb.toolTip() == "Open the Virtual Fly Brain page for DA1"

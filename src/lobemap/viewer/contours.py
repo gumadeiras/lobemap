@@ -44,6 +44,9 @@ TEXT_SIZE = 10.5
 #: `sections.SECTION_CACHE_BYTES`, at most 96 MB an atlas.
 GEOMETRY_CACHE_BYTES = 64 * 2**20
 
+#: An overlay's layer: its atlas's plain title, and what it draws.
+OUTLINE_NAME = "{} · outlines"
+
 class _PlaneGeometry:
     """What one plane draws, for every compartment it cuts, built once.
 
@@ -292,7 +295,7 @@ class ContourOverlay:
 
         self.layer = viewer.add_shapes(
             data=[],
-            name=f"{name} [contours]",
+            name=OUTLINE_NAME.format(name),
             shape_type="path",
             edge_color=color,
             edge_width=width,

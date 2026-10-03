@@ -137,6 +137,14 @@ def layer_names(viewer) -> list[str]:
     return sorted(layer.name for layer in viewer.layers)
 
 
+def stand_in_name(sess, name: str) -> str:
+    """What the stand-in of the part `name` is called in the layer list."""
+    from lobemap.viewer.deferred import STANDIN_NAME
+    from lobemap.viewer.parts import part_title
+
+    return STANDIN_NAME.format(title=part_title(sess.registry, sess.parts[name]))
+
+
 # -- what is drawn --------------------------------------------------------
 
 

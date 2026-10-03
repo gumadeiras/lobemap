@@ -213,7 +213,7 @@ def _describe(registry, panel, name, annotation, neuropils) -> dict:
         "searched": tuple(sorted(reached)),
         "wrong": wrong,
         "chrome": chrome,
-        "layer": tab.surface.name,
+        "layer": tab.surface.layer.name,
     }
 
 
