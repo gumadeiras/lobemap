@@ -56,9 +56,8 @@ def worker(path, ndisplay: int, rotate) -> dict:
         session = load(path[0])
         out["open_ms"] = (time.perf_counter() - t0) * 1e3
         switcher = SpaceSwitcher(viewer, registry, session, load)
-        switcher.dock = viewer.window.add_dock_widget(switcher, area="right", name="Space",
+        switcher.dock = viewer.window.add_dock_widget(switcher, area="left", name="View",
                                                       tabify=False)
-        switcher.settle()
         _settle(app)
 
         def turn() -> None:
