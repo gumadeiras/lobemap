@@ -106,6 +106,12 @@ def test_both_rows_are_back_and_what_is_off_says_why(opened):
                    layer_row.newPointsButton, layer_row.newShapesButton,
                    layer_row.deleteButton):
         assert button.isEnabled(), button.toolTip()
+    # The console opens and closes, and the picture is as it was.
+    for shown in (True, False):
+        row.consoleButton.click()
+        pump(200)
+        assert viewer.window._qt_viewer.dockConsole.isVisible() is shown
+        assert_no_hidden_mirror(viewer, session(viewer), sw, signs)
 
 
 def test_the_2d_3d_button_and_home_are_the_view_docks(opened):
@@ -206,6 +212,23 @@ def test_roll_and_its_popup_are_the_sections_menu(opened):
         assert_no_hidden_mirror(viewer, sess, sw, signs)
         popup.close()
         pump()
+    # Locked axes stay in place when napari rolls: whichever are locked, a
+    # roll picks sections the menu names, or nothing.
+    from qtpy.QtCore import Qt
+
+    for locked in ((0,), (1,), (2,), (0, 1)):
+        popup, found = sorter()
+        model = found.view.model()
+        for i in range(model.rowCount()):
+            state = Qt.CheckState.Unchecked if i in locked else Qt.CheckState.Checked
+            model.setData(model.index(i, 0), state.value, Qt.ItemDataRole.CheckStateRole)
+        popup.close()
+        pump()
+        row.rollDimsButton.click()
+        pump()
+        assert int(sw.slice.currentData()) == sess.slice_axis == int(viewer.dims.order[0])
+        assert_no_hidden_mirror(viewer, sess, sw, signs)
+        viewer.dims.rollable = (True,) * viewer.dims.ndim
     # A drag to the top picks the sections, and the menu follows.
     popup, found = sorter()
     last = found.axis_list[2].axis
@@ -262,6 +285,12 @@ def test_the_camera_popup_is_the_view_docks_flip_zoom_and_perspective(opened):
         sw.camera.zoom.setValue(1.25)
         pump()
         assert camera.zoom == pytest.approx(1.25) and row.zoom.value() == pytest.approx(1.25)
+        # Its sync box is napari's, and moves nothing.
+        for synced in (False, True):
+            row.camera_synced_checkbox.setChecked(synced)
+            pump()
+            assert camera.synced is synced
+            assert_no_hidden_mirror(viewer, sess, sw, signs)
         if ndisplay == 3:
             # Perspective.
             row.perspective.setValue(40)
