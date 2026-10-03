@@ -64,8 +64,9 @@ finished and reports how long it took.
 `--canvas W H` sizes the hidden canvas, as a shown window would be, and
 fits the view to it; napari picks pyramid levels for the canvas it has, so
 the levels read depend on it. `--rotate SPIN TILT TURN` turns the scene
-once it is open (`SceneSession.set_rotation`), and `--aligned` cuts 2D
-along the brain's own planes (`set_aligned`); either is timed. The planes
+once it is open (`SceneSession.set_rotation`), `--aligned` cuts 2D
+along the brain's own planes (`set_aligned`), and `--flip` shows the
+picture upside down (`set_flip`); each is timed. The planes
 are then inside the primary atlas's extent along the turned line of sight,
 and each worker also times `drag`, sixteen consecutive steps from the
 middle plane, as a slider dragged is.
@@ -252,6 +253,7 @@ def _backend() -> dict:
 _CANVAS: list = [None]
 _ROTATE: list = [None]
 _ALIGNED: list = [False]
+_FLIP: list = [False]
 
 
 def _size_canvas(viewer, app) -> None:
@@ -302,6 +304,13 @@ def _open(space: str, ndisplay: int, registry_root, data_root, asynchronous=Fals
         out["rotate_ms"] = (time.perf_counter() - t0) * 1e3
         out["rotate"] = list(_ROTATE[0] or (0.0, 0.0, 0.0))
         out["aligned"] = _ALIGNED[0]
+        _settle(app)
+        viewer.window._qt_viewer.canvas.on_draw()
+        _settle(app)
+    if _FLIP[0]:
+        t0 = time.perf_counter()
+        session.set_flip(True)
+        out["flip_ms"] = (time.perf_counter() - t0) * 1e3
         _settle(app)
         viewer.window._qt_viewer.canvas.on_draw()
         _settle(app)
@@ -493,6 +502,7 @@ def _worker_main(args) -> int:
     _CANVAS[0] = args.canvas
     _ROTATE[0] = args.rotate
     _ALIGNED[0] = args.aligned
+    _FLIP[0] = args.flip
     if args.no_bermuda:
         # An import that fails, exactly as when the package is absent.
         sys.modules["bermuda"] = None
@@ -595,6 +605,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="turn the scene by these angles once it is open")
     p.add_argument("--aligned", action="store_true",
                    help="cut 2D along the brain's own planes once the scene is open")
+    p.add_argument("--flip", action="store_true",
+                   help="show the picture upside down once the scene is open")
     p.add_argument("--json", default=None, help="write every result here")
     p.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--mode", default=None, help=argparse.SUPPRESS)
@@ -624,6 +636,8 @@ def main(argv: list[str] | None = None) -> int:
         common += ["--rotate", *map(str, args.rotate)]
     if args.aligned:
         common.append("--aligned")
+    if args.flip:
+        common.append("--flip")
     jobs = []
     for mode in args.modes:
         if mode == "benton":
