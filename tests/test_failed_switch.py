@@ -159,7 +159,12 @@ def _rendered(viewer) -> dict:
         "title": viewer.title,
         "ndisplay": viewer.dims.ndisplay,
         "order": tuple(viewer.dims.order),
-        "point": tuple(round(float(p), 6) for p in viewer.dims.point),
+        # The sliders as they read: each one's step, on its grid. Not napari's
+        # world point, which a change of range leaves off the grid until it is
+        # next assigned -- in 3D without a stain, hiding rows shrinks the
+        # surfaces that set the range -- and the restore is that assignment.
+        "sliders": (tuple(int(s) for s in viewer.dims.current_step),
+                    tuple(tuple(round(float(v), 6) for v in r) for r in viewer.dims.range)),
         "slice menu": sw.slice.currentText(),
         "mirror box": sw.mirror.isChecked(),
         "open tab": sess.panel.tabText(sess.panel.currentIndex()),
