@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import turned_harness as th
 from viewer_harness import (
     assert_renders_loops,
     assert_rows_match_drawing,
@@ -111,6 +112,7 @@ def _user_scene(viewer) -> None:
         assert axis == 1
         viewer.dims.set_current_step(axis, viewer.dims.current_step[axis] + 3)
     sw.mirror.click()
+    sw.flip.click()
     pump()
 
     panel = sess.panel
@@ -167,6 +169,11 @@ def _rendered(viewer) -> dict:
                     tuple(tuple(round(float(v), 6) for v in r) for r in viewer.dims.range)),
         "slice menu": sw.slice.currentText(),
         "mirror box": sw.mirror.isChecked(),
+        "flip box": sw.flip.isChecked(),
+        # Where the camera looks: the screen's right, up and toward the viewer.
+        "screen": (np.round(th.screen_axes(viewer), 6).tolist()
+                   if viewer.dims.ndisplay == 3 else None),
+        "upside down": sess.flipped,
         "open tab": sess.panel.tabText(sess.panel.currentIndex()),
         "layers": layer_names(viewer),
         "visible": sorted(layer.name for layer in viewer.layers if layer.visible),
@@ -308,7 +315,7 @@ def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, capfd, where, n
         camera = _camera(viewer)
         kept = session(viewer)
         # The scene really is the user's, not the space's defaults.
-        assert before["mirror box"]
+        assert before["mirror box"] and before["flip box"] and before["upside down"]
         assert before[SECONDARY]["line"].startswith(LINE)
         assert before[SECONDARY]["rows"]
         assert 0 < len(before[SECONDARY]["hidden rows"]) < before[SECONDARY]["n rows"]
@@ -366,6 +373,10 @@ def test_a_switch_that_succeeds_still_replaces_the_scene(monkeypatch):
         assert not sess.mirrored
         assert not switcher(viewer).mirror.isChecked()
         assert all(not s.mirrored for s in sess.surfaces.values())
+        # Nor does the flip: the camera shows the new brain upright.
+        assert not sess.flipped
+        assert not switcher(viewer).flip.isChecked()
+        assert str(viewer.scene.camera.orientation[1]) == "down"
         assert switcher(viewer).slice.currentText().startswith("Frontal (")
         # On the new scene's own grid, cutting its atlas.
         axis = int(viewer.dims.order[0])
@@ -374,3 +385,37 @@ def test_a_switch_that_succeeds_still_replaces_the_scene(monkeypatch):
         assert k == pytest.approx(round(k), abs=1e-6)
         assert_rows_match_drawing(sess)
         assert drawn(sess.surfaces["grabe2015"], sess.contours["grabe2015"])
+
+
+def test_a_switch_that_succeeds_in_3d_faces_the_new_brain_upright(monkeypatch):
+    """Flipped and mirrored in 3D, a switch opens the next brain at its front
+    view, dorsal up, unmirrored and upright, and lit from outside: its Home
+    was set while the camera was still the old brain's, flipped."""
+    from lobemap.core.model import anatomical_axes
+    from lobemap.viewer.napari_private import front_face
+
+    with launched(monkeypatch, "view", SPACE) as (code, viewer):
+        assert code == 0
+        sw = switcher(viewer)
+        sw.mirror.click()
+        sw.flip.click()
+        pump()
+        assert session(viewer).flipped
+        switch_to(viewer, TARGET)
+        pump(400)
+        sess = session(viewer)
+        assert sess.space == TARGET and not sess.flipped and not sess.mirrored
+        assert not sw.flip.isChecked() and not sw.mirror.isChecked()
+        th.settle_canvas(viewer)
+        frame = anatomical_axes(sess.registry.spaces[TARGET])
+        _right, up, toward = th.screen_axes(viewer)
+        assert toward @ np.asarray(frame["A"]) > 0.99
+        assert up @ np.asarray(frame["D"]) > 0.99
+        for image in sess.images:
+            image.visible = False
+        surface = sess.surfaces["grabe2015"]
+        lit = th.brightness(th.picture(viewer))
+        # The control: faces wound for a flipped picture are lit from inside.
+        front_face(viewer, surface.layer, True)
+        assert th.brightness(th.picture(viewer)) < 0.8 * lit
+        front_face(viewer, surface.layer, False)

@@ -1,12 +1,12 @@
 """The View dock: which brain is open, and how it is shown.
 
 Brain, 3D or Slice, Fit to window, the sections a slice steps through and their
-alignment, the mirror and the rotation: the controls that belong to the
+alignment, the mirror, the flip and the rotation: the controls that belong to the
 scene rather than to one atlas, whose controls are the compartment panel's.
 Every control is in view in both modes; one that applies to one mode stays
-visible in the other, disabled, and says why. The mirror stands alone, with
-no row label to repeat its word, and is worded apart from a flip of the
-picture: it mirrors the brain, where a flip would turn the picture over.
+visible in the other, disabled, and says why. The mirror and the flip stand
+alone, with no row label to repeat their words, and are worded apart: the
+mirror reflects the brain, and the flip turns the picture upside down.
 
 Picking another brain rebuilds the scene in place rather than relaunching:
 the process, the Qt window and the GPU context survive, so a switch costs
@@ -65,6 +65,11 @@ MIRROR_TIP = (
     "Show the brain as its mirror image, to compare a left lobe with a right "
     "one. Display only; the data do not change. The corner arrows follow. "
     "Opening another brain turns it off."
+)
+FLIP = "Flip the picture upside down"
+FLIP_TIP = (
+    "Show the picture upside down. Display only; the data do not change. With "
+    "the mirror, a front view turns 180°. Opening another brain turns it off."
 )
 THREE_D_TIP = "Show the brain in 3D. Drag to turn it."
 SLICE_TIP = "Show one section at a time. The slider under the image steps through them."
@@ -198,10 +203,15 @@ class SpaceSwitcher(QWidget):
         self.mirror = QCheckBox(MIRROR)
         self.mirror.setToolTip(MIRROR_TIP)
         self.mirror.toggled.connect(self._on_mirror)
-        #: How the picture is shown: the anatomical mirror, and the place a
-        #: screen flip goes under it.
+        #: The picture upside down, after the turn and the mirror.
+        self.flip = QCheckBox(FLIP)
+        self.flip.setToolTip(FLIP_TIP)
+        self.flip.toggled.connect(self._on_flip)
+        #: How the picture is shown: the anatomical mirror, and the screen
+        #: flip under it.
         self.picture = QVBoxLayout()
         self.picture.addWidget(self.mirror)
+        self.picture.addWidget(self.flip)
 
         #: The angles about the screen's axes; they carry across a switch,
         #: as the alignment does.
@@ -357,6 +367,15 @@ class SpaceSwitcher(QWidget):
         with contextlib.suppress(Exception):
             self.session.set_mirror(on)
 
+    def _on_flip(self, on: bool) -> None:
+        """Show the picture upside down, or upright."""
+        if self._busy:
+            return
+        try:
+            self.session.set_flip(on)
+        except Exception as exc:                      # noqa: BLE001
+            _report("could not flip the picture", exc)
+
     def _on_change(self, _index: int) -> None:
         self._on_brain_shown()
         want = self.combo.currentData()
@@ -376,7 +395,7 @@ class SpaceSwitcher(QWidget):
         A failed build is undone and the open scene was never touched, so the
         user gets back exactly what they had: every tab's checked rows,
         labels, fills, filter and driver line, the open tab, the mirror, the
-        angles and the alignment.
+        flip, the angles and the alignment.
         What the build did move belongs to the viewer -- the slice axis and
         plane, the camera, the selected layer, the title, the axis triads
         and the home button -- and is put back from what was captured before
@@ -425,6 +444,14 @@ class SpaceSwitcher(QWidget):
         # left read as right. `_busy` keeps `_on_mirror` out of it. A failed
         # switch keeps the open scene, mirror and all, and never gets here.
         self.mirror.setChecked(False)
+        # Upright too, for the same reason. The flip is the camera's, which
+        # the new scene was built under: its Home faces the same way either
+        # way (`view.show_upside_down`), so only the flip is undone.
+        self.flip.setChecked(False)
+        try:
+            new.set_flip(False)
+        except Exception as exc:                      # noqa: BLE001
+            _report(f"opened {want} but could not turn the picture upright", exc)
         try:
             new.settle_view()
             self.status.setText("")

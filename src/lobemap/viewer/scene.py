@@ -45,6 +45,8 @@ from .view import (
     fit_view,
     install_home_orientation,
     mirror_center,
+    show_upside_down,
+    upside_down,
 )
 
 #: Whether 2D gets its own exact mesh-plane contour layers, or just shows
@@ -333,6 +335,16 @@ class SceneSession:
     def home(self) -> None:
         """Home: in 3D the anatomy turned by the angles, in 2D napari's fit."""
         self.viewer.reset_view()
+
+    @property
+    def flipped(self) -> bool:
+        """Whether the picture is upside down (`set_flip`)."""
+        return upside_down(self.viewer)
+
+    def set_flip(self, on: bool) -> None:
+        """Turn the picture upside down after the turn and the mirror, or back,
+        by the viewer's camera (`view.show_upside_down`): no layer moves."""
+        show_upside_down(self.viewer, on)
 
     def all_layers(self) -> list:
         """Every layer this session owns."""

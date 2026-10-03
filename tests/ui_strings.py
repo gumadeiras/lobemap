@@ -304,7 +304,8 @@ BUILTIN_COLORMAPS = _builtin_colormaps()
 
 
 #: The states each brain is read in: as opened, then with every tab built
-#: and every row shown, in each mode, unturned and turned across the grid.
+#: and every row shown, in each mode, unturned and turned across the grid
+#: and upside down.
 STATES = ("3d_default", "2d_default", "3d_all", "2d_all", "2d_oblique", "3d_turned")
 #: (spin, tilt, turn) of the turned states, entered in the View dock.
 TURNED = (20.0, 30.0, -15.0)
@@ -313,7 +314,7 @@ TURNED = (20.0, 30.0, -15.0)
 def walk(viewer, spaces):
     """Yield (space, state, strings shown) for each brain, through the
     controls a user has: the Dataset menu, the tabs, 3D and Slice, the
-    angle boxes. The viewer opened on `spaces[0]`."""
+    angle boxes and the flip. The viewer opened on `spaces[0]`."""
     from viewer_harness import pump, session, switch_to, switcher
 
     sw = switcher(viewer)
@@ -333,6 +334,8 @@ def walk(viewer, spaces):
             if state == "2d_oblique":
                 for angle, value in zip(("spin", "tilt", "turn"), TURNED, strict=True):
                     sw.rotation.box[angle].setValue(value)
+                # Turned states are read upside down, which a switch undoes.
+                sw.flip.setChecked(True)
             (sw.three_d if state.startswith("3d") else sw.slice_view).click()
             pump(300)
             shown = collect(viewer)

@@ -345,6 +345,39 @@ def keep_volume_texture(viewer, layer) -> None:
     node.freeze()
 
 
+def front_face(viewer, layer, clockwise: bool) -> None:
+    """Rasterize `layer`'s faces as front-facing when wound clockwise on
+    screen, or counterclockwise, as GL does by default.
+
+    vispy's smooth shading turns a normal around on a face the camera sees
+    from behind (`gl_FrontFacing`), and a camera that mirrors the picture
+    sees every face from behind: the surfaces came out lit from inside.
+    The face is vispy's own GL state, but napari sets a layer's whole GL
+    state anew whenever its blending, the layer order or the bottom visible
+    layer changes (`_on_blending_change`), so the node's `set_gl_state` is
+    wrapped, once, to put the face back after each.
+    """
+    node = layer_visual(viewer, layer).node
+    face = "cw" if clockwise else "ccw"
+    if getattr(node, "_lobemap_face", None) is None:
+        if not clockwise:
+            return                      # never turned: GL's own default
+        set_state = node.set_gl_state
+
+        def set_gl_state(*args, **kwargs):
+            set_state(*args, **kwargs)
+            node.update_gl_state(front_face=node._lobemap_face)
+
+        # vispy freezes its visuals against new attributes.
+        node.unfreeze()
+        node.set_gl_state = set_gl_state
+        node._lobemap_face = face
+        node.freeze()
+    node._lobemap_face = face
+    node.update_gl_state(front_face=face)
+    node.update()
+
+
 def data_from_world(layer):
     """`layer.world_to_data` as it is now, as a function any thread can call.
 
@@ -379,6 +412,7 @@ __all__ = [
     "clear_extent",
     "data_from_world",
     "fit_axis_labels",
+    "front_face",
     "gl_state",
     "hook_extent",
     "keep_extent_while_slicing",

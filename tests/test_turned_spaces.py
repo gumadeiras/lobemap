@@ -19,55 +19,9 @@ napari = pytest.importorskip("napari")
 pytestmark = pytest.mark.requires_data
 
 
-def _open(registry, space, ndisplay):
-    from lobemap.viewer.app import load_space
-
-    viewer = napari.Viewer(show=False, ndisplay=ndisplay)
-    sess = load_space(viewer, registry, space, fit=False)
-    th.settle_canvas(viewer)
-    return viewer, sess
-
-
-def _center_on_the_atlas(viewer, sess) -> None:
-    """Center the 2D view on the primary atlas, on a slider plane through it:
-    the pivot a turn keeps, so the turned plane cuts the atlas."""
-    name = sess.registry.primary_atlas(sess.space).id
-    surface, contour = sess.surfaces[name], sess.contours[name]
-    # The largest compartment's center: every plane through it cuts it.
-    largest = int(np.argmax(np.diff(surface.meshset.vertex_offsets)))
-    # Through the contour layer, which carries the mirror. At rest.
-    middle = np.asarray(contour.layer.data_to_world(surface.meshset.centroid(largest)),
-                        float)
-    axis = int(viewer.dims.order[0])
-    start, _stop, step = viewer.dims.range[axis]
-    viewer.dims.set_current_step(axis, round((middle[axis] - start) / step))
-    center = list(viewer.scene.camera.center)
-    center[-2:] = middle[list(viewer.dims.displayed)]
-    viewer.scene.camera.center = tuple(center)
-    th.settle_canvas(viewer)
-
-
-def _contour_vs_trimesh(viewer, sess, to_mesh=None, tol_um=2e-4) -> int:
-    """Every loop of the primary atlas against trimesh; the count compared."""
-    name = sess.registry.primary_atlas(sess.space).id
-    contour = sess.contours[name]
-    axis = int(viewer.dims.order[0])
-    shown = list(viewer.dims.displayed)
-    world = np.zeros((3, 3))
-    world[:, axis] = float(viewer.dims.point[axis])
-    world[1, shown[0]] += 10.0
-    world[2, shown[1]] += 10.0
-    plane = np.array([contour.layer.world_to_data(w) for w in world], float)
-    if to_mesh is not None:
-        plane = to_mesh(plane)
-    normal = np.cross(plane[1] - plane[0], plane[2] - plane[0])
-    by_owner: dict[int, list] = {}
-    for owner, loop in th.loops_in_mesh(contour, to_mesh):
-        by_owner.setdefault(owner, []).append(loop)
-    for owner, drawn in by_owner.items():
-        want = th.trimesh_loops(contour.meshset, owner, plane[0], normal)
-        assert want and th.hausdorff(drawn, want) <= tol_um, (sess.space, owner)
-    return len(by_owner)
+_open = th.open_space
+_center_on_the_atlas = th.center_on_the_atlas
+_contour_vs_trimesh = th.contour_vs_trimesh
 
 
 @pytest.mark.parametrize("space", SPACES)

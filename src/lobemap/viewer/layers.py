@@ -20,7 +20,7 @@ import numpy as np
 
 from ..core.meshfmt import MeshSet
 from . import napari_private
-from .view import reflect_vertices
+from .view import face_front, reflect_vertices
 
 
 #: A qualitative palette that stays distinguishable at ~60 entries by cycling
@@ -316,6 +316,8 @@ class AtlasSurface:
             layer.visible = visible
             self.layer = layer
         self.layer.metadata["lobemap"] = {"meshset": meshset, "kind": "atlas"}
+        # Lit from outside under a picture shown upside down, as it is.
+        face_front(viewer, [self.layer])
         self.layer.events.visible.connect(self._on_eye)
         #: Whether napari's vispy node still holds this layer's 3D build of
         #: its current data; see `hide_mesh`.

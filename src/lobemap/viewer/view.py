@@ -1,10 +1,12 @@
-"""How a scene is looked at: the camera, the fit, the home button, the mirror.
+"""How a scene is looked at: the camera, the fit, the home button, the mirror
+and the flip.
 
 None of this changes the data. The camera is turned onto each space's
 measured anatomy, the view is fitted to the canvas as the window settles,
 the home button restores the anatomical view rather than napari's array
-view, and the mirror reflects every layer, the surfaces by their own vertices
-(`AtlasSurface._present`) and the rest by a world transform. A failed
+view, the mirror reflects every layer, the surfaces by their own vertices
+(`AtlasSurface._present`) and the rest by a world transform, and the flip
+turns the picture upside down by the camera (`show_upside_down`). A failed
 space switch gives the view back through `capture_view` and `restore_view`.
 """
 
@@ -13,6 +15,11 @@ from __future__ import annotations
 import contextlib
 
 import numpy as np
+
+#: napari's camera orientation along the screen's vertical: "down", the
+#: way napari draws array rows and `rotation.grid_frame` reads them, or
+#: "up", which shows the picture upside down (`show_upside_down`).
+UPRIGHT, UPSIDE_DOWN = "down", "up"
 
 #: The array axis a mirror reflects along.
 #:
@@ -40,7 +47,8 @@ def orient_anterior(viewer, space, reflect_axis: int | None = None,
     `angles` turn the scene from there, (spin, tilt, turn) degrees about
     the screen's axes (`rotation`): the camera is this view turned by their
     inverse, so no layer moves. None takes the angles of the scene the
-    viewer shows (`rotation.angles_of`), which is what Home faces.
+    viewer shows (`rotation.angles_of`), which is what Home faces. A picture
+    shown upside down (`show_upside_down`) is this view upside down.
 
     Needs the whole frame. A view direction alone leaves the roll free,
     so a camera built from anterior without dorsal would face the right
@@ -64,11 +72,69 @@ def orient_anterior(viewer, space, reflect_axis: int | None = None,
     angles = angles_of(viewer) if angles is None else tuple(angles)
     if tuple(float(a) for a in angles) != ZERO:
         view, up = turned_view(view, up, angles)
+    if upside_down(viewer):
+        # The angles stay the upright view's: napari draws its up at the
+        # top of the screen, and the view's up is now at the bottom.
+        up = -up
     camera = viewer.scene.camera
     camera.set_view_direction(view_direction=tuple(view), up_direction=tuple(up))
     # Up is what napari's angle round trip can lose, so that is what is
     # checked; see `tests/test_default_view.py`.
     return bool(np.dot(np.asarray(camera.up_direction), up) > 0.99)
+
+
+def upside_down(viewer) -> bool:
+    """Whether the camera shows the picture upside down (`show_upside_down`)."""
+    return str(viewer.scene.camera.orientation[1]) == UPSIDE_DOWN
+
+
+def show_upside_down(viewer, on: bool) -> None:
+    """Show the picture upside down, or upright again. Display only.
+
+    A flip of the screen, top to bottom about the middle of the view, after
+    every turn and mirror of the scene, made by napari's camera: its
+    vertical axis is turned to point up rather than down. Nothing else
+    moves -- no layer, slider, plane or pick -- and the camera's center,
+    zoom and angles are kept. In 2D that is the flip itself. In 3D napari
+    keeps the screen's up as the camera's up and reverses the handedness,
+    so the same angles show the scene mirrored left to right and turned
+    180 degrees, which is upside down: the angles keep meaning the upright
+    view, and Home (`orient_anterior`), a turn, a trip through 2D or a
+    failed switch put back the same picture, flipped. Off, the picture is
+    exactly what it was.
+
+    Two things napari does not do are done here. It hands its 3D camera
+    the new handedness but not the turn its angles mean under it, and its
+    next draw read the angles back from the stale turn, which lost the view:
+    so the angles are announced again. And a reversed handedness winds every
+    face the other way on screen, which vispy's shading takes for the
+    inside: so each surface takes its clockwise faces for its front ones
+    (`napari_private.front_face`), and is lit from outside. The light turns
+    over with the picture, so in 3D too the picture is the upright one
+    upside down.
+    """
+    camera = viewer.scene.camera
+    depth, vertical, horizontal = (str(o) for o in camera.orientation)
+    want = UPSIDE_DOWN if on else UPRIGHT
+    if vertical == want:
+        return
+    camera.orientation = (depth, want, horizontal)
+    camera.events.angles(value=camera.angles)
+    face_front(viewer)
+
+
+def face_front(viewer, layers=None) -> None:
+    """Wind the front faces of every surface (or of `layers`) as the camera
+    shows them: clockwise while the picture is upside down."""
+    from napari.layers import Surface
+
+    from .napari_private import front_face
+
+    clockwise = upside_down(viewer)
+    for layer in viewer.layers if layers is None else layers:
+        if isinstance(layer, Surface):
+            with contextlib.suppress(Exception):
+                front_face(viewer, layer, clockwise)
 
 
 def maximize(viewer) -> bool:
@@ -381,9 +447,12 @@ def apply_mirror(layers, on: bool, center: float,
 
 __all__ = [
     "MIRROR_AXIS",
+    "UPRIGHT",
+    "UPSIDE_DOWN",
     "apply_mirror",
     "capture_view",
     "center_sliders",
+    "face_front",
     "fit_view",
     "install_home_orientation",
     "install_initial_fit",
@@ -393,4 +462,6 @@ __all__ = [
     "orient_anterior",
     "reflect_vertices",
     "restore_view",
+    "show_upside_down",
+    "upside_down",
 ]

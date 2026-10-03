@@ -43,41 +43,7 @@ def _scene(viewer, registry, axis=2, mirrored=False, multiscale=False):
     return session
 
 
-def _check_plane(viewer, session, tol_um=2e-4):
-    """The drawn loops are trimesh's section of the meshes by the plane on
-    screen, and the images under every loop point show that mesh point.
-
-    The plane is taken into mesh coordinates through the contour layer's
-    own transform, and its cutting frame when the view is turned across the
-    grid (`th.plane_in_mesh`). Under a loop point, napari's nearest texel
-    is within half a texel of it, on each texel axis (`th.texel_reach`).
-    """
-    contour = session.contours["synthetic"]
-    origin, normal = th.plane_in_mesh(viewer, contour)
-    loops = th.loops_in_mesh(contour, th.to_mesh(contour))
-    assert loops, "nothing drawn"
-    by_owner: dict[int, list] = {}
-    for owner, loop in loops:
-        by_owner.setdefault(owner, []).append(loop)
-    for owner, drawn in by_owner.items():
-        want = th.trimesh_loops(contour.meshset, owner, origin, normal)
-        assert th.hausdorff(drawn, want) <= tol_um, owner
-    reach = th.texel_reach(viewer, contour)
-    top = np.asarray(th.SHAPE) - 2.01
-    for _owner, loop in loops:
-        for m in loop[:: max(1, len(loop) // 12)]:
-            index = (m - th.TRANSLATE) / th.SCALE
-            if np.any(index < 1.01) or np.any(index > top):
-                continue                    # outside the image, or at its edge
-            w = th.mesh_to_world(contour, m)
-            for k, image in enumerate(session.images):
-                got = th.image_index_at(image, w)
-                assert got is not None
-                want = (m[k] - th.TRANSLATE[k]) / th.SCALE[k]
-                # float32 ramps: a millionth of a voxel of rounding.
-                assert abs(got - want) <= reach[k] + 1e-4, (k, got, want)
-
-
+_check_plane = th.assert_on_the_plane
 _check_plane_oblique = _check_plane
 
 
@@ -218,7 +184,7 @@ def test_3d_turns_the_camera_from_home_and_moves_no_layer(viewer, registry):
         overlay = _vispy_axes_overlay(viewer)
         for node, direction in ((getattr(overlay, _ANATOMY_ATTR), lambda s: frame[s]),
                                 (overlay.node.axes, lambda s: np.eye(3)["xyz".index(s)])):
-            for label, drawn in _label_directions(node).items():
+            for label, drawn in th.label_directions(node).items():
                 vec = np.asarray(direction(label), float)
                 on_screen = (np.asarray(canvas_position(viewer, center + 10 * vec))
                              - np.asarray(canvas_position(viewer, center)))
@@ -235,20 +201,6 @@ def test_3d_turns_the_camera_from_home_and_moves_no_layer(viewer, registry):
         camera.angles = (40.0, 10.0, -20.0)
         session.set_rotation(*angles)
         assert np.allclose(camera.view_direction, want_v, atol=1e-6)
-
-
-def _label_directions(node) -> dict[str, np.ndarray]:
-    """Canvas direction of each label of an Axes visual, from its origin."""
-    text = node.text
-    labels = [text.text] if isinstance(text.text, str) else list(text.text)
-    to_canvas = text.get_transform("visual", "canvas")
-    origin = np.asarray(node.get_transform("visual", "canvas").map([0, 0, 0, 1]), float)
-    origin = origin[:2] / origin[3]
-    out = {}
-    for k, label in enumerate(labels):
-        p = np.asarray(to_canvas.map(np.r_[np.asarray(text.pos, float)[k][:3], 1.0]), float)
-        out[label] = p[:2] / p[3] - origin
-    return out
 
 
 def test_the_turn_survives_trips_between_2d_and_3d(viewer, registry):

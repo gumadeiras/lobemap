@@ -344,8 +344,15 @@ def test_the_view_dock_says_everything_in_words(monkeypatch):
             "plane. Slice view only.")
         assert sw.align.text() == "Align to the brain's true planes"
         assert sw.mirror.text() == "Mirror the brain left to right"
-        # A standalone checkbox: no row label repeats its word.
+        assert sw.flip.text() == "Flip the picture upside down"
+        # Standalone checkboxes: no row label repeats their words, and they
+        # share none of theirs but "the".
         assert sw.layout().labelForField(sw.picture) is None
+        assert set(sw.mirror.text().lower().split()) & set(sw.flip.text().lower().split()) == {
+            "the"}
+        assert sw.flip.toolTip() == (
+            "Show the picture upside down. Display only; the data do not change. With "
+            "the mirror, a front view turns 180°. Opening another brain turns it off.")
         assert sw.mirror.toolTip() == (
             "Show the brain as its mirror image, to compare a left lobe with a right "
             "one. Display only; the data do not change. The corner arrows follow. "

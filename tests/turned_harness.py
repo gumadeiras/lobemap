@@ -192,6 +192,184 @@ def screen_frame(viewer) -> tuple[np.ndarray, np.ndarray]:
     return right / np.linalg.norm(right), up / np.linalg.norm(up), point
 
 
+def assert_on_the_plane(viewer, session, tol_um=2e-4) -> None:
+    """The drawn loops are trimesh's section of the meshes by the plane on
+    screen, and the images under every loop point show that mesh point.
+
+    The plane is taken into mesh coordinates through the contour layer's
+    own transform, and its cutting frame when the view is turned across the
+    grid (`plane_in_mesh`). Under a loop point, napari's nearest texel
+    is within half a texel of it, on each texel axis (`texel_reach`).
+    """
+    contour = session.contours["synthetic"]
+    origin, normal = plane_in_mesh(viewer, contour)
+    loops = loops_in_mesh(contour, to_mesh(contour))
+    assert loops, "nothing drawn"
+    by_owner: dict[int, list] = {}
+    for owner, loop in loops:
+        by_owner.setdefault(owner, []).append(loop)
+    for owner, drawn in by_owner.items():
+        want = trimesh_loops(contour.meshset, owner, origin, normal)
+        assert hausdorff(drawn, want) <= tol_um, owner
+    reach = texel_reach(viewer, contour)
+    top = np.asarray(SHAPE) - 2.01
+    for _owner, loop in loops:
+        for m in loop[:: max(1, len(loop) // 12)]:
+            index = (m - TRANSLATE) / SCALE
+            if np.any(index < 1.01) or np.any(index > top):
+                continue                    # outside the image, or at its edge
+            w = mesh_to_world(contour, m)
+            for k, image in enumerate(session.images):
+                got = image_index_at(image, w)
+                assert got is not None
+                want = (m[k] - TRANSLATE[k]) / SCALE[k]
+                # float32 ramps: a millionth of a voxel of rounding.
+                assert abs(got - want) <= reach[k] + 1e-4, (k, got, want)
+
+
+def open_space(registry, space, ndisplay):
+    """A viewer showing `space` as `lobemap view` opens it, and its session."""
+    import napari
+
+    from lobemap.viewer.app import load_space
+
+    viewer = napari.Viewer(show=False, ndisplay=ndisplay)
+    sess = load_space(viewer, registry, space, fit=False)
+    settle_canvas(viewer)
+    return viewer, sess
+
+
+def center_on_the_atlas(viewer, sess) -> None:
+    """Center the 2D view on the primary atlas, on a slider plane through it:
+    the pivot a turn keeps, so the turned plane cuts the atlas."""
+    name = sess.registry.primary_atlas(sess.space).id
+    surface, contour = sess.surfaces[name], sess.contours[name]
+    # The largest compartment's center: every plane through it cuts it.
+    largest = int(np.argmax(np.diff(surface.meshset.vertex_offsets)))
+    # Through the contour layer, which carries the mirror. At rest.
+    middle = np.asarray(contour.layer.data_to_world(surface.meshset.centroid(largest)),
+                        float)
+    axis = int(viewer.dims.order[0])
+    start, _stop, step = viewer.dims.range[axis]
+    viewer.dims.set_current_step(axis, round((middle[axis] - start) / step))
+    center = list(viewer.scene.camera.center)
+    center[-2:] = middle[list(viewer.dims.displayed)]
+    viewer.scene.camera.center = tuple(center)
+    settle_canvas(viewer)
+
+
+def contour_vs_trimesh(viewer, sess, to_mesh=None, tol_um=2e-4) -> int:
+    """Every loop of the primary atlas against trimesh; the count compared."""
+    name = sess.registry.primary_atlas(sess.space).id
+    contour = sess.contours[name]
+    axis = int(viewer.dims.order[0])
+    shown = list(viewer.dims.displayed)
+    world = np.zeros((3, 3))
+    world[:, axis] = float(viewer.dims.point[axis])
+    world[1, shown[0]] += 10.0
+    world[2, shown[1]] += 10.0
+    plane = np.array([contour.layer.world_to_data(w) for w in world], float)
+    if to_mesh is not None:
+        plane = to_mesh(plane)
+    normal = np.cross(plane[1] - plane[0], plane[2] - plane[0])
+    by_owner: dict[int, list] = {}
+    for owner, loop in loops_in_mesh(contour, to_mesh):
+        by_owner.setdefault(owner, []).append(loop)
+    for owner, drawn in by_owner.items():
+        want = trimesh_loops(contour.meshset, owner, plane[0], normal)
+        assert want and hausdorff(drawn, want) <= tol_um, (sess.space, owner)
+    return len(by_owner)
+
+
+def screen_axes(viewer) -> np.ndarray:
+    """3D: the world directions of screen right, screen up and toward the
+    viewer, as rows, measured through vispy's own transform to the canvas.
+
+    Right and up are the canvas x axis and minus its y axis; toward the
+    viewer is minus the depth axis, which GL's depth test draws nearest.
+    """
+    canvas = viewer.window._qt_viewer.canvas
+    transform = canvas.view.transform * canvas.view.scene.transform
+    center = np.asarray(viewer.scene.camera.center, float)
+
+    def canvas_of(world) -> np.ndarray:
+        p = np.asarray(transform.map(np.r_[np.asarray(world, float)[::-1], 1.0]), float)
+        return p[:3] / p[3]
+
+    base = canvas_of(center)
+    # Rows: canvas x, y and depth per unit along each world axis.
+    rows = np.column_stack([canvas_of(center + e) - base for e in np.eye(3)])
+    rows = rows / np.linalg.norm(rows, axis=1, keepdims=True)
+    return np.array([rows[0], -rows[1], -rows[2]])
+
+
+def label_directions(node) -> dict[str, np.ndarray]:
+    """Canvas direction of each label of an Axes visual, from its origin."""
+    text = node.text
+    labels = [text.text] if isinstance(text.text, str) else list(text.text)
+    to_canvas = text.get_transform("visual", "canvas")
+    origin = np.asarray(node.get_transform("visual", "canvas").map([0, 0, 0, 1]), float)
+    origin = origin[:2] / origin[3]
+    out = {}
+    for k, label in enumerate(labels):
+        p = np.asarray(to_canvas.map(np.r_[np.asarray(text.pos, float)[k][:3], 1.0]), float)
+        out[label] = p[:2] / p[3] - origin
+    return out
+
+
+def assert_triads_point_where_they_say(viewer, space) -> int:
+    """Each shown arrow of both corner triads points, on the canvas, where
+    what it names is drawn, within a degree; how many were checked.
+
+    napari's names the image's axes x, y and z, drawn as the scene's layers
+    place them -- turned in the plane, mirrored -- which a layer's own
+    transform says; the second, in 3D, the anatomical poles, reflected with
+    the scene (`core.model.anatomical_triad`).
+    """
+    from viewer_harness import canvas_position
+
+    from lobemap.core.model import anatomical_axes
+    from lobemap.viewer.axes import _ANATOMY_ATTR, _vispy_axes_overlay
+    from lobemap.viewer.rotation import owner
+    from lobemap.viewer.view import MIRROR_AXIS
+
+    overlay = _vispy_axes_overlay(viewer)
+    session = owner(viewer).session
+    frame = {k: np.asarray(v, float) for k, v in anatomical_axes(space).items()}
+    if session.mirrored:
+        for v in frame.values():
+            v[MIRROR_AXIS] *= -1.0
+    point = np.asarray(viewer.dims.point, float)
+    point[list(viewer.dims.displayed)] = np.asarray(
+        viewer.scene.camera.center, float)[-len(viewer.dims.displayed):]
+    layer = session.affine_layers()[0]
+    data = np.asarray(layer.world_to_data(point), float)
+
+    def image_axis(label) -> np.ndarray:
+        step = np.eye(3)["xyz".index(label)]
+        return (np.asarray(layer.data_to_world(data + step), float)
+                - np.asarray(layer.data_to_world(data), float))
+
+    nodes = [(overlay.node.axes, image_axis)]
+    anatomy = getattr(overlay, _ANATOMY_ATTR, None)
+    if anatomy is not None:
+        nodes.append((anatomy, frame.__getitem__))
+    checked = 0
+    for node, direction in nodes:
+        if not node.visible:
+            continue
+        for label, drawn in label_directions(node).items():
+            vec = np.asarray(direction(label), float)
+            on_screen = (np.asarray(canvas_position(viewer, point + 10 * vec))
+                         - np.asarray(canvas_position(viewer, point)))
+            if np.linalg.norm(on_screen) < 1e-3 * 10 * viewer.scene.camera.zoom:
+                continue                        # along the line of sight
+            cos = drawn @ on_screen / np.linalg.norm(drawn) / np.linalg.norm(on_screen)
+            assert cos > np.cos(np.radians(1.0)), (label, np.degrees(np.arccos(cos)))
+            checked += 1
+    return checked
+
+
 def settle_canvas(viewer) -> None:
     """Put a hidden canvas's view box in step with the canvas, and draw once.
 
@@ -217,6 +395,49 @@ def render(viewer) -> np.ndarray:
     canvas = viewer.window._qt_viewer.canvas
     canvas.on_draw(None)
     return np.asarray(canvas._scene_canvas.render())[..., :3]
+
+
+def picture(viewer) -> np.ndarray:
+    """`render`, without the corner triads and their box, which stay in their
+    corner rather than flip, and are checked on their own
+    (`assert_triads_point_where_they_say`)."""
+    overlay = viewer.canvas.overlays["axes"]
+    overlay.visible = False
+    try:
+        return render(viewer)
+    finally:
+        overlay.visible = True
+
+
+def pixel_at(viewer, pixels, x, y) -> np.ndarray:
+    """The rendered pixel at canvas point (x, y): the framebuffer can have
+    more pixels than the canvas has points."""
+    scale = pixels.shape[1] / viewer.window._qt_viewer.canvas._scene_canvas.size[0]
+    return pixels[int(y * scale), int(x * scale)]
+
+
+def assert_upside_down(got, upright, at_most=0.002) -> None:
+    """`got` is the `upright` picture upside down, to the pixel but for
+    `at_most` of them, on the edges of what is drawn, where GL's rule for a
+    pixel centered on an edge breaks the tie the other way."""
+    assert upright.std() > 0, "nothing drawn"
+    off = np.any(np.abs(got.astype(int) - upright[::-1].astype(int)) > 2, axis=-1)
+    assert off.mean() <= at_most, off.mean()
+
+
+def brightness(pixels) -> float:
+    """Mean brightness of what is drawn on the black canvas."""
+    drawn = pixels.sum(axis=-1) > 30
+    assert drawn.mean() > 0.001, "nothing drawn"
+    return float(pixels[drawn].mean())
+
+
+def placed(viewer) -> dict:
+    """`state` but for each layer's corner pixels, which in 3D are the box
+    napari spans between two corners of the screen, and so follow a flip."""
+    out = state(viewer)
+    out["layers"] = [layer[:4] for layer in out["layers"]]
+    return out
 
 
 def state(viewer) -> dict:
