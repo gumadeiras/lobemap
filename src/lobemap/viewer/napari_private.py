@@ -131,6 +131,28 @@ def no_scene_update(viewer, layer):
     return layer.events.visible.blocker(canvas._update_scenegraph)
 
 
+def fit_axis_labels(viewer) -> None:
+    """Size the slider labels for their text, as napari does when one is edited.
+
+    napari sizes them when the user edits one or a slider changes size, but
+    not when `dims.axis_labels` is set; and it caps them at a fifth of the
+    width of the first slider, shown or not, which hidden since the window
+    opened is Qt's default 100 px. A turned 2D view's `depth` kept the width
+    of an `x` and read `…`, and sized under that cap read `de…`. So each
+    hidden slider is first given the width the shown ones have, which it
+    keeps through napari's next sizing, on a resize.
+    """
+    qt_dims = getattr(getattr(viewer.window, "_qt_viewer", None), "dims", None)
+    if qt_dims is None:
+        return
+    sliders = qt_dims.slider_widgets
+    shown = [slider.width() for slider in sliders if slider.isVisible()]
+    for slider in sliders:
+        if shown and not slider.isVisible():
+            slider.resize(max(shown), slider.height())
+    qt_dims._resize_axis_labels()
+
+
 def shown_unsliced(layer):
     """A context in which showing `layer`, or changing its data or transform,
     does not slice it or rebuild its visual; the caller slices it after."""
@@ -356,6 +378,7 @@ __all__ = [
     "before_slicing",
     "clear_extent",
     "data_from_world",
+    "fit_axis_labels",
     "gl_state",
     "hook_extent",
     "keep_extent_while_slicing",

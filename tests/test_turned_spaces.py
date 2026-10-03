@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import turned_harness as th
-from viewer_harness import SPACES, launched, pump, session, switch_to
+from viewer_harness import SPACES, launched, pump, session, switch_to, switcher
 
 napari = pytest.importorskip("napari")
 
@@ -399,3 +399,47 @@ def test_at_rest_no_turned_code_runs(registry, monkeypatch):
     finally:
         viewer.close()
         pump()
+
+
+@pytest.mark.parametrize("launch", ["3", "2"])
+@pytest.mark.parametrize("space", SPACES)
+def test_the_oblique_slider_reads_depth_in_full(monkeypatch, space, launch):
+    """In a window laid out at 1440 x 900, turned across the grid through the
+    View dock, the slider's label shows `depth` whole, along each section
+    axis: the text drawn is the text set, and it fits the label's width.
+    napari left the label at the width of an `x`, and it read `…`."""
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import QLineEdit
+
+    from lobemap.viewer.axes import DEPTH_LABEL
+
+    with launched(monkeypatch, "view", space, "--ndisplay", launch) as (code, viewer):
+        assert code == 0
+        window = viewer.window._qt_window
+        window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        window.resize(1440, 900)
+        window.show()
+        pump(300)
+        sw = switcher(viewer)
+        sw.slice_view.click()
+        for angle, value in zip(("spin", "tilt", "turn"), (0.0, 30.0, 20.0), strict=True):
+            sw.rotation.box[angle].setValue(value)
+        # Along each section axis, and once more after the window is resized,
+        # when napari sizes the labels again.
+        for index in [*range(sw.slice.count()), -1]:
+            if index >= 0:
+                sw.slice.setCurrentIndex(index)
+            else:
+                window.resize(1200, 800)
+                pump(300)
+                window.resize(1440, 900)
+            pump(300)
+            shown = [s.axis_label for s in viewer.window._qt_viewer.dims.slider_widgets
+                     if s.isVisible()]
+            assert [label.full_text() for label in shown] == [DEPTH_LABEL], (
+                sw.slice.currentText())
+            for label in shown:
+                width = label.fontMetrics().horizontalAdvance(label.full_text())
+                assert QLineEdit.text(label) == label.full_text(), QLineEdit.text(label)
+                assert width <= label.contentsRect().width(), (
+                    width, label.contentsRect().width())

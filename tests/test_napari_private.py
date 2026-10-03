@@ -77,6 +77,7 @@ CHECKED = {
     "_current_viewbox_size": "test_a_turned_image_picks_its_level_as_napari_draws",
     "_data_level": "test_a_turned_image_picks_its_level_as_napari_draws",
     "_slicing_state": "test_a_turned_image_picks_its_level_as_napari_draws",
+    "_resize_axis_labels": "test_a_slider_label_is_sized_for_the_text_it_is_given",
 }
 
 #: lobemap's own private names, reached from another of its modules.
@@ -817,3 +818,29 @@ def test_a_turned_image_picks_its_level_as_napari_draws(viewer):
         level_as_unturned(layer, None)
     need(len(calls) == 1 and "_update_draw" not in layer.__dict__,
          "an instance _update_draw found before the class's", used)
+
+
+def test_a_slider_label_is_sized_for_the_text_it_is_given(viewer):
+    """napari leaves a slider's label at its width when `dims.axis_labels` is
+    set, and `fit_axis_labels` has its dims widget size the labels for their
+    text, as it does when one is edited."""
+    from qtpy.QtWidgets import QApplication
+
+    from lobemap.viewer.napari_private import fit_axis_labels
+
+    used = "viewer.axes.apply_axis_mode, through napari_private.fit_axis_labels"
+    viewer.add_image(np.zeros((6, 8, 10), np.uint8))
+    QApplication.processEvents()
+    with reaching("QtViewer.dims.slider_widgets[i].axis_label", used):
+        label = viewer.window._qt_viewer.dims.slider_widgets[0].axis_label
+    before = label.maximumWidth()
+    viewer.dims.axis_labels = ("depth", "y", "x")
+    QApplication.processEvents()
+    need(label.maximumWidth() == before, "a label napari does not size when set",
+         used)
+    with reaching("QtDims._resize_axis_labels", used):
+        fit_axis_labels(viewer)
+    # Wider for the longer text, and fixed; how wide a laid-out window lets
+    # it be is `test_turned_spaces.py`'s to measure.
+    need(label.minimumWidth() == label.maximumWidth() > before,
+         "QtDims._resize_axis_labels fixing each label's width for its text", used)

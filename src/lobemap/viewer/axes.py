@@ -46,6 +46,7 @@ import numpy as np
 from ..core.model import (
     anatomical_triad,
 )
+from . import napari_private
 
 
 def _vispy_axes_overlay(viewer):
@@ -209,7 +210,10 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
         if oblique:
             labels[int(viewer.dims.order[0])] = DEPTH_LABEL
         with contextlib.suppress(Exception):
-            viewer.dims.axis_labels = tuple(labels)
+            if tuple(viewer.dims.axis_labels) != tuple(labels):
+                viewer.dims.axis_labels = tuple(labels)
+                # Or `depth` is cut to `…` in a label sized for `x`.
+                napari_private.fit_axis_labels(viewer)
 
     # Switching it on is also what makes napari BUILD the visual: it
     # skips overlays that are not visible and waits on their `visible`
