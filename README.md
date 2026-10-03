@@ -179,6 +179,7 @@ The window has three columns. On the left, the **View** dock, tabbed with napari
 - **Show** switches between **3D**, which draws the meshes, and **Slice**, which draws one section at a time: the image, and exact mesh–plane outlines that stay sharp at any zoom. **Fit to window** fits the brain to the window; in 3D it also turns back to the front view, dorsal side up, with the rotation applied. It never moves the slice or the angles.
 - **Sections** chooses which sections the slider steps through. Each choice is named by the brain's plane nearest the image grid and the angle between them, for example `Frontal (17.5° off true)` in FAFB: unaligned, a section follows the image's own grid. **Align to the brain's true planes**, off by default, cuts the sections along the brain's own frontal, horizontal and sagittal planes instead, and the menu then reads `Frontal (true plane)`. Both work in Slice view only; in 3D they are disabled and say so.
 - **Mirror the brain left to right** shows the brain as its mirror image about its mid-plane, to compare a left lobe with a right one. It is for display only: the data do not change, and the corner arrows follow it.
+- **Flip the picture upside down** turns the picture over on screen, top to bottom about the middle of the view, after the rotation and the mirror, in 3D and in Slice view. It is for display only: no slider, plane or layer moves, the corner arrows follow, names on the slice stay readable, the surfaces stay lit from outside, and turning it off gives back the view exactly. With the mirror, a front view is turned 180°. Its only cost is the click: about 35 ms in Slice view and 4 ms in 3D. A slice step and a change between 3D and Slice view take as long upside down as upright.
 - **Rotate around** turns the view by three angles, from −180° to 180°, about the axes of the screen:
   - **Line of sight**: positive turns the picture counterclockwise.
   - **Vertical axis**: positive moves the near side to your right.
@@ -195,14 +196,14 @@ The window has three columns. On the left, the **View** dock, tabbed with napari
 | Y/vertical | Rotate around **Vertical axis** |
 | X/horizontal | Rotate around **Horizontal axis** |
 | Mirror horizontal | **Mirror the brain left to right** |
-| Mirror vertical | **Mirror the brain left to right**, and **Line of sight** 180° |
-| both mirrors, Benton's 0.1 default | **Line of sight** 180° |
+| Mirror vertical | **Flip the picture upside down** |
+| both mirrors, Benton's 0.1 default | both, which is a 180° turn: the same as **Line of sight** 180° |
 
 ### Switching brains
 
-A switch that succeeds keeps the mode, the angles and the alignment, which mean the same on screen in every brain, and the section plane by its anatomy: frontal stays frontal, whichever image axis that is in the new brain. It clears the mirror, so a brain never opens reflected. Each brain opens its own tables, with its primary atlas checked.
+A switch that succeeds keeps the mode, the angles and the alignment, which mean the same on screen in every brain, and the section plane by its anatomy: frontal stays frontal, whichever image axis that is in the new brain. It clears the mirror and the flip, so a brain never opens reflected or upside down. Each brain opens its own tables, with its primary atlas checked.
 
-A switch that fails says why under the controls and leaves the brain you had exactly as it was: its checked rows, names, fills, searches, driver lines and open tab, its slice and plane, the mode, the mirror, the angles, the alignment and the camera.
+A switch that fails says why under the controls and leaves the brain you had exactly as it was: its checked rows, names, fills, searches, driver lines and open tab, its slice and plane, the mode, the mirror, the flip, the angles, the alignment and the camera.
 
 ### The tables
 
