@@ -364,3 +364,38 @@ def test_rest_puts_back_every_hidden_slider(registry):
     finally:
         viewer.close()
         pump()
+
+
+def test_at_rest_no_turned_code_runs(registry, monkeypatch):
+    """A scene never turned runs none of the turn: steps, trips, the mirror,
+    another slice axis and Home go the way they go on `main`."""
+    from lobemap.viewer import napari_private, resample, sections, turned
+
+    calls = []
+    for owner, name in ((turned.TurnedView, "_apply"), (turned.TurnedView, "_before_slice"),
+                        (turned.TurnedView, "_after_mode"), (resample.TurnedImage, "__init__"),
+                        (sections.PlaneFrame, "__init__"), (napari_private, "hook_extent")):
+        real = getattr(owner, name)
+
+        def spy(*args, real=real, name=name, **kwargs):
+            calls.append(name)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(owner, name, spy)
+    viewer, sess = _open(registry, "GRABE", 2)
+    try:
+        axis = int(viewer.dims.order[0])
+        for k in range(5):
+            viewer.dims.set_current_step(axis, viewer.dims.current_step[axis] + k)
+        viewer.dims.ndisplay = 3
+        viewer.dims.ndisplay = 2
+        sess.set_mirror(True)
+        sess.set_slice_axis(0)
+        sess.home()
+        sess.set_rotation(0, 0, 0)
+        sess.set_aligned(False)
+        th.settle_canvas(viewer)
+        assert calls == []
+    finally:
+        viewer.close()
+        pump()

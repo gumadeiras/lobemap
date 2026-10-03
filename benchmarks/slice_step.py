@@ -64,7 +64,8 @@ finished and reports how long it took.
 `--canvas W H` sizes the hidden canvas, as a shown window would be, and
 fits the view to it; napari picks pyramid levels for the canvas it has, so
 the levels read depend on it. `--rotate SPIN TILT TURN` turns the scene
-once it is open (`SceneSession.set_rotation`), and times that; the planes
+once it is open (`SceneSession.set_rotation`), and `--aligned` cuts 2D
+along the brain's own planes (`set_aligned`); either is timed. The planes
 are then inside the primary atlas's extent along the turned line of sight,
 and each worker also times `drag`, sixteen consecutive steps from the
 middle plane, as a slider dragged is.
@@ -250,6 +251,7 @@ def _backend() -> dict:
 #: and `--rotate`.
 _CANVAS: list = [None]
 _ROTATE: list = [None]
+_ALIGNED: list = [False]
 
 
 def _size_canvas(viewer, app) -> None:
@@ -291,11 +293,15 @@ def _open(space: str, ndisplay: int, registry_root, data_root, asynchronous=Fals
     _settle(app)
     _size_canvas(viewer, app)
     out = {"registry_s": registry_s, "load_s": load_s}
-    if _ROTATE[0] is not None:
+    if _ROTATE[0] is not None or _ALIGNED[0]:
         t0 = time.perf_counter()
-        session.set_rotation(*_ROTATE[0])
+        if _ALIGNED[0]:
+            session.set_aligned(True)
+        if _ROTATE[0] is not None:
+            session.set_rotation(*_ROTATE[0])
         out["rotate_ms"] = (time.perf_counter() - t0) * 1e3
-        out["rotate"] = list(_ROTATE[0])
+        out["rotate"] = list(_ROTATE[0] or (0.0, 0.0, 0.0))
+        out["aligned"] = _ALIGNED[0]
         _settle(app)
         viewer.window._qt_viewer.canvas.on_draw()
         _settle(app)
@@ -394,7 +400,7 @@ def work_steps(space, mode, planes, registry_root, data_root, hide=None,
             **load, **_backend(), **state,
             "sweeps": _sweeps(viewer, axis, ks, app,
                               shapes_of=lambda: len(overlay.paths),
-                              drag=_ROTATE[0] is not None),
+                              drag=_ROTATE[0] is not None or _ALIGNED[0]),
         }
         result["held_mb"] = _held_mb(overlay)
         if mode == "primary" and not hide:
@@ -486,6 +492,7 @@ def _at(ndim, axis, value):
 def _worker_main(args) -> int:
     _CANVAS[0] = args.canvas
     _ROTATE[0] = args.rotate
+    _ALIGNED[0] = args.aligned
     if args.no_bermuda:
         # An import that fails, exactly as when the package is absent.
         sys.modules["bermuda"] = None
@@ -586,6 +593,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--rotate", nargs=3, type=float, default=None,
                    metavar=("SPIN", "TILT", "TURN"),
                    help="turn the scene by these angles once it is open")
+    p.add_argument("--aligned", action="store_true",
+                   help="cut 2D along the brain's own planes once the scene is open")
     p.add_argument("--json", default=None, help="write every result here")
     p.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--mode", default=None, help=argparse.SUPPRESS)
@@ -613,6 +622,8 @@ def main(argv: list[str] | None = None) -> int:
         common += ["--canvas", *map(str, args.canvas)]
     if args.rotate:
         common += ["--rotate", *map(str, args.rotate)]
+    if args.aligned:
+        common.append("--aligned")
     jobs = []
     for mode in args.modes:
         if mode == "benton":
