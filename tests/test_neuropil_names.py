@@ -47,8 +47,11 @@ def test_every_row_names_a_cited_source(registry_root):
 
 def test_one_structure_has_one_full_name_however_it_is_spelled(registry_root):
     names = reference.neuropil_names(registry_root)
-    assert names["MB_PED"][0] == names["PED"][0] == "pedunculus"
-    assert names["MB_CA"][0] == names["CA"][0] == "calyx"
+    assert names["MB_PED"][0] == names["PED"][0] == "mushroom body pedunculus"
+    assert names["MB_CA"][0] == names["CA"][0] == "mushroom body calyx"
+    # Every part of the mushroom body says so, its lobes with Ito's primes.
+    assert names["a'L"][0] == "mushroom body \u03b1\u2032 lobe"
+    assert names["SPS"][0] == "superior posterior slope"
     assert names["AL"] == ("antennal lobe", "Ito et al. 2014, Neuron")
 
 
