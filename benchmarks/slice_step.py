@@ -308,11 +308,11 @@ def _open(space: str, ndisplay: int, registry_root, data_root, asynchronous=Fals
         viewer.window._qt_viewer.canvas.on_draw()
         _settle(app)
     if _FLIP[0]:
+        # Not drawn after: a hidden canvas's draw picks the pyramid levels,
+        # and the flip leaves them as they are (`tests/test_flip_spaces.py`).
         t0 = time.perf_counter()
         session.set_flip(True)
         out["flip_ms"] = (time.perf_counter() - t0) * 1e3
-        _settle(app)
-        viewer.window._qt_viewer.canvas.on_draw()
         _settle(app)
     if _CANVAS[0] is not None:
         out["canvas"] = list(_CANVAS[0])
