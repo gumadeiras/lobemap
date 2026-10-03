@@ -93,8 +93,7 @@ def test_no_string_in_any_brain_or_mode_reads_as_code(monkeypatch, allowed, regi
         buttons.HORIZONTAL_OFF: both, buttons.DEPTH_OFF: ("3d_default",),
         camera_rows.ZOOM_TIP: both, camera_rows.PERSPECTIVE_TIP: both,
         camera_rows.ZOOM_UNIT.strip(): both, camera_rows.FLAT: both,
-        camera_rows.THREE_D_ONLY: ("2d_default",), camera_rows.ZOOM: both,
-        camera_rows.PERSPECTIVE: both,
+        camera_rows.ZOOM: both, camera_rows.PERSPECTIVE: both,
     }
     # The header checkboxes' tooltips: a glomerulus table's in every brain
     # as it opens, a neuropil table's once its tab is built.

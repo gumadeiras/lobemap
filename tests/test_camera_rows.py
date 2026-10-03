@@ -105,7 +105,7 @@ def test_the_zoom_box_is_the_cameras_zoom_in_pixels_per_micrometer(monkeypatch):
 
 
 def test_the_perspective_box_is_the_cameras_and_3d_only(monkeypatch):
-    from lobemap.viewer.camera_rows import FLAT, THREE_D_ONLY
+    from lobemap.viewer.camera_rows import FLAT
 
     context, viewer = _shown(monkeypatch, "GRABE")
     try:
@@ -122,11 +122,10 @@ def test_the_perspective_box_is_the_cameras_and_3d_only(monkeypatch):
         viewer.dims.ndisplay = 2
         pump()
         assert not box.isEnabled()
-        assert sw.camera.note.isVisible() and sw.camera.note.text() == THREE_D_ONLY
-        assert "3D only" in box.toolTip()
+        assert box.toolTip().endswith("3D only.")
         sw.three_d.click()
         pump()
-        assert box.isEnabled() and not sw.camera.note.isVisible()
+        assert box.isEnabled()
         assert camera.perspective == 70 and box.value() == 70
         # Another brain is shown with the same perspective, as with the angles.
         combo = sw.combo

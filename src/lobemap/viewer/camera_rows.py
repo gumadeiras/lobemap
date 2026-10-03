@@ -11,7 +11,7 @@ Fit to window and napari's camera popup move them, and they move the view:
   different size each time.
 - **Perspective** is the 3D camera's field of view, 0 to 90 degrees; 0 is
   flat, with no perspective, as lobemap opens. It applies to 3D alone, so
-  Slice view disables it and says so beside it.
+  Slice view disables it, and its tooltip says so.
 
 The zoom box is sized for its widest number, not for the one it shows, so
 the dock does not reflow while the mouse zooms.
@@ -19,14 +19,7 @@ the dock does not reflow while the mouse zooms.
 
 from __future__ import annotations
 
-from qtpy.QtWidgets import (
-    QAbstractSpinBox,
-    QDoubleSpinBox,
-    QHBoxLayout,
-    QLabel,
-    QSizePolicy,
-    QSpinBox,
-)
+from qtpy.QtWidgets import QAbstractSpinBox, QDoubleSpinBox, QSizePolicy, QSpinBox
 
 ZOOM = "Zoom"
 ZOOM_UNIT = " pixels per µm"
@@ -42,8 +35,6 @@ PERSPECTIVE_TIP = (
     "field of view, from 0°, flat, to 90°. 3D only."
 )
 FLAT = "0° (flat)"
-#: Said beside the perspective box while Slice view disables it.
-THREE_D_ONLY = "3D only"
 
 
 class CameraRows:
@@ -75,17 +66,6 @@ class CameraRows:
         self.perspective.setSpecialValueText(FLAT)
         self.perspective.setKeyboardTracking(False)
         self.perspective.setToolTip(PERSPECTIVE_TIP)
-        self.note = QLabel(THREE_D_ONLY)
-        self.note.setToolTip(PERSPECTIVE_TIP)
-        # Shown in Slice view only, holding its place in 3D.
-        policy = self.note.sizePolicy()
-        policy.setRetainSizeWhenHidden(True)
-        self.note.setSizePolicy(policy)
-        #: The perspective box and its note, as one row.
-        self.perspective_row = QHBoxLayout()
-        self.perspective_row.addWidget(self.perspective)
-        self.perspective_row.addWidget(self.note)
-        self.perspective_row.addStretch(1)
 
         self._show_zoom()
         self._show_perspective()
@@ -109,9 +89,7 @@ class CameraRows:
         self.viewer.scene.camera.perspective = float(value)
 
     def _on_mode(self, event=None) -> None:
-        three_d = self.viewer.dims.ndisplay == 3
-        self.perspective.setEnabled(three_d)
-        self.note.setVisible(not three_d)
+        self.perspective.setEnabled(self.viewer.dims.ndisplay == 3)
 
 
 def _quietly(box, value) -> None:
@@ -126,7 +104,6 @@ def _quietly(box, value) -> None:
 __all__ = [
     "FLAT",
     "PERSPECTIVE",
-    "THREE_D_ONLY",
     "ZOOM",
     "ZOOM_UNIT",
     "CameraRows",

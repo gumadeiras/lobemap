@@ -217,12 +217,12 @@ def test_the_boxes_and_the_alignment_cut_the_2d_section(monkeypatch):
         assert th.state(viewer) == before
         assert np.array_equal(th.render(viewer), pixels)
 
-        # 3D disables the alignment and says why; it is kept for 2D.
+        # 3D disables the alignment, and its tooltip says why; it is kept for 2D.
         sw.align.click()
         sw.three_d.click()
         pump()
         assert not sw.align.isEnabled() and sw.align.isChecked()
-        assert sw.slice_note.isVisibleTo(sw) and sw.slice_note.text() == "Slice view only"
+        assert sw.align.toolTip().endswith("Slice view only.")
         sw.slice_view.click()
         th.settle_canvas(viewer)
         assert sw.align.isEnabled() and sess.aligned and contour.frame is not None

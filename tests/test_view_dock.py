@@ -171,10 +171,9 @@ def test_the_view_controls_drive_the_viewer(monkeypatch):
         def mode_shown(three_d: bool) -> None:
             assert sw.three_d.isChecked() is three_d
             assert sw.slice_view.isChecked() is not three_d
-            # Sections stays in view, disabled in 3D, and says why.
+            # Sections stays in view, disabled in 3D, and its tooltip says why.
             assert sw.slice.isVisible() and sw.slice.isEnabled() is not three_d
-            assert sw.slice_note.isVisible() is three_d
-            assert sw.slice_note.text() == "Slice view only"
+            assert sw.slice.toolTip().endswith("Slice view only.")
             assert sw.legend.isVisible() is three_d
 
         mode_shown(True)
@@ -316,8 +315,7 @@ def test_the_view_dock_sits_on_one_grid(monkeypatch):
                 assert all(got == want for got, want in gaps), (space, ndisplay, gaps)
                 # Inside a row: the controls a grid unit apart, Fit to window two.
                 assert _gaps([sw.three_d, sw.slice_view, sw.home], True) == [GRID, 2 * GRID]
-                assert _gaps([sw.camera.perspective, sw.camera.note], True) == [GRID]
-                assert _gaps([sw.slice, sw.align, sw.slice_note], False) == [GRID, GRID]
+                assert _gaps([sw.slice, sw.align], False) == [GRID]
                 assert _gaps([sw.mirror, sw.flip], False) == [GRID]
                 # napari's rows: a grid unit between buttons; delete at the far end.
                 viewer_row = [getattr(qt_viewer.viewerButtons, name) for name in (

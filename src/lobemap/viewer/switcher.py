@@ -4,9 +4,9 @@ Brain, 3D or Slice, Fit to window, the zoom and the perspective, the sections a
 slice steps through and their alignment, the mirror, the flip and the rotation:
 the controls that belong to the scene rather than to one atlas, whose controls
 are the compartment panel's. Every control is in view in both modes; one that
-applies to one mode stays visible in the other, disabled, and says why. A box
-or menu changes under the mouse wheel only once it has focus (`wheel`), so a
-scroll over the dock changes nothing. The
+applies to one mode stays visible in the other, disabled, and its tooltip says
+when it works. A box or menu changes under the mouse wheel only once it has
+focus (`wheel`), so a scroll over the dock changes nothing. The
 mirror and the flip stand alone, with no row label to repeat their words, and
 are worded apart: the mirror reflects the brain, and the flip turns the picture
 upside down.
@@ -91,8 +91,6 @@ HOME_TIP = (
     "Fit the brain to the window. In 3D, also turn back to the front view, "
     "dorsal side up, with your rotation applied."
 )
-#: Said under the Sections menu while 3D disables it.
-SLICE_ONLY = "Slice view only"
 #: What the corner arrows mean; 3D only, where the anatomical ones are drawn.
 ARROWS = (
     "Arrows: A anterior, P posterior, D dorsal, V ventral, L left, R right. "
@@ -217,9 +215,6 @@ class SpaceSwitcher(QWidget):
         self.align = QCheckBox(ALIGN)
         self.align.setToolTip(ALIGN_TIP)
         self.align.toggled.connect(self._on_align)
-        self.slice_note = QLabel(SLICE_ONLY)
-        # Shown in 3D only; holding its line keeps the rows below still.
-        self._hold_place(self.slice_note)
         self._fill_slices()
 
         self.mirror = QCheckBox(MIRROR)
@@ -248,7 +243,9 @@ class SpaceSwitcher(QWidget):
         self.legend = QLabel(ARROWS)
         self.legend.setWordWrap(True)
         # Shown in 3D only, holding its place in 2D, so nothing below moves.
-        self._hold_place(self.legend)
+        policy = self.legend.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        self.legend.setSizePolicy(policy)
         self.status = QLabel("")
         self.status.setWordWrap(True)
 
@@ -261,12 +258,11 @@ class SpaceSwitcher(QWidget):
         sections = QVBoxLayout()
         sections.addWidget(self.slice)
         sections.addWidget(self.align)
-        sections.addWidget(self.slice_note)
         # In a layout of its own: a form drops the row of a hidden widget,
         # held place or not, and everything under it moved up in 2D.
         arrows = QVBoxLayout()
         arrows.addWidget(self.legend)
-        for row in (show, sections, self.picture, self.camera.perspective_row, arrows):
+        for row in (show, sections, self.picture, arrows):
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(GRID)
 
@@ -284,7 +280,7 @@ class SpaceSwitcher(QWidget):
         self._gap(form)
         form.addRow("Show", show)
         form.addRow(ZOOM, self.camera.zoom)
-        form.addRow(PERSPECTIVE, self.camera.perspective_row)
+        form.addRow(PERSPECTIVE, self.camera.perspective)
         self._gap(form)
         form.addRow("Sections", sections)
         self._gap(form)
@@ -327,13 +323,6 @@ class SpaceSwitcher(QWidget):
         gap = QWidget()
         gap.setFixedHeight(0)
         form.addRow(gap)
-
-    @staticmethod
-    def _hold_place(widget: QWidget) -> None:
-        """Keep a widget's room in the layout while it is hidden."""
-        policy = widget.sizePolicy()
-        policy.setRetainSizeWhenHidden(True)
-        widget.setSizePolicy(policy)
 
     def _mode_button(self, text: str, tip: str, ndisplay: int) -> QPushButton:
         button = QPushButton(text)
@@ -416,7 +405,6 @@ class SpaceSwitcher(QWidget):
         self.slice_view.setChecked(not three_d)
         self.slice.setEnabled(not three_d)
         self.align.setEnabled(not three_d)
-        self.slice_note.setVisible(three_d)
         self.legend.setVisible(three_d)
 
     def _on_order(self, event=None) -> None:
