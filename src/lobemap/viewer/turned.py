@@ -290,6 +290,8 @@ class TurnedView:
             layer.scale = image.scale
             napari_private.update_draw(self.viewer, layer)
         napari_private.slice_now(self.viewer, layer)
+        if len(held) > 3:
+            held[3].close()
 
     def _keep_unturned(self, layer) -> None:
         """Record napari's own extent of `layer`, to the bit: what the
@@ -360,8 +362,9 @@ class TurnedView:
         if self._applied is None and not self._unturned and not self._virtual:
             return
         matrix = self._mirror()
-        for layer, (sources, translate, scale, _image) in list(self._virtual.items()):
+        for layer, (sources, translate, scale, image) in list(self._virtual.items()):
             images.release(layer)
+            image.close()
             kept = self._unturned.get(layer)
             with contextlib.suppress(Exception), napari_private.shown_unsliced(layer):
                 layer.data = sources if layer.multiscale else sources[0]
@@ -673,8 +676,9 @@ class TurnedView:
         for layer in list(self._unturned):
             with contextlib.suppress(Exception):
                 napari_private.level_as_unturned(layer, None)
-        for layer in list(self._virtual):
+        for layer, held in list(self._virtual.items()):
             images.release(layer)
+            held[3].close()
         self._unturned, self._virtual, self._applied = {}, {}, None
         if self._hooked:
             self._hooked = False

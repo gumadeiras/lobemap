@@ -295,3 +295,29 @@ def test_nothing_of_the_oblique_path_stays_at_rest(viewer, registry):
     assert all(layer not in images._HELD for layer in session.images)
     assert session.contours["synthetic"].frame is None
     assert rotation.owner(viewer) is session.turned
+
+
+def test_a_turned_image_lets_go_of_its_samples_once_replaced(viewer, registry):
+    """A new turn, a spin and rest each free what the last turned image kept,
+    at once: its levels refer back to it, so letting go of it alone left its
+    tiles to a full collection, which a long session of turns outran."""
+    import gc
+
+    session = _scene(viewer, registry, multiscale=True)
+
+    def shown():
+        return [held[3] for held in session.turned._virtual.values()]
+
+    gc.disable()
+    try:
+        for angles, after in (((0, 37, 0), (20, 37, 15)), ((20, 37, 15), (20, 0, 0)),
+                              ((0, 25, 10), (0, 0, 0))):
+            session.set_rotation(*angles)
+            th.settle_canvas(viewer)
+            last = shown()
+            assert last and all(image.nbytes > 0 for image in last)
+            session.set_rotation(*after)
+            th.settle_canvas(viewer)
+            assert all(image.nbytes == 0 for image in last), angles
+    finally:
+        gc.enable()

@@ -129,6 +129,11 @@ class Kept:
                 _key, gone = self._items.popitem(last=False)
                 self.nbytes -= _bytes(gone)
 
+    def clear(self) -> None:
+        with self._lock:
+            self._items.clear()
+            self.nbytes = 0
+
 
 def _bytes(value) -> int:
     return int(value.nbytes if isinstance(value, np.ndarray) else value[2].nbytes)
@@ -433,6 +438,13 @@ class TurnedImage:
     def nbytes(self) -> int:
         """Bytes this keeps: the tile boxes, and the tiles sampled."""
         return self._boxes.nbytes + self._kept.nbytes
+
+    def close(self) -> None:
+        """Let go of what this keeps, now: its levels refer back to it, so
+        only the cycle collector would free it, a full collection later."""
+        self._boxes.clear()
+        self._kept.clear()
+        self._tiles.clear()
 
 
 __all__ = [
