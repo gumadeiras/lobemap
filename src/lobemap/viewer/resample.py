@@ -50,7 +50,7 @@ TILE = 128
 PAD = 4
 
 #: Bytes of tile boxes kept for the next step, per image.
-BOX_BYTES = 192 * 2**20
+BOX_BYTES = 128 * 2**20
 
 #: Bytes of sampled tiles kept, per image: a plane seen again, or panned
 #: back to, is not sampled again.
@@ -96,21 +96,58 @@ def level_geometry(levels) -> list[tuple[np.ndarray, np.ndarray]]:
     return [(base / np.asarray(s, float), np.zeros(len(s))) for s in shapes]
 
 
+class Kept:
+    """Arrays by key, least recently used out, within a byte budget.
+
+    Thread-safe; shared by every level of one image, so the budget is the
+    image's.
+    """
+
+    def __init__(self, max_bytes: int) -> None:
+        self.max_bytes = int(max_bytes)
+        self.nbytes = 0
+        self._items: OrderedDict = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key, holds=None):
+        """The value kept under `key`, if `holds(value)` -- or None."""
+        with self._lock:
+            hit = self._items.get(key)
+            if hit is None or (holds is not None and not holds(hit)):
+                return None
+            self._items.move_to_end(key)
+            return hit
+
+    def put(self, key, value, nbytes: int) -> None:
+        with self._lock:
+            old = self._items.pop(key, None)
+            if old is not None:
+                self.nbytes -= _bytes(old)
+            self._items[key] = value
+            self.nbytes += int(nbytes)
+            while self.nbytes > self.max_bytes and len(self._items) > 1:
+                _key, gone = self._items.popitem(last=False)
+                self.nbytes -= _bytes(gone)
+
+
+def _bytes(value) -> int:
+    return int(value.nbytes if isinstance(value, np.ndarray) else value[2].nbytes)
+
+
 class Tiles:
     """Tiles of samples of one source level, at affine positions.
 
     `source` is an array in memory or a `chunkcache.CachedLevel`; `order`
-    is 1 for trilinear, 0 for the nearest voxel. Thread-safe: tiles are
-    sampled side by side, for napari's reads on the UI thread.
+    is 1 for trilinear, 0 for the nearest voxel; `boxes` keeps the voxels
+    each tile read (`Kept`). Thread-safe: tiles are sampled side by side,
+    for napari's reads on the UI thread.
     """
 
-    def __init__(self, source, order: int, dtype) -> None:
+    def __init__(self, source, order: int, dtype, boxes: Kept) -> None:
         self.source = source
         self.order = int(order)
         self.dtype = np.dtype(dtype)
-        self._boxes: OrderedDict = OrderedDict()
-        self._box_bytes = 0
-        self._lock = threading.Lock()
+        self._boxes = boxes
 
     def shape(self, du, dv) -> tuple[int, int]:
         """(rows, columns) of the tiles a plane with these steps is cut in."""
@@ -155,29 +192,15 @@ class Tiles:
 
     def _box(self, source, key, lo, hi):
         """The voxels [lo, hi) of the source, from a kept box when one holds them."""
-        with self._lock:
-            kept = self._boxes.get(key)
-            if kept is not None and np.all(kept[0] <= lo) and np.all(kept[1] >= hi):
-                self._boxes.move_to_end(key)
-                return kept[0], kept[2]
+        kept = self._boxes.get((id(source), key),
+                               lambda k: np.all(k[0] <= lo) and np.all(k[1] >= hi))
+        if kept is not None:
+            return kept[0], kept[2]
         size = np.asarray(source.shape)
         lo, hi = np.maximum(lo - PAD, 0), np.minimum(hi + PAD, size)
         box = source._read(lo, hi)
-        with self._lock:
-            old = self._boxes.pop(key, None)
-            if old is not None:
-                self._box_bytes -= old[2].nbytes
-            self._boxes[key] = (lo, hi, box)
-            self._box_bytes += box.nbytes
-            while self._box_bytes > BOX_BYTES and len(self._boxes) > 1:
-                _key, (_lo, _hi, gone) = self._boxes.popitem(last=False)
-                self._box_bytes -= gone.nbytes
+        self._boxes.put((id(source), key), (lo, hi, box), box.nbytes)
         return lo, box
-
-    @property
-    def nbytes(self) -> int:
-        """Bytes of the boxes kept."""
-        return self._box_bytes
 
 
 #: What reading one chunk's part of a box costs, in voxels copied: the
@@ -308,10 +331,10 @@ class TurnedImage:
         self.geometry = level_geometry(sources) if self.multiscale else [
             (np.ones(3), np.zeros(3))]
         self._tiles: dict[int, Tiles] = {}
-        #: Tiles sampled, by (level, plane, row, column), least recently used out.
-        self._kept: OrderedDict = OrderedDict()
-        self._kept_bytes = 0
-        self._kept_lock = threading.Lock()
+        #: The voxels each tile read, and the tiles sampled, by (level,
+        #: plane, row, column).
+        self._boxes = Kept(BOX_BYTES)
+        self._kept = Kept(SAMPLE_BYTES)
         self._shapes, self._uses = self._pyramid(size)
         self.levels = [TurnedLevel(self, k, s) for k, s in enumerate(self._shapes)]
 
@@ -346,7 +369,8 @@ class TurnedImage:
         use = self._uses[k]
         tiles = self._tiles.get(use)
         if tiles is None or tiles.source is not self.sources[use]:
-            tiles = self._tiles[use] = Tiles(self.sources[use], self.order, self.dtype)
+            tiles = self._tiles[use] = Tiles(self.sources[use], self.order, self.dtype,
+                                             self._boxes)
         return tiles
 
     def to_source(self, k: int):
@@ -387,17 +411,14 @@ class TurnedImage:
             def one(span, plane=plane):
                 ti, tj = span
                 key = (k, plane, ti, tj)
-                with self._kept_lock:
-                    hit = self._kept.get(key)
-                    if hit is not None:
-                        self._kept.move_to_end(key)
+                hit = self._kept.get(key)
                 if hit is None:
                     i0, j0 = ti * rows, tj * cols
                     shape = (min(rows, level[r] - i0), min(cols, level[c] - j0))
                     j = np.zeros(3)
                     j[a], j[r], j[c] = plane, i0, j0
                     hit = tiles.tile(P @ j + p0, du, dv, shape, (k, ti, tj))
-                    self._keep(key, hit)
+                    self._kept.put(key, hit, hit.nbytes)
                 return span, hit
 
             for (ti, tj), tile in _pool().map(one, spans):
@@ -408,20 +429,10 @@ class TurnedImage:
                     tile[si.start - i0:si.stop - i0, sj.start - j0:sj.stop - j0]
         return out
 
-    def _keep(self, key, tile) -> None:
-        with self._kept_lock:
-            if key in self._kept:
-                return
-            self._kept[key] = tile
-            self._kept_bytes += tile.nbytes
-            while self._kept_bytes > SAMPLE_BYTES and len(self._kept) > 1:
-                _key, gone = self._kept.popitem(last=False)
-                self._kept_bytes -= gone.nbytes
-
     @property
     def nbytes(self) -> int:
         """Bytes this keeps: the tile boxes, and the tiles sampled."""
-        return sum(t.nbytes for t in self._tiles.values()) + self._kept_bytes
+        return self._boxes.nbytes + self._kept.nbytes
 
 
 __all__ = [
@@ -431,6 +442,7 @@ __all__ = [
     "PAD",
     "SAMPLE_BYTES",
     "TILE",
+    "Kept",
     "Tiles",
     "TurnedImage",
     "TurnedLevel",

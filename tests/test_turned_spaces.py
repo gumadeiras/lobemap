@@ -344,3 +344,23 @@ def test_aligned_sections_in_every_space(registry, space):
     finally:
         viewer.close()
         pump()
+
+
+def test_rest_puts_back_every_hidden_slider(registry):
+    """The repro of the in-plane prototype's hidden-slider bug: slice along
+    y, then along x, spin, rest, and along y again lands on the same plane."""
+    viewer, sess = _open(registry, "JRCFIB2018F", 2)
+    try:
+        sess.set_slice_axis(1)
+        plane = viewer.dims.point[1]
+        sess.set_slice_axis(0)
+        before = tuple(viewer.dims.point), tuple(tuple(r) for r in viewer.dims.range)
+        for spin in [*range(1, 91), 30]:
+            sess.set_rotation(float(spin), 0, 0)
+        sess.set_rotation(0, 0, 0)
+        assert (tuple(viewer.dims.point), tuple(tuple(r) for r in viewer.dims.range)) == before
+        sess.set_slice_axis(1)
+        assert viewer.dims.point[1] == plane
+    finally:
+        viewer.close()
+        pump()

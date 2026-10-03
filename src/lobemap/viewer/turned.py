@@ -187,17 +187,15 @@ class TurnedView:
 
     def _turn_2d(self, focus) -> None:
         """Show the 2D turn of the current angles, keeping the specimen at `focus`."""
-        turn = Turn.about(self._q(), focus, self.turn)
-        if self.kind == "spin":
-            turn = self._on_plane(turn)
-        self.turn = turn
+        self.turn = Turn.about(self._q(), focus, self.turn)
         self._apply()
 
     def _on_plane(self, turn: Turn) -> Turn:
         """A spin keeps every point's depth: the pivot goes on the slider's grid.
 
         Then `T(x)[axis] = x[axis]`, so the slider steps through the planes
-        it steps through unturned, and moving it there moves the plane.
+        it steps through unturned. The grid is the unturned one, which the
+        sliders have while spun (`_ranges`).
         """
         dims = self.viewer.dims
         axis = int(dims.order[0])
@@ -205,8 +203,6 @@ class TurnedView:
         depth = start + round((float(turn.pivot[axis]) - start) / step) * step
         pivot, focus = turn.pivot.copy(), turn.focus.copy()
         pivot[axis] = focus[axis] = depth
-        if float(dims.point[axis]) != depth:
-            dims.set_point(axis, depth)
         return Turn(turn.q, pivot, focus)
 
     # -- placing the layers ---------------------------------------------------
@@ -228,6 +224,8 @@ class TurnedView:
         # Before anything moves, so napari never sees a turned extent.
         self._applied, self._applied_kind = turn, kind
         self._hook()
+        if kind == "spin":
+            self.turn = self._applied = turn = self._on_plane(turn)
         self._on_pivot_plane()
         if kind == "spin":
             matrix = turn.affine() @ self._mirror()
@@ -269,8 +267,7 @@ class TurnedView:
         position = float((np.linalg.inv(mirror) @ np.r_[np.asarray(dims.point, float),
                                                          1.0])[axis])
         for layer in self.session.images:
-            with contextlib.suppress(Exception):
-                self._virtualize(layer, turn, mirror, position)
+            self._virtualize(layer, turn, mirror, position)
 
     def _virtualize(self, layer, turn: Turn, mirror, position: float) -> None:
         from .resample import TurnedImage
@@ -411,8 +408,6 @@ class TurnedView:
         if before != (self.session.reflect_axis(), self.session.mirror_center):
             specimen = self._reflected(specimen, before)
         self.turn = Turn(self._q(), specimen, focus)
-        if self.kind == "spin":
-            self.turn = self._on_plane(self.turn)
         self._hook()
         axis = int(self.viewer.dims.order[0])
         if float(self.viewer.dims.point[axis]) != float(self.turn.focus[axis]):
@@ -659,8 +654,6 @@ class TurnedView:
         if self.turn is None:
             focus = np.array(dims.point, float) if left is None else left
             self.turn = Turn(self._q(), focus.copy(), focus.copy())
-            if self.kind == "spin":
-                self.turn = self._on_plane(self.turn)
             self._hook()
             if float(dims.point[axis]) != float(self.turn.focus[axis]):
                 dims.set_point(axis, float(self.turn.focus[axis]))
