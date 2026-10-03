@@ -1,12 +1,13 @@
 """The View dock: which brain is open, and how it is shown.
 
-Brain, 3D or Slice, Fit to window, the sections a slice steps through and their
-alignment, the mirror, the flip and the rotation: the controls that belong to the
-scene rather than to one atlas, whose controls are the compartment panel's.
-Every control is in view in both modes; one that applies to one mode stays
-visible in the other, disabled, and says why. The mirror and the flip stand
-alone, with no row label to repeat their words, and are worded apart: the
-mirror reflects the brain, and the flip turns the picture upside down.
+Brain, 3D or Slice, Fit to window, the zoom and the perspective, the sections a
+slice steps through and their alignment, the mirror, the flip and the rotation:
+the controls that belong to the scene rather than to one atlas, whose controls
+are the compartment panel's. Every control is in view in both modes; one that
+applies to one mode stays visible in the other, disabled, and says why. The
+mirror and the flip stand alone, with no row label to repeat their words, and
+are worded apart: the mirror reflects the brain, and the flip turns the picture
+upside down.
 
 Picking another brain rebuilds the scene in place rather than relaunching:
 the process, the Qt window and the GPU context survive, so a switch costs
@@ -41,6 +42,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from .camera_rows import PERSPECTIVE, ZOOM, CameraRows
 from .request import MissingAssets, loadable_spaces
 from .rotation_rows import RotationRows
 from .slicing import AXIS_LETTERS, slice_axes
@@ -213,6 +215,9 @@ class SpaceSwitcher(QWidget):
         self.picture.addWidget(self.mirror)
         self.picture.addWidget(self.flip)
 
+        #: The camera's zoom and perspective; see `camera_rows`.
+        self.camera = CameraRows(viewer)
+
         #: The angles about the screen's axes; they carry across a switch,
         #: as the alignment does.
         self.rotation = RotationRows()
@@ -240,10 +245,16 @@ class SpaceSwitcher(QWidget):
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.addRow("Brain", self.combo)
         form.addRow("Show", show)
+        form.addRow(ZOOM, self.camera.zoom)
+        form.addRow(PERSPECTIVE, self.camera.perspective_row)
         form.addRow("Sections", sections)
         form.addRow(self.picture)
         form.addRow(self.rotation)
-        form.addRow(self.legend)
+        # In a layout of its own: a form drops the row of a hidden widget,
+        # held place or not, and everything under it moved up in 2D.
+        arrows = QVBoxLayout()
+        arrows.addWidget(self.legend)
+        form.addRow(arrows)
         form.addRow(self.status)
 
         # The dock outlives every scene, so it is connected once.

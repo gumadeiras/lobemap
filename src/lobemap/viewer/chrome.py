@@ -101,7 +101,11 @@ def _settle(window, view_dock, layers, panel_dock) -> None:
         window.resizeDocks([view_dock, panel_dock], [LEFT_WIDTH, RIGHT_WIDTH],
                            Qt.Orientation.Horizontal)
         # Qt shares the column by ratio and keeps each dock's minimum: the
-        # tabs get the height they need and the layer list the rest.
+        # tabs get the height they need and the layer list the rest. What
+        # the View tab needs is its rows' full height, laid out; below it,
+        # Qt squeezed the rotation rows into each other.
+        controls = view_dock.widget()
+        controls.setMinimumHeight(controls.sizeHint().height())
         window.resizeDocks([view_dock, layers], [1, 10_000], Qt.Orientation.Vertical)
 
 
