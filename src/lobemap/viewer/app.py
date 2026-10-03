@@ -232,11 +232,12 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
     In 3D the ray is tested against the shown compartments' boxes and then
     their triangles (`AtlasSurface.pick`), not against every triangle of
     the layer as napari's own Surface pick does -- 40 ms a mouse move on
-    Benton. In 2D the contour loops are tested directly, inside the loop
-    rather than on its stroke. `Shapes.get_value` cannot be used for them:
-    napari rounds each shape's slice position to a whole number and compares
-    it with the unrounded plane, so off a whole-micrometer plane it found no
-    shape at all.
+    Benton. Under perspective the ray starts at the eye, which zoomed in can
+    be inside the brain. In 2D the contour loops are tested directly, inside
+    the loop rather than on its stroke. `Shapes.get_value` cannot be used for
+    them: napari rounds each shape's slice position to a whole number and
+    compares it with the unrounded plane, so off a whole-micrometer plane it
+    found no shape at all.
 
     The dicts are read on every move, so a part the session builds later
     (`SceneSession.realize`) is picked too.
@@ -260,6 +261,7 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
                     event.position,
                     getattr(event, "view_direction", None),
                     getattr(event, "dims_displayed", None) or viewer.dims.displayed,
+                    from_position=viewer.scene.camera.perspective > 0,
                 )
             else:
                 if not overlay.layer.visible:

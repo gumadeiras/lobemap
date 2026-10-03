@@ -603,8 +603,17 @@ class AtlasSurface:
 
     # -- identification --------------------------------------------------
 
-    def pick(self, position, view_direction, dims_displayed) -> int | None:
+    def pick(self, position, view_direction, dims_displayed,
+             from_position: bool = False) -> int | None:
         """The shown compartment a view ray through `position` meets first.
+
+        `view_direction` is the ray's, from the eye through the cursor, as
+        napari gives it for each pixel: under perspective the rays spread.
+        With `from_position` the ray starts at `position`, which napari puts
+        just in front of a perspective camera's eye; without, it crosses the
+        whole layer, as an orthographic camera sees it. Zoomed in under
+        perspective, the eye can be inside the brain, and what lies behind it
+        is not drawn: hover named it.
 
         napari's own Surface pick tests every triangle of the layer -- about
         40 ms for Benton's 298k -- and hovering asks on every mouse move.
@@ -613,7 +622,10 @@ class AtlasSurface:
         nearer than a hit already found. Only selected compartments count,
         so geometry awaiting compaction cannot answer for a hidden one.
         """
-        from napari.utils.geometry import find_nearest_triangle_intersection
+        from napari.utils.geometry import (
+            intersect_line_with_triangles,
+            line_in_triangles_3d,
+        )
 
         if view_direction is None or not self.selection:
             return None
@@ -628,9 +640,15 @@ class AtlasSurface:
         if length == 0.0:
             return None
         direction /= length
+        # How far along the ray from `start` the first hit may be, if anywhere.
+        first = None
+        if from_position:
+            origin = np.asarray(self.layer.world_to_data(position), float)
+            first = max(0.0, float(np.dot(origin[list(dims_displayed)] - start, direction)))
         if self._mirror is not None:
             # The ray is in the uploaded geometry's coordinates, reflected;
             # the boxes and triangles below are the MeshSet's (`_present`).
+            # A reflection keeps distances along the ray.
             axis, center = self._mirror
             start[axis] = 2.0 * center - start[axis]
             direction[axis] = -direction[axis]
@@ -639,20 +657,24 @@ class AtlasSurface:
         with np.errstate(divide="ignore", invalid="ignore"):
             near = (lo[indices] - start) / direction
             far = (hi[indices] - start) / direction
-        enter = np.nanmax(np.minimum(near, far), axis=1)
+        enter = np.maximum(np.nanmax(np.minimum(near, far), axis=1), first or 0.0)
         leave = np.nanmin(np.maximum(near, far), axis=1)
-        crossed = leave >= np.maximum(enter, 0.0)
+        crossed = leave >= enter
         best, best_t = None, np.inf
         for j in np.flatnonzero(crossed)[np.argsort(enter[crossed])]:
             if enter[j] > best_t:
                 break
             v, f = self.meshset.compartment(int(indices[j]))
-            hit, point = find_nearest_triangle_intersection(start, direction, v[f])
-            if hit is None:
+            triangles = v[f]
+            met = line_in_triangles_3d(start, direction, triangles)
+            if not met.any():
                 continue
-            t = float(np.dot(np.asarray(point) - start, direction))
-            if t < best_t:
-                best, best_t = int(indices[j]), t
+            points = intersect_line_with_triangles(start, direction, triangles[met])
+            t = (np.asarray(points, float) - start) @ direction
+            if first is not None:
+                t = t[t >= first]
+            if t.size and float(t.min()) < best_t:
+                best, best_t = int(indices[j]), float(t.min())
         return best
 
     def _boxes(self) -> tuple[np.ndarray, np.ndarray]:
