@@ -25,7 +25,8 @@ import numpy as np
 MIRROR_AXIS = 0
 
 
-def orient_anterior(viewer, space, reflect_axis: int | None = None) -> bool:
+def orient_anterior(viewer, space, reflect_axis: int | None = None,
+                    angles=None) -> bool:
     """Face the anterior surface of the brain, dorsal up. True if applied.
 
     Uses the space's MEASURED anatomy, so the view really is down the
@@ -35,6 +36,11 @@ def orient_anterior(viewer, space, reflect_axis: int | None = None) -> bool:
     `reflect_axis` is the array axis the scene is shown mirrored along, or
     None. The frame is reflected with it, so a mirrored scene is looked at
     from its own reflected front, the mirror image of the unmirrored view.
+
+    `angles` turn the scene from there, (spin, tilt, turn) degrees about
+    the screen's axes (`rotation`): the camera is this view turned by their
+    inverse, so no layer moves. None takes the angles of the scene the
+    viewer shows (`rotation.angles_of`), which is what Home faces.
 
     Needs the whole frame. A view direction alone leaves the roll free,
     so a camera built from anterior without dorsal would face the right
@@ -52,13 +58,17 @@ def orient_anterior(viewer, space, reflect_axis: int | None = None) -> bool:
         anterior[reflect_axis] *= -1.0
         dorsal[reflect_axis] *= -1.0
 
+    from .rotation import ZERO, angles_of, turned_view
+
+    view, up = -anterior, dorsal
+    angles = angles_of(viewer) if angles is None else tuple(angles)
+    if tuple(float(a) for a in angles) != ZERO:
+        view, up = turned_view(view, up, angles)
     camera = viewer.scene.camera
-    camera.set_view_direction(
-        view_direction=tuple(-anterior), up_direction=tuple(dorsal)
-    )
+    camera.set_view_direction(view_direction=tuple(view), up_direction=tuple(up))
     # Up is what napari's angle round trip can lose, so that is what is
     # checked; see `tests/test_default_view.py`.
-    return bool(np.dot(np.asarray(camera.up_direction), dorsal) > 0.99)
+    return bool(np.dot(np.asarray(camera.up_direction), up) > 0.99)
 
 
 def maximize(viewer) -> bool:
@@ -130,7 +140,10 @@ def install_home_orientation(viewer, space, reflect_axis=None) -> bool:
     makes the button -- verified -- go through this.
 
     Re-orienting only when napari reset the angles, so `fit_view`, which
-    asks it not to, keeps preserving whatever the user is looking at.
+    asks it not to, keeps preserving whatever the user is looking at. Home
+    faces the scene turned by its angles (`orient_anterior`); in 2D it fits
+    the view, as napari's own does, and a turned 2D view is fitted as it
+    would be unturned (`turned.TurnedView`).
     """
     existing = viewer.__dict__.get("reset_view")
     if getattr(existing, "_lobemap_home", False):

@@ -98,6 +98,10 @@ ANATOMY_COLORS = _table("#D55E00", "#009E73", "#0072B2")
 #: sliders step, so these are the labels whatever the display mode.
 VOXEL_LABELS = ("x", "y", "z")
 
+#: The slider's label while a turned 2D view cuts across the image grid: it
+#: steps along the turned line of sight, which is no image axis.
+DEPTH_LABEL = "depth"
+
 #: Where the second triad is kept. It hangs off napari's own vispy
 #: overlay rather than off the viewer, so it dies with the canvas.
 _ANATOMY_ATTR = "_lobemap_anatomy_axes"
@@ -142,6 +146,19 @@ def _reflection_4x4(axis: int, displayed=(0, 1, 2)) -> np.ndarray:
     return mat
 
 
+def _roll_4x4(degrees: float) -> np.ndarray:
+    """A 2D triad turned with the slice, in vispy's row-vector form.
+
+    In the 2D triad vispy x is the column axis and y the row axis, drawn
+    down, so counterclockwise on screen takes x toward -y.
+    """
+    t = np.radians(degrees)
+    c, s = np.cos(t), np.sin(t)
+    mat = np.eye(4)
+    mat[:2, :2] = [[c, -s], [s, c]]
+    return mat
+
+
 def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
     """Two triads in 3D; only napari's own in 2D. Returns what is shown.
 
@@ -167,18 +184,32 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
 
     So the anatomical triad is hidden in 2D. What stays is napari's,
     naming the axes the slider actually steps.
+
+    A turned 2D view (`turned.TurnedView.shown`) keeps that true. Spun in
+    its plane, the slice is still cut along the grid, so napari's triad
+    turns with it and the slider keeps its axis name. Cut across the grid,
+    no image axis lies in the plane or along the slider: napari's triad is
+    hidden and the slider is labeled `DEPTH_LABEL`.
     """
     from vispy.visuals.transforms import MatrixTransform, NullTransform
+
+    from .rotation import owner
 
     three_d = getattr(viewer.dims, "ndisplay", 3) == 3
     triad = anatomical_triad(space, reflect_axis=mirror_axis)
     show_anatomy = bool(three_d and triad is not None)
+    view = owner(viewer)
+    shown = None if three_d or view is None else view.shown
+    oblique = shown is not None and shown[0] == "oblique"
 
     if getattr(viewer.dims, "ndim", 3) == len(VOXEL_LABELS):
         # napari TRUNCATES a longer tuple, keeping the tail, so three
         # labels on a 2D-ndim viewer would land on the wrong axes.
+        labels = list(VOXEL_LABELS)
+        if oblique:
+            labels[int(viewer.dims.order[0])] = DEPTH_LABEL
         with contextlib.suppress(Exception):
-            viewer.dims.axis_labels = VOXEL_LABELS
+            viewer.dims.axis_labels = tuple(labels)
 
     # Switching it on is also what makes napari BUILD the visual: it
     # skips overlays that are not visible and waits on their `visible`
@@ -199,14 +230,21 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
         # displayed voxel grid rather than against it. The labels are
         # axis NAMES and so are unaffected; it is the directions that
         # move.
-        overlay.node.axes.transform = (
-            NullTransform() if mirror_axis is None
-            else MatrixTransform(
-                _reflection_4x4(mirror_axis, tuple(viewer.dims.displayed))
-            )
-        )
+        roll = shown[1] if shown is not None and shown[0] == "spin" else 0.0
+        if mirror_axis is None and not roll:
+            overlay.node.axes.transform = NullTransform()
+        else:
+            mat = np.eye(4)
+            if mirror_axis is not None:
+                mat = _reflection_4x4(mirror_axis, tuple(viewer.dims.displayed))
+            if roll:
+                # Reflected first, then turned: the mirror applies before
+                # the rotation, as it does to the slice.
+                mat = mat @ _roll_4x4(roll)
+            overlay.node.axes.transform = MatrixTransform(mat)
         overlay.node.axes._default_color = VOXEL_COLORS
         overlay._on_data_change()
+        overlay.node.axes.visible = not oblique
 
     with contextlib.suppress(Exception):
         node = _anatomy_triad(overlay)
@@ -236,6 +274,7 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
 
 __all__ = [
     "ANATOMY_COLORS",
+    "DEPTH_LABEL",
     "VOXEL_COLORS",
     "VOXEL_LABELS",
     "apply_axis_mode",

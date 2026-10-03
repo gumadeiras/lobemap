@@ -10,6 +10,8 @@ the viewer.
 
 from __future__ import annotations
 
+import numpy as np
+
 
 def layer_visual(viewer, layer):
     """napari's vispy visual for `layer`: its `.node` and its `.font_info`."""
@@ -123,8 +125,145 @@ def no_scene_update(viewer, layer):
 
 
 def shown_unsliced(layer):
-    """A context in which showing `layer` does not slice it or rebuild its visual."""
+    """A context in which showing `layer`, or changing its data or transform,
+    does not slice it or rebuild its visual; the caller slices it after."""
     return layer._block_refresh()
+
+
+# -- a turned 2D view (`viewer.turned`) -------------------------------------
+
+#: The layer-list class with a hooked extent, per original class.
+_HOOKED: dict[type, type] = {}
+
+
+def _hooked_class(base: type) -> type:
+    from functools import cached_property
+
+    if base not in _HOOKED:
+        class Hooked(base):
+            """napari's layer list, whose extent a turned view rewrites."""
+
+            @cached_property
+            def extent(self):
+                value = base.extent.func(self)
+                world, step = self._lobemap_ranges(value.world, value.step)
+                return type(value)(data=value.data, world=world, step=step,
+                                   units=value.units)
+
+            @cached_property
+            def _extent_world_augmented(self):
+                return self._lobemap_fit(base._extent_world_augmented.func(self))
+
+        _HOOKED[base] = Hooked
+    return _HOOKED[base]
+
+
+def hook_extent(viewer, ranges=None, fit=None) -> None:
+    """Rewrite the extent napari reads its slider ranges and its fit from, or stop.
+
+    `ranges(world, step)` takes the (2, ndim) world extent and the step
+    napari computed for `dims.range` and returns the ones to use; `fit(world)`
+    does the same for the extent the camera is fitted to (`reset_view`,
+    `fit_to_view`). Both None puts napari's own back. The slider ranges are recomputed at once, as napari
+    recomputes them when a layer changes.
+
+    napari has no public way to do this. Its layer list caches the extent
+    in two cached properties, and the viewer reads them; the list's class is
+    swapped for a subclass that passes them through these, and back.
+    """
+    layers = viewer.layers
+    hooked = ranges is not None or fit is not None
+    base = getattr(layers, "_lobemap_base", type(layers))
+    if hooked:
+        layers._lobemap_base = base
+        layers._lobemap_ranges = ranges or (lambda world, step: (world, step))
+        layers._lobemap_fit = fit or (lambda world: world)
+        layers.__class__ = _hooked_class(base)
+    elif type(layers) is not base:
+        layers.__class__ = base
+        for name in ("_lobemap_base", "_lobemap_ranges", "_lobemap_fit"):
+            layers.__dict__.pop(name, None)
+    refresh_extent(viewer)
+
+
+def augmented_extent(layer):
+    """`layer`'s extent with its pixels' size: what napari fits the view to."""
+    return layer._extent_augmented
+
+
+def refresh_extent(viewer) -> None:
+    """Make napari measure the layer list's extent again and reset the sliders."""
+    viewer.layers._clean_cache()
+    viewer._on_layers_change()
+
+
+def level_of(layer):
+    """(pyramid level, region) a layer is sliced at, for `put_level`."""
+    return (getattr(layer, "_data_level", None),
+            np.array(getattr(layer, "corner_pixels", np.zeros((2, 0), int)), copy=True))
+
+
+def put_level(layer, level) -> None:
+    """Give `layer` back the level and region `level_of` recorded; not sliced."""
+    data_level, corners = level
+    if data_level is not None:
+        layer._data_level = data_level
+    if corners.shape == np.shape(layer.corner_pixels):
+        layer.corner_pixels = corners
+
+
+def slice_now(viewer, layer) -> None:
+    """Slice `layer` now, at its level and region, for the viewer's dims.
+
+    `refresh` alone reuses the slice input the layer last had, which can be
+    from before a change of mode; it is made from the dims first.
+    """
+    if layer.visible:
+        layer._slicing_state.set_slice_input_from_dims(viewer.dims, True)
+        layer.refresh(extent=False)
+
+
+def update_draw(viewer, layer) -> None:
+    """Pick `layer`'s pyramid level and region for the canvas, as napari's draw does.
+
+    A hidden canvas never draws, and a new data array leaves the layer on
+    its coarsest level until it does; this asks the layer what napari's own
+    draw would. The layer is not sliced here.
+    """
+    canvas = viewer.window._qt_viewer.canvas
+    displayed = list(viewer.dims.displayed)
+    with layer._block_refresh():
+        layer._update_draw(
+            scale_factor=1 / viewer.scene.camera.zoom,
+            corner_pixels_displayed=canvas._viewbox_corners_in_world[:, displayed],
+            shape_threshold=canvas._current_viewbox_size[::-1],
+        )
+
+
+def level_as_unturned(layer, turn_2x2=None) -> None:
+    """Pick `layer`'s pyramid level as if its in-plane turn were not there, or stop.
+
+    napari picks a level from the box, in data coordinates, that holds the
+    canvas; turned in plane, that box is the turned canvas's bounding box,
+    larger than the canvas, and napari went a level coarser at the same zoom.
+    The box is still what is read. Only the threshold napari compares it
+    with is scaled by the same growth, axis by axis, so each comparison is
+    the one the unturned canvas would make. `turn_2x2` is the turn on the
+    displayed axes, in their order; None stops.
+    """
+    if turn_2x2 is None:
+        layer.__dict__.pop("_update_draw", None)
+        return
+    inverse = np.abs(np.asarray(turn_2x2, float).T)
+    update = type(layer)._update_draw.__get__(layer)
+
+    def _update_draw(scale_factor, corner_pixels_displayed, shape_threshold):
+        size = np.abs(np.diff(np.asarray(corner_pixels_displayed, float), axis=0))[0]
+        grow = (inverse @ size) / np.where(size > 0, size, 1.0)
+        threshold = np.asarray(shape_threshold, float) * np.maximum(grow, 1.0)
+        return update(scale_factor, corner_pixels_displayed, tuple(threshold))
+
+    layer.__dict__["_update_draw"] = _update_draw
 
 
 def keep_volume_texture(viewer, layer) -> None:
@@ -206,16 +345,24 @@ def triangulate_face(ring):
 
 
 __all__ = [
+    "augmented_extent",
     "before_slicing",
     "clear_extent",
     "data_from_world",
     "gl_state",
+    "hook_extent",
     "keep_extent_while_slicing",
     "keep_volume_texture",
     "layer_visual",
+    "level_as_unturned",
+    "level_of",
     "no_scene_update",
+    "put_level",
+    "refresh_extent",
     "shown_unsliced",
+    "slice_now",
     "text_visual",
     "triangulate_edge",
     "triangulate_face",
+    "update_draw",
 ]

@@ -28,6 +28,7 @@ from .parts import (
     scene_parts,
 )
 from .request import MissingAssets, ViewRequestError, show_targets
+from .rotation import register
 from .slicing import (
     DEFAULT_SLICE_AXIS,
     busiest_plane,
@@ -35,6 +36,7 @@ from .slicing import (
     crosses,
     order_for,
 )
+from .turned import TurnedView
 from .view import (
     MIRROR_AXIS,
     apply_mirror,
@@ -290,6 +292,43 @@ class SceneSession:
         #: Where the sliders go, as `center_sliders` takes it; see `open_sliders`.
         self.sliders: tuple | None = None
         self._spans: dict[tuple[str, int], object] = {}
+        #: The angles the scene is turned by, and what they move; see `turned`.
+        self.turned = TurnedView(self)
+
+    # -- turning the view -------------------------------------------------
+
+    @property
+    def rotation(self) -> tuple[float, float, float]:
+        """(spin, tilt, turn) in degrees; see `rotation`."""
+        return tuple(self.turned.angles)
+
+    def set_rotation(self, spin: float, tilt: float, turn: float) -> None:
+        """Turn the scene: in 3D the camera from Home, in 2D the section.
+
+        Spin turns about the line of sight, counterclockwise on screen;
+        tilt about the screen's horizontal, top toward the viewer; turn
+        about its vertical, front toward the viewer's right. Each is
+        relative to the mode's base view. All three zero, without the
+        alignment, gives back the view exactly as it was at zero.
+        """
+        self.turned.set((spin, tilt, turn))
+
+    @property
+    def aligned(self) -> bool:
+        """Whether 2D's base view is the anatomy rather than the image grid."""
+        return self.turned.aligned
+
+    def set_aligned(self, on: bool) -> None:
+        """Cut 2D along the brain's own planes rather than the image grid's.
+
+        The 2D base view becomes the anatomical frame nearest the grid's,
+        the one 3D's Home uses for that direction; the angles turn from it.
+        """
+        self.turned.set(self.turned.angles, bool(on))
+
+    def home(self) -> None:
+        """Home: in 3D the anatomy turned by the angles, in 2D napari's fit."""
+        self.viewer.reset_view()
 
     def all_layers(self) -> list:
         """Every layer this session owns."""
@@ -376,6 +415,9 @@ class SceneSession:
                 self._stack(contour.layer, self._rank(name, contour=True))
             if self.mirrored and contour is not None:
                 apply_mirror([contour.layer], True, self.mirror_center)
+            if contour is not None:
+                # Placed on the turned plane, as the parts already built are.
+                self.turned.adopt(contour.layer)
         except BaseException:
             for layer in added:
                 with contextlib.suppress(Exception):
@@ -421,7 +463,12 @@ class SceneSession:
         reverses handedness, so an unmirrored anatomical triad over
         mirrored data would name the wrong side, which is the single
         error this project has had to correct most often.
+
+        A turned view is turned again about the same specimen point.
         """
+        self.turned.around(lambda: self._set_mirror(on))
+
+    def _set_mirror(self, on: bool) -> None:
         if on and not self.mirrored:
             self._mirror_center = self.mirror_center
         self.mirrored = bool(on)
@@ -448,19 +495,24 @@ class SceneSession:
         Remembered for the session, so 3D and back keeps it. The contours
         read the axis from `dims.order` and redraw when it changes. The view
         is refitted, since the camera was framing the other plane's axes.
+        A turned view is turned the same way from the new axis's base view.
         """
         self.slice_axis = int(axis)
         if self.viewer.dims.ndisplay == 3:
             return
-        order = order_for(self.slice_axis)
-        # Not a reason to stop: napari's roll button sets the order first,
-        # and the new plane still has to be found.
-        if tuple(self.viewer.dims.order) != order:
-            self.viewer.dims.order = order
+
+        def _change() -> None:
+            order = order_for(self.slice_axis)
+            # Not a reason to stop: napari's roll button sets the order
+            # first, and the new plane still has to be found.
+            if tuple(self.viewer.dims.order) != order:
+                self.viewer.dims.order = order
+            self.populate_plane()
+
+        self.turned.around(_change)
         space = self.registry.spaces.get(self.space)
         if space is not None:
             apply_axis_mode(self.viewer, space, mirror_axis=self.reflect_axis())
-        self.populate_plane()
         fit_view(self.viewer)
 
     def _atlas_order(self) -> list[str]:
@@ -486,7 +538,16 @@ class SceneSession:
         plane that cuts any shown atlas is the user's and is kept; an empty
         one moves to the plane cutting the most compartments of the first
         shown atlas, the primary one when it is shown. True if it moved.
+
+        A view turned across the grid keeps its plane: it passes through the
+        pivot, and the spans here are along the grid. The plane a turn put
+        back at rest is put back first (`TurnedView.take_plane`).
         """
+        plane = self.turned.take_plane()
+        if plane is not None and int(self.viewer.dims.order[0]) == plane[0]:
+            self.viewer.dims.set_point(*plane)
+        if self.turned.kind not in (None, "spin"):
+            return False
         shown = [n for n in self._atlas_order() if self.surfaces[n].selection]
         if not shown:
             return False
@@ -539,6 +600,7 @@ class SceneSession:
         layer selection are the switcher's to restore (`restore_view`); these
         are this session's, because they depend on its space and its mirror.
         """
+        register(self.viewer, self.turned)
         space = self.registry.spaces.get(self.space)
         if space is None:
             return
@@ -585,6 +647,7 @@ class SceneSession:
             fit_view(self.viewer)
 
     def teardown(self) -> None:
+        self.turned.close()
         for event, handler in self.handlers:
             with contextlib.suppress(Exception):
                 event.disconnect(handler)
