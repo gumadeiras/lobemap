@@ -110,19 +110,43 @@ class _Cell(QTableWidgetItem):
         return super().__lt__(other)
 
 
-class _Details(QWidget):
-    """The details area, which sizes its lines again only when its width changes."""
+class _Value(QLabel):
+    """One detail's value, as tall as the longest value it can show needs.
 
-    def __init__(self, fit) -> None:
+    Sized again whenever its width changes, so selecting another row changes
+    its text and nothing else. Measured on a plain label with its font and
+    margins: this one can be selected with the mouse, so Qt lays its text
+    out in a text document, whose height for a width the macOS style gave
+    as a line per word -- 66 px held for a value that takes 18.
+    """
+
+    def __init__(self, values) -> None:
         super().__init__()
-        self._fit = fit
+        self.setWordWrap(True)
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        #: Every text this value can show.
+        self._values = values
         self._width = None
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if self.width() != self._width:
             self._width = self.width()
-            self._fit()
+            self.setFixedHeight(self.needed())
+
+    def needed(self) -> int:
+        """The height the longest of its values takes at its width."""
+        probe = QLabel()
+        probe.setWordWrap(True)
+        probe.setFont(self.font())
+        margins = self.contentsMargins()
+        inner = max(1, self.width() - margins.left() - margins.right())
+        heights = []
+        for text in self._values():
+            probe.setText(text)
+            heights.append(probe.heightForWidth(inner))
+        tallest = max(heights, default=probe.sizeHint().height())
+        return tallest + margins.top() + margins.bottom()
 
 
 class AtlasTab(QWidget):
@@ -313,11 +337,11 @@ class AtlasTab(QWidget):
         Below the table rather than in it: they are too many to be columns
         in a dock this narrow, and only one row's are read at a time. Each
         line is as tall as its longest value in this tab needs, wrapped and
-        never cut short (`_fit_details`), so selecting another row changes
-        their text and nothing else: a value that took one line more used
-        to push the table up.
+        never cut short (`_Value`), so selecting another row changes their
+        text and nothing else: a value that took one line more used to push
+        the table up.
         """
-        box = _Details(self._fit_details)
+        box = QWidget()
         form = QFormLayout(box)
         form.setContentsMargins(2, 4, 2, 0)
         form.setVerticalSpacing(2)
@@ -333,9 +357,7 @@ class AtlasTab(QWidget):
         #: Field -> the label showing its value for the selected row.
         self.details: dict[str, QLabel] = {}
         for name in self.detail_fields:
-            value = QLabel()
-            value.setWordWrap(True)
-            value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            value = _Value(lambda name=name: [row.details[name] for row in self.rows.values()])
             form.addRow(name, value)
             self.details[name] = value
         #: Opens the Virtual Fly Brain term page of the selected glomerulus.
@@ -343,22 +365,6 @@ class AtlasTab(QWidget):
         self.vfb.clicked.connect(self._open_vfb)
         form.addRow(self.vfb)
         return box
-
-    def _fit_details(self) -> None:
-        """Hold each detail line at the height its longest value takes at
-        the width it has now, with the title at one line."""
-        for name, label in self.details.items():
-            width = label.width()
-            if width <= 0:
-                continue
-            # Measured on the label itself, which napari's style sheet sizes.
-            shown, heights = label.text(), []
-            for row in self.rows.values():
-                label.setText(row.details[name])
-                heights.append(label.heightForWidth(width))
-            label.setText(shown)
-            label.setFixedHeight(max(heights, default=label.sizeHint().height()))
-        self.detail_title.setFixedHeight(self.detail_title.sizeHint().height())
 
     # -- helpers ---------------------------------------------------------
     #

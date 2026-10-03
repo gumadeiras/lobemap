@@ -142,23 +142,55 @@ def test_a_click_selects_and_a_drag_does_not(monkeypatch):
             pump()
 
 
+def _lines(label, text: str) -> int:
+    """The height `text` takes wrapped in `label`'s width, from its font."""
+    from qtpy.QtCore import QRect, Qt
+
+    margins = label.contentsMargins()
+    inner = label.width() - margins.left() - margins.right()
+    box = label.fontMetrics().boundingRect(QRect(0, 0, inner, 1 << 20),
+                                           Qt.TextFlag.TextWordWrap, text)
+    return box.height() + margins.top() + margins.bottom()
+
+
 @pytest.mark.parametrize("space", SPACES)
 def test_the_details_hold_their_size_and_show_every_value_in_full(monkeypatch, space):
+    """Under the platform's own style: each value line is as tall as the
+    longest value in its tab needs, measured from the font -- never less,
+    and not a line per word -- at the column's width and after it changes;
+    and selecting rows moves nothing."""
+    from qtpy.QtCore import Qt
+
     with launched(monkeypatch, "view", space) as (code, viewer):
         assert code == 0
         _show(viewer)
         sess = session(viewer)
+        window = viewer.window._qt_window
+        for width in (None, 150, 440, 380, 520, 440):
+            if width is not None:
+                window.resizeDocks([sess.dock], [width], Qt.Orientation.Horizontal)
+                pump(200)
+            # Painted, as a window on screen is: a selectable label lays
+            # its text out for painting, and measured itself wrong after.
+            window.grab()
+            for name in list(sess.parts):
+                tab = sess.panel.tab(name)
+                sess.panel.setCurrentWidget(tab)
+                pump(100)
+                for field, label in tab.details.items():
+                    texts = [row.details[field] for row in tab.rows.values()]
+                    need = max(_lines(label, t) for t in texts)
+                    assert need <= label.height() <= need + 2, (
+                        space, name, field, width, label.width(), label.height(), need)
         for name in list(sess.parts):
             tab = sess.panel.tab(name)
             sess.panel.setCurrentWidget(tab)
             pump(100)
             box = tab.detail_title.parentWidget()
-            size = box.size()
-            table = tab.table.geometry()
+            size, table = box.size(), tab.table.geometry()
             for row in range(tab.table.rowCount()):
                 tab.table.selectRow(row)
                 assert box.size() == size and tab.table.geometry() == table, (name, row)
                 for field, label in tab.details.items():
-                    # Wrapped, never cut short: the text fits the line it has.
-                    assert label.heightForWidth(label.width()) <= label.height(), (
+                    assert _lines(label, label.text()) <= label.height(), (
                         name, field, label.text())
