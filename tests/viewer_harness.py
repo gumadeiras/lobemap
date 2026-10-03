@@ -130,6 +130,7 @@ def handler_counts(viewer) -> dict[str, int]:
         for name in ("draw", "resize", "mouse_press", "mouse_wheel", "key_press")
     })
     out["viewer.mouse_move_callbacks"] = len(viewer.mouse_move_callbacks)
+    out["viewer.mouse_drag_callbacks"] = len(viewer.mouse_drag_callbacks)
     return out
 
 
@@ -458,6 +459,32 @@ def hover(viewer, world) -> str:
     event = MouseEvent(type="mouse_move", pos=canvas_position(viewer, world),
                        modifiers=(), buttons=[])
     canvas._on_mouse_move(event)
+    pump()
+    status = viewer.status
+    return status if isinstance(status, str) else str(status)
+
+
+def click(viewer, world, drag: float = 0.0) -> str:
+    """Press and release the left button over `world`, through napari's own
+    mouse path; `drag` moves the cursor that many pixels in between. What
+    the status bar says after."""
+    from vispy.app.canvas import MouseEvent
+
+    canvas = viewer.window._qt_viewer.canvas
+    x, y = canvas_position(viewer, world)
+    viewer.status = ""
+    press = MouseEvent(type="mouse_press", pos=(x, y), modifiers=(), button=1,
+                       buttons=[1])
+    canvas._on_mouse_press(press)
+    if drag:
+        for k in range(1, 4):
+            move = MouseEvent(type="mouse_move", pos=(x + drag * k / 3, y),
+                              modifiers=(), button=1, buttons=[1], press_event=press)
+            canvas._on_mouse_move(move)
+    end = (x + drag, y)
+    release = MouseEvent(type="mouse_release", pos=end, modifiers=(), button=1,
+                         buttons=[], press_event=press)
+    canvas._on_mouse_release(release)
     pump()
     status = viewer.status
     return status if isinstance(status, str) else str(status)

@@ -1,5 +1,7 @@
 """Hovering names the glomerulus under the cursor, from the first frame.
 
+It names it in the status bar and selects nothing; a click selects its row.
+
 The mouse moves go through napari's own canvas handler, so which layer is
 active -- the reason hovering did nothing on first open -- decides the
 outcome exactly as it does for a user. One compartment is shown, so the
@@ -13,6 +15,7 @@ import pytest
 from viewer_harness import (
     SPACES,
     canvas_position,
+    click,
     contour_loops,
     hover,
     launched,
@@ -59,9 +62,12 @@ def test_hover_names_the_glomerulus_in_3d_and_2d(monkeypatch, space):
         title = sess.registry.asset_of(primary).title
         want = f"{bare} ({ {'L': 'left', 'R': 'right'}[side]}) — {title}"
 
-        # First open, 3D: nothing selected in the layer list by us.
+        # First open, 3D: nothing selected in the layer list by us. Hover
+        # names it and selects nothing; a click selects its row.
         assert hover(viewer, surface.meshset.centroid(index)) == want
-        assert tab._index_of(tab.table.currentRow()) == index
+        assert tab.selected() is None
+        assert click(viewer, surface.meshset.centroid(index)) == want
+        assert tab.selected().index == index
 
         viewer.dims.ndisplay = 2
         pump()

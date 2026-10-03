@@ -10,8 +10,8 @@ from viewer_harness import (
     REGISTRY,
     assert_rows_match_drawing,
     checked,
+    click,
     drawn,
-    hover,
     launched,
     pump,
     session,
@@ -124,7 +124,7 @@ def test_the_vfb_button_opens_the_selected_glomerulus(monkeypatch):
         )]
 
 
-def test_hovering_a_glomerulus_points_the_vfb_button_at_it(monkeypatch):
+def test_clicking_a_glomerulus_points_the_vfb_button_at_it(monkeypatch):
     from qtpy.QtCore import Qt
 
     from lobemap.viewer.panel import VISIBLE_COL
@@ -135,7 +135,7 @@ def test_hovering_a_glomerulus_points_the_vfb_button_at_it(monkeypatch):
         _buttons(tab)["None"].click()
         tab.table.item(tab._row_of(index), VISIBLE_COL).setCheckState(Qt.Checked)
         pump(300)
-        assert hover(viewer, tab.surface.meshset.centroid(index)) == "DA1 (left) — Benton 2025"
+        assert click(viewer, tab.surface.meshset.centroid(index)) == "DA1 (left) — Benton 2025"
         vfb = _buttons(tab)["Open in Virtual Fly Brain"]
         assert vfb.isEnabled()
         assert vfb.toolTip() == "Open the Virtual Fly Brain page for DA1"

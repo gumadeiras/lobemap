@@ -271,7 +271,7 @@ class SceneSession:
         self.panel = None
         self.dock = None
         self.handlers: list[tuple] = []
-        #: Callbacks added to `viewer.mouse_move_callbacks`.
+        #: Callbacks added to the viewer's mouse move and drag callbacks.
         self.callbacks: list = []
         #: Every mesh the space shows, by scene key, built or not.
         self.parts: dict[str, ScenePart] = {}
@@ -674,8 +674,10 @@ class SceneSession:
                 with contextlib.suppress(Exception):
                     event.disconnect(handler)
         for callback in self.callbacks:
-            with contextlib.suppress(ValueError):
-                self.viewer.mouse_move_callbacks.remove(callback)
+            for callbacks in (self.viewer.mouse_move_callbacks,
+                              self.viewer.mouse_drag_callbacks):
+                with contextlib.suppress(ValueError):
+                    callbacks.remove(callback)
         self.callbacks = []
         for surface in self.surfaces.values():
             surface.stop()

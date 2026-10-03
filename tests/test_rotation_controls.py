@@ -1,7 +1,7 @@
 """The View dock's rotation and alignment controls, by what they do to the scene.
 
 Each test drives the dock's own widgets -- the angle boxes, Reset rotation,
-the alignment box, Home view and the Brain menu -- in a space opened as
+the alignment box, Fit to window and the Brain menu -- in a space opened as
 `lobemap view` opens it, and reads back the camera, the plane on screen
 through napari's canvas mapping, and the contours drawn on it against
 trimesh. A widget's own text is checked only where the text is the point.
@@ -140,7 +140,7 @@ def test_the_boxes_turn_the_3d_camera_from_home_and_a_drag_leaves_them(monkeypat
         viewer.scene.camera.angles = (5.0, 60.0, -100.0)
         pump()
         assert sw.rotation.angles() == (30.0, -20.0, 45.0)
-        # Home view, and an arrow step, put it at Home turned by the boxes.
+        # Fit to window, and an arrow step, put it at Home turned by the boxes.
         sw.home.click()
         pump()
         _faces(viewer, sess, (30, -20, 45))
@@ -268,3 +268,36 @@ def test_a_switch_carries_the_turn_and_a_failed_one_keeps_everything(monkeypatch
         assert sw.combo.currentData() == "FAFB14"
         assert th.state(viewer) == before
         assert np.array_equal(th.render(viewer), pixels)
+
+
+def test_fit_to_window_never_moves_the_slice(monkeypatch):
+    """It fits the view, and in 3D faces the front turned by the angles; the
+    plane, every slider and the angles stay where they are."""
+    with launched(monkeypatch, "view", "GRABE", "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        sw, sess = switcher(viewer), session(viewer)
+        assert sw.home.text() == "Fit to window"
+        th.settle_canvas(viewer)
+        _center_on_the_atlas(viewer, sess)
+        camera = viewer.scene.camera
+        for angles in ((0, 0, 0), (20, 30, -10)):
+            _set(sw, *angles)
+            for ndisplay in (2, 3):
+                viewer.dims.ndisplay = ndisplay
+                th.settle_canvas(viewer)
+                axis = int(viewer.dims.order[0])
+                viewer.dims.set_current_step(axis, viewer.dims.current_step[axis] + 3)
+                camera.zoom = camera.zoom * 1.9
+                pump()
+                point, steps = tuple(viewer.dims.point), tuple(viewer.dims.current_step)
+                zoom = camera.zoom
+                sw.home.click()
+                pump()
+                assert tuple(viewer.dims.point) == point, (angles, ndisplay)
+                assert tuple(viewer.dims.current_step) == steps, (angles, ndisplay)
+                assert camera.zoom != pytest.approx(zoom), "it did not fit"
+                assert sess.rotation == tuple(float(a) for a in angles)
+                if ndisplay == 3:
+                    _faces(viewer, sess, angles)
+            viewer.dims.ndisplay = 2
+            pump()

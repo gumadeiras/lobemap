@@ -25,8 +25,8 @@ HEADING = "Rotate around"
 HEADING_TIP = (
     "Turn the view, in 3D and in Slice view, where a turn about the vertical "
     "or horizontal axis cuts oblique sections. Dragging in 3D leaves the "
-    "angles as they are; a new angle or Home view puts the camera at Home "
-    "turned by them."
+    "angles as they are; a new angle, or Fit to window, turns back to the "
+    "front view with them applied."
 )
 #: Each row: its label, the angle of `rotation` it sets, and its positive sense.
 ROWS = (

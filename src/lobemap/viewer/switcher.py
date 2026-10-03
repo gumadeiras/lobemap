@@ -1,6 +1,6 @@
 """The View dock: which brain is open, and how it is shown.
 
-Brain, 3D or Slice, Home view, the sections a slice steps through and their
+Brain, 3D or Slice, Fit to window, the sections a slice steps through and their
 alignment, the mirror and the rotation: the controls that belong to the
 scene rather than to one atlas, whose controls are the compartment panel's.
 Every control is in view in both modes; one that applies to one mode stays
@@ -68,9 +68,11 @@ MIRROR_TIP = (
 )
 THREE_D_TIP = "Show the brain in 3D. Drag to turn it."
 SLICE_TIP = "Show one section at a time. The slider under the image steps through them."
+HOME = "Fit to window"
 HOME_TIP = (
-    "Fit the brain to the window. In 3D, also turn it to face the front, dorsal "
-    "side up, then by the rotation angles."
+    "Fit the brain to the window. In 3D, also turn back to the front view, "
+    "dorsal side up, with your rotation applied. The slice and the rotation "
+    "angles stay as they are."
 )
 #: Said under the Sections menu while 3D disables it.
 SLICE_ONLY = "Slice view only"
@@ -159,7 +161,7 @@ class SpaceSwitcher(QWidget):
         group = QButtonGroup(self)
         group.addButton(self.three_d)
         group.addButton(self.slice_view)
-        self.home = QPushButton("Home view")
+        self.home = QPushButton(HOME)
         self.home.setToolTip(HOME_TIP)
         self.home.clicked.connect(lambda: self.session.home())
 

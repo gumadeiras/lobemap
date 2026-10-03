@@ -110,6 +110,21 @@ class _Cell(QTableWidgetItem):
         return super().__lt__(other)
 
 
+class _Details(QWidget):
+    """The details area, which sizes its lines again only when its width changes."""
+
+    def __init__(self, fit) -> None:
+        super().__init__()
+        self._fit = fit
+        self._width = None
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.width() != self._width:
+            self._width = self.width()
+            self._fit()
+
+
 class AtlasTab(QWidget):
     """The table of one mesh: an atlas's glomeruli, or a neuropil set."""
 
@@ -296,12 +311,19 @@ class AtlasTab(QWidget):
         """The selected row's details, always in the kind's order.
 
         Below the table rather than in it: they are too many to be columns
-        in a dock this narrow, and only one row's are read at a time.
+        in a dock this narrow, and only one row's are read at a time. Each
+        line is as tall as its longest value in this tab needs, wrapped and
+        never cut short (`_fit_details`), so selecting another row changes
+        their text and nothing else: a value that took one line more used
+        to push the table up.
         """
-        box = QWidget()
+        box = _Details(self._fit_details)
         form = QFormLayout(box)
         form.setContentsMargins(2, 4, 2, 0)
         form.setVerticalSpacing(2)
+        # The values take the width there is, whatever their text: on macOS
+        # they kept their own, so each row selected moved them.
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.detail_title = QLabel()
         bold = QFont(self.detail_title.font())
         bold.setBold(True)
@@ -321,6 +343,22 @@ class AtlasTab(QWidget):
         self.vfb.clicked.connect(self._open_vfb)
         form.addRow(self.vfb)
         return box
+
+    def _fit_details(self) -> None:
+        """Hold each detail line at the height its longest value takes at
+        the width it has now, with the title at one line."""
+        for name, label in self.details.items():
+            width = label.width()
+            if width <= 0:
+                continue
+            # Measured on the label itself, which napari's style sheet sizes.
+            shown, heights = label.text(), []
+            for row in self.rows.values():
+                label.setText(row.details[name])
+                heights.append(label.heightForWidth(width))
+            label.setText(shown)
+            label.setFixedHeight(max(heights, default=label.sizeHint().height()))
+        self.detail_title.setFixedHeight(self.detail_title.sizeHint().height())
 
     # -- helpers ---------------------------------------------------------
     #

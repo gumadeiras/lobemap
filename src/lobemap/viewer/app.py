@@ -203,18 +203,31 @@ def _meshes_of(viewer) -> weakref.WeakSet:
     return meshes
 
 
+#: How far, in screen pixels, the cursor may move between press and release
+#: for the press to be a click rather than a drag.
+CLICK_SLOP = 4.0
+
+
 def install_picking(viewer, surfaces, contours, panel=None) -> list:
-    """Identify the glomerulus under the cursor, in 3D and in 2D.
+    """Name the glomerulus under the cursor, and select it on a click.
 
     Returns the viewer callbacks it added, so a scene switch can remove them.
 
-    On the VIEWER, not on each layer. napari sends a layer's mouse-move
-    callbacks only while that layer is the active one, and one atlas is
-    drawn by two layers -- a mesh in 3D, its outlines in 2D -- while the
-    user can make any layer active, so hovering named nothing until the
-    right layer happened to be selected. The viewer's callbacks run on
-    every move, and this asks each layer the current mode draws: surfaces
-    in 3D, contours in 2D, the atlases before the reference shells.
+    Hovering only says what is under the cursor, in the status bar: "VA3
+    (left) — Benton 2025", the panel row's words and whose it is. It moves
+    nothing. It used to select the row as well, which switched the panel's
+    tab, moved its selection, scrolled its table and refilled its details
+    under the user's eyes. A click that does not drag selects the row, as a
+    click in the table does; a drag turns or pans the view and selects
+    nothing.
+
+    On the VIEWER, not on each layer. napari sends a layer's mouse callbacks
+    only while that layer is the active one, and one atlas is drawn by two
+    layers -- a mesh in 3D, its outlines in 2D -- while the user can make
+    any layer active, so hovering named nothing until the right layer
+    happened to be selected. The viewer's callbacks run on every move, and
+    this asks each layer the current mode draws: surfaces in 3D, contours in
+    2D, the atlases before the reference shells.
 
     In 3D the ray is tested against the shown compartments' boxes and then
     their triangles (`AtlasSurface.pick`), not against every triangle of
@@ -223,16 +236,14 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
     rather than on its stroke. `Shapes.get_value` cannot be used for them:
     napari rounds each shape's slice position to a whole number and compares
     it with the unrounded plane, so off a whole-micrometer plane it found no
-    shape at all. Drags are skipped: they rotate or pan the view.
+    shape at all.
 
     The dicts are read on every move, so a part the session builds later
-    (`SceneSession.realize`) is picked too. The status bar says what the
-    panel's row says, and whose it is: "VA3 (left) — Benton 2025".
+    (`SceneSession.realize`) is picked too.
     """
 
-    def _on_move(_viewer, event):
-        if getattr(event, "buttons", None):
-            return          # a drag: rotating or panning, not pointing
+    def _pick(event):
+        """(part, compartment, words) under the cursor, or None."""
         three_d = viewer.dims.ndisplay == 3
         order = sorted(
             surfaces,
@@ -250,7 +261,6 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
                     getattr(event, "view_direction", None),
                     getattr(event, "dims_displayed", None) or viewer.dims.displayed,
                 )
-                label = surface.meshset.names[index] if index is not None else None
             else:
                 if not overlay.layer.visible:
                     continue
@@ -262,17 +272,35 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
                 )
                 label = overlay.name_at_shape(shape)
                 index = overlay.meshset.names.index(label) if label else None
-            if label:
+            if index is not None:
                 tab = panel.tabs.get(name) if panel is not None else None
-                shown_as = surface.display_names[index] if index is not None else label
-                said = tab.describe(index) if tab is not None and index is not None else ""
-                viewer.status = said or f"{shown_as} — {surface.name}"
-                if panel is not None and index is not None:
-                    panel.highlight(name, index)
-                return
+                said = tab.describe(index) if tab is not None else ""
+                return name, index, said or f"{surface.display_names[index]} — {surface.name}"
+        return None
+
+    def _on_move(_viewer, event):
+        if getattr(event, "buttons", None):
+            return          # a drag: rotating or panning, not pointing
+        picked = _pick(event)
+        if picked is not None:
+            viewer.status = picked[2]
+
+    def _on_press(_viewer, event):
+        start = np.asarray(event.pos, float)
+        yield
+        while event.type == "mouse_move":
+            if np.hypot(*(np.asarray(event.pos, float) - start)) > CLICK_SLOP:
+                return      # a drag
+            yield
+        picked = _pick(event)
+        if picked is not None:
+            viewer.status = picked[2]
+            if panel is not None:
+                panel.highlight(picked[0], picked[1])
 
     viewer.mouse_move_callbacks.append(_on_move)
-    return [_on_move]
+    viewer.mouse_drag_callbacks.append(_on_press)
+    return [_on_move, _on_press]
 
 
 def show_main_layer(viewer, registry: Registry, session: SceneSession) -> None:
@@ -412,6 +440,7 @@ def run(
 
 __all__ = [
     "BASE_DISPLAY",
+    "CLICK_SLOP",
     "DIMS_ORDER_XYZ",
     "MIRROR_AXIS",
     "PANEL_TITLE",

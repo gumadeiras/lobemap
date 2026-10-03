@@ -138,7 +138,7 @@ def test_a_switch_keeps_the_layout_and_a_hidden_dock_comes_back(monkeypatch):
 
 
 def test_the_view_controls_drive_the_viewer(monkeypatch):
-    """3D and Slice, Home view and Sections do what napari's buttons did."""
+    """3D and Slice, Fit to window and Sections do what napari's buttons did."""
     from qtpy.QtCore import Qt
 
     with launched(monkeypatch, "view", "JRCFIB2018F") as (code, viewer):
@@ -172,7 +172,7 @@ def test_the_view_controls_drive_the_viewer(monkeypatch):
         sw.three_d.click()
         assert viewer.dims.ndisplay == 3
 
-        # Home view gives the camera napari's Home button gave, in both modes.
+        # Fit to window gives the camera napari's Home button gave, in both modes.
         for ndisplay in (3, 2):
             viewer.dims.ndisplay = ndisplay
             pump()
