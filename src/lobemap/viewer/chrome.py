@@ -32,6 +32,11 @@ RIGHT_WIDTH = 440
 #: between rows of a group, two between groups, one at the dock's edges.
 GRID = 8
 
+#: The height of every control of the View dock: a line of text, with half a
+#: grid unit above and below it, as napari pads its buttons -- three grid
+#: units, so its rows fall on the grid.
+CONTROL_HEIGHT = 3 * GRID
+
 #: napari's own docks, by the names lobemap shows for them.
 LAYER_SETTINGS = "Layer settings"
 LAYERS = "Layers"
@@ -192,6 +197,7 @@ def _relock(layer) -> None:
 
 
 __all__ = [
+    "CONTROL_HEIGHT",
     "GRID",
     "LAYERS",
     "LAYER_SETTINGS",

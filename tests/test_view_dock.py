@@ -236,9 +236,10 @@ def _gaps(widgets, horizontal: bool) -> list[int]:
 def test_the_view_dock_sits_on_one_grid(monkeypatch):
     """Measured as laid out, in every brain, in 3D and Slice view: no push
     button wider than its text and a grid unit either side; every other
-    control at its own size; labels ending on one column and controls
-    starting a grid unit after it; rows a grid unit apart in a group and two
-    between groups; and napari's buttons a grid unit apart."""
+    control at its own width; every control one height, with at least half
+    a grid unit above and below its text; labels ending on one column and
+    controls starting a grid unit after it; rows a grid unit apart in a
+    group and two between groups; and napari's buttons a grid unit apart."""
     from qtpy.QtWidgets import (
         QAbstractSpinBox,
         QCheckBox,
@@ -247,7 +248,7 @@ def test_the_view_dock_sits_on_one_grid(monkeypatch):
         QPushButton,
     )
 
-    from lobemap.viewer.chrome import GRID
+    from lobemap.viewer.chrome import CONTROL_HEIGHT, GRID
 
     with launched(monkeypatch, "view", "GRABE") as (code, viewer):
         assert code == 0
@@ -270,6 +271,15 @@ def test_the_view_dock_sits_on_one_grid(monkeypatch):
                 for control in sw.findChildren((QComboBox, QCheckBox, QAbstractSpinBox)):
                     assert control.width() == control.sizeHint().width(), (
                         space, type(control).__name__, control.width())
+                # Heights: one for every control, never tight around its text.
+                controls = sw.findChildren(
+                    (QPushButton, QComboBox, QCheckBox, QAbstractSpinBox))
+                assert {c.height() for c in controls} == {CONTROL_HEIGHT}, sorted(
+                    {(type(c).__name__, c.height()) for c in controls})
+                for control in controls:
+                    text = control.fontMetrics().height()
+                    assert control.height() >= text + 2 * (GRID // 2), (
+                        type(control).__name__, control.height(), text)
                 # One label column, one control column.
                 margin = form.contentsMargins()
                 assert (margin.left(), margin.top(), margin.right()) == (GRID,) * 3

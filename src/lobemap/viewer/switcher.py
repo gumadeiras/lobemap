@@ -48,7 +48,7 @@ from qtpy.QtWidgets import (
 )
 
 from .camera_rows import PERSPECTIVE, ZOOM, CameraRows
-from .chrome import GRID
+from .chrome import CONTROL_HEIGHT, GRID
 from .request import MissingAssets, loadable_spaces
 from .rotation_rows import RotationRows
 from .slicing import AXIS_LETTERS, order_for, slice_axes
@@ -270,8 +270,8 @@ class SpaceSwitcher(QWidget):
         # One grid (`chrome.GRID`): labels in one column and controls in
         # the next, a grid unit apart; rows a grid unit apart within a
         # group and two between groups; every control as wide as its
-        # content, no wider. Only the headings and the text that wraps run
-        # across the dock.
+        # content, no wider, and as tall as the rest. Only the headings and
+        # the text that wraps run across the dock.
         form = QFormLayout(self)
         form.setContentsMargins(GRID, GRID, GRID, GRID)
         form.setHorizontalSpacing(GRID)
@@ -296,9 +296,18 @@ class SpaceSwitcher(QWidget):
                         self.camera.perspective, self.rotation.reset,
                         *self.rotation.box.values()):
             control.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        # napari's theme pads a push button by 4 px all round, which left
-        # its text touching the sides: a grid unit either side instead.
-        self.setStyleSheet(f"QPushButton {{ padding: 4px {GRID}px; }}")
+            # One height: the boxes and checkboxes were 20 px, their text a
+            # few pixels from their edges, and the Sections menu 26.
+            control.setFixedHeight(CONTROL_HEIGHT)
+        # napari's theme pads a push button by half a grid unit all round,
+        # which left its text touching the sides: a grid unit either side
+        # instead. It pads a box's text by 1 px above and below, and holds
+        # its height to its own: half a grid unit there too, as on a button.
+        pad = GRID // 2
+        self.setStyleSheet(
+            f"QPushButton {{ padding: {pad}px {GRID}px; }}"
+            f"QAbstractSpinBox {{ padding: {pad}px 10px; "
+            f"min-height: {CONTROL_HEIGHT - 2 * pad}px; }}")
 
         # The dock outlives every scene, so it is connected once.
         viewer.dims.events.ndisplay.connect(self._on_mode)
