@@ -52,19 +52,21 @@ from .rotation_rows import RotationRows
 from .slicing import AXIS_LETTERS, order_for, slice_axes
 from .view import capture_view, restore_view, upside_down
 
-#: The plane a section lies in, by the anatomical axis the slider steps along.
-PLANES = {"Anterior-Posterior": "Frontal", "Dorsal-Ventral": "Horizontal",
-          "Left-Right": "Sagittal"}
+#: The plane a section lies in, and the axis the slider steps along across
+#: it, by that anatomical axis.
+PLANES = {"Anterior-Posterior": ("Frontal", "anterior–posterior"),
+          "Dorsal-Ventral": ("Horizontal", "dorsal–ventral"),
+          "Left-Right": ("Sagittal", "medial–lateral")}
 
 SECTIONS_TIP = (
-    "Which sections the slider steps through. Unless aligned below, they follow "
-    "the image's own grid, which is at the angle shown from the brain's true "
-    "plane. Slice view only."
+    "Which sections the slider steps through, and the axis it steps along. "
+    "Unless aligned below, the sections follow the image's own grid, at the "
+    "angle shown from that axis. Slice view only."
 )
-ALIGN = "Align to the brain's true planes"
+ALIGN = "Align sections to the anatomical axes"
 ALIGN_TIP = (
-    "Cut the sections along the brain's own frontal, horizontal and sagittal "
-    "planes, not along the image's grid. Slice view only."
+    "Cut the sections square to the brain's anterior–posterior, dorsal–ventral "
+    "and medial–lateral axes, not along the image's grid. Slice view only."
 )
 MIRROR = "Mirror the brain left to right"
 MIRROR_TIP = (
@@ -107,15 +109,17 @@ UNTURNED = "Opened {title}, but could not turn it to the angles shown."
 
 
 def section_label(choice, aligned: bool = False) -> str:
-    """'Frontal (17.5° off true)': the plane, and its angle to the anatomy.
+    """'Frontal (17.5° off anterior–posterior)': the plane, and the angle
+    between the slider's steps and the anatomical axis they step along.
 
-    Aligned, the section is the true plane: 'Frontal (true plane)'.
+    Aligned, the steps are along that axis: 'Frontal (anterior–posterior)'.
     """
     if choice.anatomy is None:
         return f"Image axis {AXIS_LETTERS[choice.axis]}"
+    plane, axis = PLANES[choice.anatomy]
     if aligned:
-        return f"{PLANES[choice.anatomy]} (true plane)"
-    return f"{PLANES[choice.anatomy]} ({choice.degrees:.1f}° off true)"
+        return f"{plane} ({axis})"
+    return f"{plane} ({choice.degrees:.1f}° off {axis})"
 
 
 #: The abbreviations in the brains' titles, and what each stands for.

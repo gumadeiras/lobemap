@@ -335,14 +335,20 @@ def test_the_view_dock_says_everything_in_words(monkeypatch):
             assert f"the {template} template" in tips[space], tips[space]
         for space in ("FAFB14", "JRCFIB2018F", "JRCFIB2022M"):
             assert "electron microscopy" in tips[space], tips[space]
-        assert sw.slice.itemText(0) == "Frontal (17.5° off true)"
+        assert sw.slice.itemText(0) == "Frontal (17.5° off anterior–posterior)"
         assert [sw.slice.itemText(i).split(" (")[0] for i in range(sw.slice.count())] == [
             "Frontal", "Horizontal", "Sagittal"]
         assert sw.slice.toolTip() == (
-            "Which sections the slider steps through. Unless aligned below, they follow "
-            "the image's own grid, which is at the angle shown from the brain's true "
-            "plane. Slice view only.")
-        assert sw.align.text() == "Align to the brain's true planes"
+            "Which sections the slider steps through, and the axis it steps along. "
+            "Unless aligned below, the sections follow the image's own grid, at the "
+            "angle shown from that axis. Slice view only.")
+        assert sw.align.text() == "Align sections to the anatomical axes"
+        assert all(axis in sw.align.toolTip() for axis in (
+            "anterior–posterior", "dorsal–ventral", "medial–lateral"))
+        # No "true plane" anywhere: each section names the axis it steps along.
+        shown = [sw.slice.itemText(i) for i in range(sw.slice.count())]
+        shown += [sw.slice.toolTip(), sw.align.text(), sw.align.toolTip()]
+        assert not any(re.search(r"\btrue\b", text) for text in shown), shown
         assert sw.mirror.text() == "Mirror the brain left to right"
         assert sw.flip.text() == "Flip the picture upside down"
         # Standalone checkboxes: no row label repeats their words, and they

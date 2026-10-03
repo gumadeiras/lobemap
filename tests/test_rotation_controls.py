@@ -192,14 +192,15 @@ def test_the_boxes_and_the_alignment_cut_the_2d_section(monkeypatch):
         th.settle_canvas(viewer)
         assert sess.aligned
         assert [sw.slice.itemText(i) for i in range(sw.slice.count())] == [
-            "Frontal (true plane)", "Horizontal (true plane)", "Sagittal (true plane)"]
+            "Frontal (anterior–posterior)", "Horizontal (dorsal–ventral)",
+            "Sagittal (medial–lateral)"]
         base = _aligned_base(viewer, sess)
         assert 1.0 < np.degrees(np.arccos(np.diag(base.T @ grid).min())) < 35.0
         assert np.allclose(_shown_frame(viewer, contour),
                            base @ screen_matrix(angles).T, atol=1e-6)
         assert _contour_vs_trimesh(viewer, sess, th.to_mesh(contour)) > 0
 
-        # At zero angles, aligned, the section is the brain's true plane
+        # At zero angles, aligned, the section is the brain's own plane
         # nearest the grid's: perpendicular to an anatomical axis.
         sw.rotation.reset.click()
         th.settle_canvas(viewer)

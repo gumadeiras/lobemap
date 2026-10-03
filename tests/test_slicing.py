@@ -105,10 +105,12 @@ def test_the_sections_menu_names_each_axis_by_its_nearest_plane(monkeypatch, spa
         for i in range(menu.count()):
             axis = int(menu.itemData(i))
             name, degrees = _nearest_plane(registry.spaces[space], axis)
-            assert menu.itemText(i) == f"{name} ({degrees:.1f}° off true)"
+            axis_name = {"Frontal": "anterior–posterior", "Horizontal": "dorsal–ventral",
+                         "Sagittal": "medial–lateral"}[name]
+            assert menu.itemText(i) == f"{name} ({degrees:.1f}° off {axis_name})"
             seen.append(name)
         assert seen == ["Frontal", "Horizontal", "Sagittal"]
-        assert menu.toolTip().startswith("Which sections the slider steps through.")
+        assert menu.toolTip().startswith("Which sections the slider steps through,")
 
 
 def _assert_image_slices(layer, axis) -> None:
