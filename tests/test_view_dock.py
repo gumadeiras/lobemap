@@ -275,9 +275,10 @@ def test_the_view_dock_says_everything_in_words(monkeypatch):
         assert [sw.slice.itemText(i).split(" (")[0] for i in range(sw.slice.count())] == [
             "Frontal", "Horizontal", "Sagittal"]
         assert sw.slice.toolTip() == (
-            "Which sections the slider steps through. The sections follow the image's "
-            "own grid, which is at the angle shown from the brain's true plane. Slice "
-            "view only.")
+            "Which sections the slider steps through. Unless aligned below, they follow "
+            "the image's own grid, which is at the angle shown from the brain's true "
+            "plane. Slice view only.")
+        assert sw.align.text() == "Align to the brain's true planes"
         assert sw.mirror.text() == "Mirror left and right"
         assert sw.mirror.toolTip() == (
             "Show the brain as its mirror image, to compare a left lobe with a right "

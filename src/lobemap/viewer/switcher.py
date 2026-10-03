@@ -1,8 +1,8 @@
 """The View dock: which brain is open, and how it is shown.
 
-Brain, 3D or Slice, Home view, the sections a slice steps through, and the
-mirror: the controls that belong to the scene rather than to one atlas,
-whose controls are the compartment panel's.
+Brain, 3D or Slice, Home view, the sections a slice steps through and their
+alignment, the mirror and the rotation: the controls that belong to the
+scene rather than to one atlas, whose controls are the compartment panel's.
 
 Picking another brain rebuilds the scene in place rather than relaunching:
 the process, the Qt window and the GPU context survive, so a switch costs
@@ -38,6 +38,7 @@ from qtpy.QtWidgets import (
 )
 
 from .request import MissingAssets, loadable_spaces
+from .rotation_group import RotationGroup
 from .slicing import AXIS_LETTERS, slice_axes
 from .view import capture_view, restore_view
 
@@ -46,9 +47,14 @@ PLANES = {"Anterior-Posterior": "Frontal", "Dorsal-Ventral": "Horizontal",
           "Left-Right": "Sagittal"}
 
 SECTIONS_TIP = (
-    "Which sections the slider steps through. The sections follow the image's "
-    "own grid, which is at the angle shown from the brain's true plane. Slice "
-    "view only."
+    "Which sections the slider steps through. Unless aligned below, they follow "
+    "the image's own grid, which is at the angle shown from the brain's true "
+    "plane. Slice view only."
+)
+ALIGN = "Align to the brain's true planes"
+ALIGN_TIP = (
+    "Cut the sections along the brain's own frontal, horizontal and sagittal "
+    "planes, not along the image's grid. Slice view only."
 )
 MIRROR_TIP = (
     "Show the brain as its mirror image, to compare a left lobe with a right "
@@ -57,7 +63,10 @@ MIRROR_TIP = (
 )
 THREE_D_TIP = "Show the brain in 3D. Drag to turn it."
 SLICE_TIP = "Show one section at a time. The slider under the image steps through them."
-HOME_TIP = "Fit the brain to the window. In 3D, also turn it to face the front, dorsal side up."
+HOME_TIP = (
+    "Fit the brain to the window. In 3D, also turn it to face the front, dorsal "
+    "side up, then by the rotation angles."
+)
 #: Said under the Sections menu while 3D disables it.
 SLICE_ONLY = "Slice view only"
 #: What the corner arrows mean; 3D only, where the anatomical ones are drawn.
@@ -69,12 +78,18 @@ ARROWS = (
 OPENING = "Opening {title}…"
 FAILED = "Could not open {title}: {reason}. Your view is unchanged."
 UNFITTED = "Opened {title}, but could not fit it to the window."
+UNTURNED = "Opened {title}, but could not turn it to the angles shown."
 
 
-def section_label(choice) -> str:
-    """'Frontal (17.5° off true)': the plane, and its angle to the anatomy."""
+def section_label(choice, aligned: bool = False) -> str:
+    """'Frontal (17.5° off true)': the plane, and its angle to the anatomy.
+
+    Aligned, the section is the true plane: 'Frontal (true plane)'.
+    """
     if choice.anatomy is None:
         return f"Image axis {AXIS_LETTERS[choice.axis]}"
+    if aligned:
+        return f"{PLANES[choice.anatomy]} (true plane)"
     return f"{PLANES[choice.anatomy]} ({choice.degrees:.1f}° off true)"
 
 
@@ -144,15 +159,16 @@ class SpaceSwitcher(QWidget):
         group.addButton(self.slice_view)
         self.home = QPushButton("Home view")
         self.home.setToolTip(HOME_TIP)
-        # Through the viewer, as napari's own Home button went: the scene
-        # wraps `reset_view` to face the anatomy (`install_home_orientation`).
-        self.home.clicked.connect(lambda: self.viewer.reset_view())
+        self.home.clicked.connect(lambda: self.session.home())
 
         #: The sections the slider steps through, by array axis.
         self.slice = QComboBox()
         self.slice.setToolTip(SECTIONS_TIP)
         self._narrow(self.slice)
         self.slice.currentIndexChanged.connect(self._on_slice)
+        self.align = QCheckBox(ALIGN)
+        self.align.setToolTip(ALIGN_TIP)
+        self.align.toggled.connect(self._on_align)
         self.slice_note = QLabel(SLICE_ONLY)
         # Shown in 3D only; holding its line keeps the rows below still.
         policy = self.slice_note.sizePolicy()
@@ -163,6 +179,10 @@ class SpaceSwitcher(QWidget):
         self.mirror = QCheckBox("Mirror left and right")
         self.mirror.setToolTip(MIRROR_TIP)
         self.mirror.toggled.connect(self._on_mirror)
+
+        #: Spin, tilt and turn; they carry across a switch, as the alignment does.
+        self.rotation = RotationGroup()
+        self.rotation.changed.connect(self._on_rotation)
 
         self.legend = QLabel(ARROWS)
         self.legend.setWordWrap(True)
@@ -176,6 +196,7 @@ class SpaceSwitcher(QWidget):
         show.addWidget(self.home)
         sections = QVBoxLayout()
         sections.addWidget(self.slice)
+        sections.addWidget(self.align)
         sections.addWidget(self.slice_note)
         form = QFormLayout(self)
         form.setContentsMargins(8, 6, 8, 6)
@@ -185,6 +206,7 @@ class SpaceSwitcher(QWidget):
         form.addRow("Show", show)
         form.addRow("Sections", sections)
         form.addRow("Mirror", self.mirror)
+        form.addRow(self.rotation)
         form.addRow(self.legend)
         form.addRow(self.status)
 
@@ -228,13 +250,15 @@ class SpaceSwitcher(QWidget):
         try:
             self.slice.clear()
             for choice in choices:
-                self.slice.addItem(section_label(choice), choice.axis)
+                self.slice.addItem(section_label(choice, self.align.isChecked()),
+                                   choice.axis)
             wanted = next((c.axis for c in choices if keep and c.anatomy == keep),
                           self.session.slice_axis)
             self.slice.setCurrentIndex(max(0, self.slice.findData(wanted)))
         finally:
             self.slice.blockSignals(False)
         self._anatomy = {c.axis: c.anatomy for c in choices}
+        self._choices = choices
         self.session.slice_axis = int(self.slice.currentData())
 
     def _on_slice(self, _index: int) -> None:
@@ -244,11 +268,31 @@ class SpaceSwitcher(QWidget):
         with contextlib.suppress(Exception):
             self.session.set_slice_axis(int(axis))
 
+    def _on_align(self, on: bool) -> None:
+        """Cut along the anatomy or the grid; the menu says which."""
+        for i, choice in enumerate(self._choices):
+            self.slice.setItemText(i, section_label(choice, on))
+        if self._busy:
+            return
+        try:
+            self.session.set_aligned(on)
+        except Exception as exc:                      # noqa: BLE001
+            _report("could not align the sections", exc)
+
+    def _on_rotation(self, spin: float, tilt: float, turn: float) -> None:
+        if self._busy:
+            return
+        try:
+            self.session.set_rotation(spin, tilt, turn)
+        except Exception as exc:                      # noqa: BLE001
+            _report("could not turn the view", exc)
+
     def _on_mode(self, event=None) -> None:
         three_d = self.viewer.dims.ndisplay == 3
         self.three_d.setChecked(three_d)
         self.slice_view.setChecked(not three_d)
         self.slice.setEnabled(not three_d)
+        self.align.setEnabled(not three_d)
         self.slice_note.setVisible(three_d)
         self.legend.setVisible(three_d)
 
@@ -298,7 +342,8 @@ class SpaceSwitcher(QWidget):
 
         A failed build is undone and the open scene was never touched, so the
         user gets back exactly what they had: every tab's checked rows,
-        labels, fills, filter and driver line, the open tab, the mirror.
+        labels, fills, filter and driver line, the open tab, the mirror, the
+        angles and the alignment.
         What the build did move belongs to the viewer -- the slice axis and
         plane, the camera, the selected layer, the title, the axis triads
         and the home button -- and is put back from what was captured before
@@ -354,6 +399,25 @@ class SpaceSwitcher(QWidget):
             # it failed, which is worth saying but not undoing.
             _report(f"opened {want} but could not fit it", exc)
             self.status.setText(UNFITTED.format(title=title))
+        self._carry_turn(new, title)
+
+    def _carry_turn(self, new, title: str) -> None:
+        """Turn the new scene as the controls say, once it is framed.
+
+        Unlike the mirror, the angles and the alignment carry across: they
+        mean the same on screen in every brain, and a switch keeps showing
+        the new brain the way the old one was shown. The alignment first,
+        since the angles turn from the base view it sets.
+        """
+        aligned, angles = self.align.isChecked(), self.rotation.angles()
+        if not aligned and not any(angles):
+            return
+        try:
+            new.set_aligned(aligned)
+            new.set_rotation(*angles)
+        except Exception as exc:                      # noqa: BLE001
+            _report(f"opened {title} but could not turn it", exc)
+            self.status.setText(UNTURNED.format(title=title))
 
 
 def _report(what: str, exc: BaseException) -> None:
