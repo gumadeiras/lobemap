@@ -3,6 +3,10 @@
 Brain, 3D or Slice, Home view, the sections a slice steps through and their
 alignment, the mirror and the rotation: the controls that belong to the
 scene rather than to one atlas, whose controls are the compartment panel's.
+Every control is in view in both modes; one that applies to one mode stays
+visible in the other, disabled, and says why. The mirror stands alone, with
+no row label to repeat its word, and is worded apart from a flip of the
+picture: it mirrors the brain, where a flip would turn the picture over.
 
 Picking another brain rebuilds the scene in place rather than relaunching:
 the process, the Qt window and the GPU context survive, so a switch costs
@@ -38,7 +42,7 @@ from qtpy.QtWidgets import (
 )
 
 from .request import MissingAssets, loadable_spaces
-from .rotation_group import RotationGroup
+from .rotation_rows import RotationRows
 from .slicing import AXIS_LETTERS, slice_axes
 from .view import capture_view, restore_view
 
@@ -56,6 +60,7 @@ ALIGN_TIP = (
     "Cut the sections along the brain's own frontal, horizontal and sagittal "
     "planes, not along the image's grid. Slice view only."
 )
+MIRROR = "Mirror the brain left to right"
 MIRROR_TIP = (
     "Show the brain as its mirror image, to compare a left lobe with a right "
     "one. Display only; the data do not change. The corner arrows follow. "
@@ -124,9 +129,6 @@ class SpaceSwitcher(QWidget):
     Only brains that actually have something to show are listed. A space
     with no ingested assets raises from `build_scene`, and offering a choice
     that cannot be honoured is worse than not offering it.
-
-    A control that applies to one mode stays visible in the other, disabled,
-    and says why.
     """
 
     loadable_spaces = staticmethod(loadable_spaces)
@@ -171,21 +173,26 @@ class SpaceSwitcher(QWidget):
         self.align.toggled.connect(self._on_align)
         self.slice_note = QLabel(SLICE_ONLY)
         # Shown in 3D only; holding its line keeps the rows below still.
-        policy = self.slice_note.sizePolicy()
-        policy.setRetainSizeWhenHidden(True)
-        self.slice_note.setSizePolicy(policy)
+        self._hold_place(self.slice_note)
         self._fill_slices()
 
-        self.mirror = QCheckBox("Mirror left and right")
+        self.mirror = QCheckBox(MIRROR)
         self.mirror.setToolTip(MIRROR_TIP)
         self.mirror.toggled.connect(self._on_mirror)
+        #: How the picture is shown: the anatomical mirror, and the place a
+        #: screen flip goes under it.
+        self.picture = QVBoxLayout()
+        self.picture.addWidget(self.mirror)
 
-        #: Spin, tilt and turn; they carry across a switch, as the alignment does.
-        self.rotation = RotationGroup()
+        #: The angles about the screen's axes; they carry across a switch,
+        #: as the alignment does.
+        self.rotation = RotationRows()
         self.rotation.changed.connect(self._on_rotation)
 
         self.legend = QLabel(ARROWS)
         self.legend.setWordWrap(True)
+        # Shown in 3D only, holding its place in 2D, so nothing below moves.
+        self._hold_place(self.legend)
         self.status = QLabel("")
         self.status.setWordWrap(True)
 
@@ -205,7 +212,7 @@ class SpaceSwitcher(QWidget):
         form.addRow("Brain", self.combo)
         form.addRow("Show", show)
         form.addRow("Sections", sections)
-        form.addRow("Mirror", self.mirror)
+        form.addRow(self.picture)
         form.addRow(self.rotation)
         form.addRow(self.legend)
         form.addRow(self.status)
@@ -214,6 +221,13 @@ class SpaceSwitcher(QWidget):
         viewer.dims.events.ndisplay.connect(self._on_mode)
         viewer.dims.events.order.connect(self._on_order)
         self._on_mode()
+
+    @staticmethod
+    def _hold_place(widget: QWidget) -> None:
+        """Keep a widget's room in the layout while it is hidden."""
+        policy = widget.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        widget.setSizePolicy(policy)
 
     def _mode_button(self, text: str, tip: str, ndisplay: int) -> QPushButton:
         button = QPushButton(text)

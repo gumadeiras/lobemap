@@ -30,9 +30,9 @@ def _home(sess) -> tuple[np.ndarray, np.ndarray]:
 
 def _set(sw, spin=None, tilt=None, turn=None) -> None:
     """Enter angles in the boxes, as a user does: one value at a time."""
-    for box, value in zip(sw.rotation.boxes, (spin, tilt, turn), strict=True):
+    for angle, value in (("spin", spin), ("tilt", tilt), ("turn", turn)):
         if value is not None:
-            box.setValue(value)
+            sw.rotation.box[angle].setValue(value)
             pump()
 
 
@@ -78,30 +78,45 @@ def _through_the_atlas(viewer, sess) -> None:
     th.settle_canvas(viewer)
 
 
-def test_the_group_opens_folded_and_its_header_says_the_angles(monkeypatch):
+def test_the_rows_are_in_view_in_both_modes_and_named_by_the_screen(monkeypatch):
+    """No click opens them: about the line of sight, the vertical and the
+    horizontal axis, 0.1's Z/slice, Y/vertical and X/horizontal, in its order."""
+    from qtpy.QtCore import Qt
+
     with launched(monkeypatch, "view", "GRABE") as (code, viewer):
         assert code == 0
-        group = switcher(viewer).rotation
-        assert not group.body.isVisibleTo(group)
-        assert group.header.text() == "Rotation  0°, 0°, 0°"
-        group.header.click()
-        assert group.body.isVisibleTo(group)
-        labels = ["Spin (in the screen plane)", "Tilt (top toward you)",
-                  "Turn (about the vertical)"]
-        for box, label in zip(group.boxes, labels, strict=True):
+        window = viewer.window._qt_window
+        window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        window.resize(1440, 900)
+        window.show()
+        pump(300)
+        sw = switcher(viewer)
+        rows = sw.rotation
+        assert rows.heading.text() == "Rotate around"
+        labels = [rows.rows.labelForField(rows.box[a]).text()
+                  for a in ("spin", "turn", "tilt")]
+        assert labels == ["Line of sight", "Vertical axis", "Horizontal axis"]
+        for ndisplay in (3, 2):
+            viewer.dims.ndisplay = ndisplay
+            pump()
+            shown = [rows.heading, rows.reset, *rows.box.values()]
+            assert all(w.isVisible() and w.isEnabled() for w in shown), ndisplay
+            # Laid out top to bottom in that order, inside the dock.
+            ys = [rows.box[a].mapTo(sw, rows.box[a].rect().topLeft()).y()
+                  for a in ("spin", "turn", "tilt")]
+            assert ys == sorted(ys) and ys[-1] + 20 < sw.height(), ys
+        for box in rows.box.values():
             assert (box.minimum(), box.maximum()) == (-180.0, 180.0)
             assert box.wrapping() and box.singleStep() == 1.0
             assert box.decimals() == 1 and box.suffix() == "°"
             assert "Positive" in box.toolTip()
-            assert group.body.layout().labelForField(box).text() == label
+        assert "counterclockwise" in rows.box["spin"].toolTip()
+        assert "top toward you" in rows.box["tilt"].toolTip()
+        assert "to your right" in rows.box["turn"].toolTip()
         # Stepping past 180 wraps to -180, the same angle.
-        group.boxes[0].setValue(180.0)
-        group.boxes[0].stepBy(1)
-        assert group.boxes[0].value() == -180.0
-        group.header.click()
-        assert not group.body.isVisibleTo(group)
-        # Folded, the header still says the view is turned.
-        assert group.header.text() == "Rotation  -180°, 0°, 0°"
+        rows.box["spin"].setValue(180.0)
+        rows.box["spin"].stepBy(1)
+        assert rows.box["spin"].value() == -180.0
         assert session(viewer).rotation == (-180.0, 0.0, 0.0)
 
 
@@ -117,7 +132,6 @@ def test_the_boxes_turn_the_3d_camera_from_home_and_a_drag_leaves_them(monkeypat
         _faces(viewer, sess, (30, 0, 0))
         _set(sw, tilt=-20, turn=45)
         _faces(viewer, sess, (30, -20, 45))
-        assert sw.rotation.header.text() == "Rotation  30°, -20°, 45°"
         # The camera turns; no layer moves.
         assert all(np.array_equal(p, layer.affine.affine_matrix)
                    for p, layer in zip(placed, viewer.layers, strict=True))
@@ -130,7 +144,7 @@ def test_the_boxes_turn_the_3d_camera_from_home_and_a_drag_leaves_them(monkeypat
         sw.home.click()
         pump()
         _faces(viewer, sess, (30, -20, 45))
-        sw.rotation.boxes[0].stepBy(1)
+        sw.rotation.box["spin"].stepBy(1)
         pump()
         _faces(viewer, sess, (31, -20, 45))
 

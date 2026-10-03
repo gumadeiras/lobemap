@@ -323,7 +323,9 @@ def test_the_view_dock_says_everything_in_words(monkeypatch):
             "the image's own grid, which is at the angle shown from the brain's true "
             "plane. Slice view only.")
         assert sw.align.text() == "Align to the brain's true planes"
-        assert sw.mirror.text() == "Mirror left and right"
+        assert sw.mirror.text() == "Mirror the brain left to right"
+        # A standalone checkbox: no row label repeats its word.
+        assert sw.layout().labelForField(sw.picture) is None
         assert sw.mirror.toolTip() == (
             "Show the brain as its mirror image, to compare a left lobe with a right "
             "one. Display only; the data do not change. The corner arrows follow. "
