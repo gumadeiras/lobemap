@@ -15,6 +15,7 @@ import pytest
 from viewer_harness import (
     assert_renders_loops,
     assert_rows_match_drawing,
+    clear_all,
     contour_loops,
     drawn,
     hover,
@@ -26,12 +27,6 @@ from viewer_harness import (
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
-
-
-def _buttons(tab):
-    from qtpy.QtWidgets import QPushButton
-
-    return {b.text(): b for b in tab.findChildren(QPushButton)}
 
 
 def _tick(tab, table_row: int, column: int, on: bool) -> None:
@@ -81,7 +76,7 @@ def test_a_rows_boxes_act_on_every_side_in_3d_and_on_the_slice(monkeypatch, spac
         sess = session(viewer)
         tab = sess.panel.tab(part)
         contour, meshset = sess.contours[part], tab.surface.meshset
-        _buttons(tab)["None"].click()
+        clear_all(tab)
         r = _find(tab, name)
         sides = set(tab.row_at(r).indices)
         assert sorted(meshset.names[i] for i in sides) == sorted(

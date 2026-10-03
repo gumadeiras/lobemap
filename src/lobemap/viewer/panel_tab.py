@@ -23,7 +23,6 @@ from qtpy.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QFormLayout,
-    QGridLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -36,6 +35,7 @@ from qtpy.QtWidgets import (
 )
 
 from . import rows as R
+from .check_header import CheckHeader
 
 #: The columns, by position. The first four mean the same in both kinds of
 #: tab; a glomerulus tab adds the receptor. A row is a compartment with all
@@ -44,11 +44,10 @@ VISIBLE_COL, NAME_COL, LABEL_COL, FILL_COL, RECEPTOR_COL = range(5)
 GLOMERULUS_COLUMNS = ("Show", "Glomerulus", "Label", "Fill", R.RECEPTOR)
 NEUROPIL_COLUMNS = ("Show", "Neuropil", "Label", "Fill")
 
-#: The checkbox columns, a fixed width each: they hold nothing to size to.
+#: The checkbox columns. Each has a checkbox in its header for the whole
+#: column (`CheckHeader`), and is as wide as that checkbox and its name.
 CHECK_COLUMNS = (VISIBLE_COL, LABEL_COL, FILL_COL)
-CHECK_WIDTH = 38
 
-SHOW_TIP = "Draw it in 3D and on the slice"
 LABEL_TIP = "Write the name on the slice (Slice view only)"
 FILL_TIP = "Fill the outline on the slice (Slice view only)"
 
@@ -62,76 +61,63 @@ LINE_PROMPT = "Driver line: none"
 LINE_TIP = ("Show the glomeruli that a driver line labels, "
             "from lobemap's reference table")
 
-ON_SLICE = "On slice"
-#: The same row in 3D, where it draws nothing: when it works, in the View
-#: dock's words. One line, as in 2D, so changing mode moves nothing below.
-ON_SLICE_3D = "Slice view only"
-
 VFB_TEXT = "Open in Virtual Fly Brain"
 VFB_NONE = "Select a glomerulus with a Virtual Fly Brain term to open it"
 
 #: The panel's spacing grid, in pixels. The parts of one group -- a search
-#: and its driver lines, a row of buttons, a value and the next -- sit `GAP`
-#: apart; groups sit `GROUP_GAP` apart, a tab's contents `MARGIN` inside its
-#: frame, and a label `2 * GAP` before what it labels.
+#: and its driver lines, a table and its count, a value and the next -- sit
+#: `GAP` apart; groups sit `GROUP_GAP` apart, a tab's contents `MARGIN`
+#: inside its frame, and a label `2 * GAP` before what it labels.
 GAP, GROUP_GAP, MARGIN = 4, 12, 8
 #: What labels the source menu at the top of each tab.
 SOURCE = "Source"
-SHOW = "Show"
 
 
 #: Every label of the panel's label column, in either kind of tab.
-COLUMN_LABELS = (SOURCE, SHOW, ON_SLICE, ON_SLICE_3D,
-                 *R.GLOMERULUS_DETAILS, *R.NEUROPIL_DETAILS)
+COLUMN_LABELS = (SOURCE, *R.GLOMERULUS_DETAILS, *R.NEUROPIL_DETAILS)
 
 
 class ColumnLabel(QLabel):
     """A label of the panel's label column, its text against the right.
 
     As wide as the widest of `COLUMN_LABELS` in the font and padding it is
-    drawn with, so every label of the column ends at one edge, and the menu,
-    the buttons and the values beside them start at one. Measured when laid
-    out, once napari's style has set the font, not when built, before it
-    has. `gap` is room kept after the text, where the layout beside it
-    leaves too little of its own.
+    drawn with, so every label of the column ends at one edge, and the menu
+    and the values beside them start at one. Measured when laid out, once
+    napari's style has set the font, not when built, before it has. No
+    indent: napari's style gives a label a frame, and a framed label with
+    none set keeps half an x clear of its right edge, which pushed the
+    widest label's first letter out of its box.
     """
 
-    def __init__(self, text: str = "", gap: int = 0) -> None:
+    def __init__(self, text: str = "") -> None:
         super().__init__(text)
         self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.setIndent(gap)
+        self.setIndent(0)
 
     def sizeHint(self) -> QSize:
         metrics, margins = self.fontMetrics(), self.contentsMargins()
         widest = max(metrics.horizontalAdvance(text) for text in COLUMN_LABELS)
-        width = widest + margins.left() + margins.right() + max(self.indent(), 0)
-        return QSize(width, super().sizeHint().height())
+        return QSize(widest + margins.left() + margins.right(), super().sizeHint().height())
 
     def minimumSizeHint(self) -> QSize:
         return self.sizeHint()
 
 
-def _words(is_atlas: bool) -> tuple[str, str]:
-    """What one row is, and what several are, in this kind of tab."""
-    return ("glomerulus", "glomeruli") if is_atlas else ("neuropil", "neuropils")
+def _word(is_atlas: bool) -> str:
+    """What one row is in this kind of tab."""
+    return "glomerulus" if is_atlas else "neuropil"
 
 
-def _bulk_buttons(is_atlas: bool) -> tuple[tuple[str, str], tuple[str, str]]:
-    """(text, tooltip) of the Show row, then of the On slice row."""
-    one, many = _words(is_atlas)
-    show = (
-        ("All", f"Show every {one} in this table"),
-        ("None", f"Hide every {one} in this table"),
-        ("Matches", f"Show only the {many} that match the search"),
-        ("Invert", f"Show the hidden {many} and hide the shown ones"),
-    )
-    on_slice = (
-        ("Names", f"Write the name of every shown {one} on the slice"),
-        ("No names", f"Remove the name of every {one} from the slice"),
-        ("Fill", f"Fill the outline of every shown {one} on the slice"),
-        ("No fill", f"Draw the outline of every {one} on the slice without fill"),
-    )
-    return show, on_slice
+def toggle_tips(is_atlas: bool) -> dict[int, str]:
+    """What each header checkbox does, by column, in this kind of tab."""
+    one = _word(is_atlas)
+    return {
+        VISIBLE_COL: f"Show or hide every listed {one}",
+        LABEL_COL: (f"Write or clear the name of every listed {one} on the slice. "
+                    "Slice view only."),
+        FILL_COL: (f"Fill or empty the outline of every listed {one} on the slice. "
+                   "Slice view only."),
+    }
 
 
 class _Cell(QTableWidgetItem):
@@ -198,6 +184,11 @@ class AtlasTab(QWidget):
     Label and Fill boxes act on every side, and a box is half ticked when
     only some sides are: never by the panel's own controls, which act on
     whole rows, but by a selection set in code (`select`).
+
+    Each checkbox column's header has a checkbox for the rows listed, those
+    the search keeps: ticked when every one is ticked, half when some are.
+    A click ticks every listed row, or clears them all when all are ticked
+    (`_toggle`).
     """
 
     def __init__(self, surface, compartments=None, contour=None,
@@ -223,10 +214,10 @@ class AtlasTab(QWidget):
         self.detail_fields = R.GLOMERULUS_DETAILS if is_atlas else R.NEUROPIL_DETAILS
         self._updating = False
         self._three_d: bool | None = None
-        one, _many = _words(is_atlas)
+        one = _word(is_atlas)
 
-        # Four groups, top to bottom: finding rows, acting on them, the
-        # table with its count, and the selected row's details.
+        # Three groups, top to bottom: finding rows, the table with its
+        # count, and the selected row's details.
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(GAP)
@@ -251,8 +242,6 @@ class AtlasTab(QWidget):
         # row fills them, and the table can select one as it is built.
         details = self._make_details(one)
         layout.addSpacing(GROUP_GAP - GAP)
-        layout.addLayout(self._make_buttons(is_atlas))
-        layout.addSpacing(GROUP_GAP - GAP)
         layout.addWidget(self._make_table(), stretch=1)
         self.count = QLabel()
         layout.addWidget(self.count)
@@ -264,6 +253,7 @@ class AtlasTab(QWidget):
         self.lines.setVisible(is_atlas and self.lines.count() > 1)
         self.vfb.setVisible(is_atlas)
         self._on_row_selected()
+        self._sync_header()
 
         # The table follows the eye in napari's layer list, and the count
         # follows whichever layer the mode draws.
@@ -275,71 +265,32 @@ class AtlasTab(QWidget):
 
     # -- building --------------------------------------------------------
 
-    def _make_buttons(self, is_atlas: bool) -> QGridLayout:
-        """The Show row above the On slice row, each button in a column.
-
-        Each button as wide as the wider of its column needs, and no wider;
-        the labels in the label column, their text ending `2 * GAP` before
-        the buttons, as a label ends before its menu or value.
-        """
-        grid = QGridLayout()
-        grid.setSpacing(GAP)
-        show, on_slice = _bulk_buttons(is_atlas)
-        slots = {
-            "All": self._all, "None": self._none,
-            "Matches": self._filtered_only, "Invert": self._invert,
-            "Names": self._labels_for_shown, "No names": self._no_labels,
-            "Fill": self._fill_for_shown, "No fill": self._no_fill,
-        }
-        # A label ends 2 * GAP before what it labels: the grid's own gap
-        # between columns, and as much again kept after the text.
-        self.on_slice = ColumnLabel(ON_SLICE, gap=GAP)
-        self._two_d_buttons: list[QPushButton] = []
-        for r, (title, buttons) in enumerate(((ColumnLabel(SHOW, gap=GAP), show),
-                                              (self.on_slice, on_slice))):
-            grid.addWidget(title, r, 0)
-            for c, (text, tip) in enumerate(buttons, start=1):
-                button = QPushButton(text)
-                button.setToolTip(tip)
-                button.clicked.connect(slots[text])
-                # Its words and a gap each side, at least. The table is
-                # built before napari's style reaches it, when a macOS push
-                # button asks for 90 px; a dock never gives back a minimum
-                # width it once had, and the column then could not be 440.
-                button.setMinimumWidth(
-                    button.fontMetrics().horizontalAdvance(text) + 2 * GAP)
-                grid.addWidget(button, r, c)
-                if r == 1:
-                    self._two_d_buttons.append(button)
-        # The rest of the width is left empty, after the buttons.
-        grid.setColumnStretch(5, 1)
-        return grid
-
     def _make_table(self) -> QTableWidget:
         self.table = table = QTableWidget(len(self.rows), len(self.columns))
+        #: The header, with a checkbox for each checkbox column.
+        self.header = CheckHeader(CHECK_COLUMNS, table)
+        table.setHorizontalHeader(self.header)
         table.setHorizontalHeaderLabels(list(self.columns))
-        for col, tip in ((VISIBLE_COL, SHOW_TIP), (LABEL_COL, LABEL_TIP),
-                         (FILL_COL, FILL_TIP)):
+        for col, tip in toggle_tips(self.is_atlas).items():
             table.horizontalHeaderItem(col).setToolTip(tip)
+        self.header.toggled.connect(self._toggle)
         table.verticalHeader().setVisible(False)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setWordWrap(False)
         table.setTextElideMode(Qt.ElideRight)
 
-        # Fits the dock without scrolling sideways: fixed checkbox columns,
-        # the name as wide as it needs, and the last text column takes what
-        # is left, shortening a long receptor list rather than widening the
-        # table. The tooltip has it in full.
-        header = table.horizontalHeader()
+        # Fits the dock without scrolling sideways: the checkbox columns and
+        # the name as wide as their contents, and the last text column takes
+        # what is left, shortening a long receptor list rather than widening
+        # the table. The tooltip has it in full.
+        header = self.header
         header.setMinimumSectionSize(24)
         header.setStretchLastSection(False)
         header.setSectionsClickable(True)
-        for col in CHECK_COLUMNS:
-            header.setSectionResizeMode(col, QHeaderView.Fixed)
-            table.setColumnWidth(col, CHECK_WIDTH)
+        for col in (*CHECK_COLUMNS, NAME_COL):
+            header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
         stretch = RECEPTOR_COL if self.is_atlas else NAME_COL
-        header.setSectionResizeMode(NAME_COL, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(stretch, QHeaderView.Stretch)
 
         # Sorting must be off while the rows are built, or Qt reorders them
@@ -467,8 +418,8 @@ class AtlasTab(QWidget):
         """Show exactly these compartments, in whichever layer the mode draws.
 
         The surface draws its own selection in the mesh or, paired, in its
-        contours (`AtlasSurface.sync`), so a bulk button and a single row's
-        checkbox reach the same code and cannot disagree about the mode.
+        contours (`AtlasSurface.sync`), so a header checkbox and a single
+        row's checkbox reach the same code and cannot disagree about the mode.
         """
         self.surface.set_selection(selection)
         self._set_checks(VISIBLE_COL, self.surface.selection)
@@ -506,14 +457,10 @@ class AtlasTab(QWidget):
             self.count.setText(f"{shown} of {len(self.rows)} shown")
 
     def set_mode(self, three_d: bool) -> None:
-        """Disable the slice-only controls in 3D, where they draw nothing."""
+        """Disable the slice-only columns in 3D, where they draw nothing."""
         if three_d == self._three_d:
             return
         self._three_d = three_d
-        for button in self._two_d_buttons:
-            button.setEnabled(not three_d)
-        self.on_slice.setEnabled(not three_d)
-        self.on_slice.setText(ON_SLICE_3D if three_d else ON_SLICE)
         self._updating = True
         try:
             for row in range(self.table.rowCount()):
@@ -524,6 +471,7 @@ class AtlasTab(QWidget):
                                   else flags | Qt.ItemIsEnabled)
         finally:
             self._updating = False
+        self._sync_header()
         self._update_count()
 
     # -- driver lines, details and VFB -----------------------------------
@@ -583,20 +531,57 @@ class AtlasTab(QWidget):
         if row is None:
             return
         on = item.checkState() == Qt.Checked
-        if item.column() == VISIBLE_COL:
-            held = set(self.surface.selection)
-        elif self.contour is None:
-            return
+        held = self._held(item.column())
+        self._apply(item.column(), held | set(row.indices) if on
+                    else held - set(row.indices))
+
+    def _held(self, column: int) -> set[int]:
+        """The compartments `column` has on: shown, named or filled."""
+        if column == VISIBLE_COL:
+            return set(self.surface.selection)
+        if self.contour is None:
+            return {i for r in range(self.table.rowCount())
+                    if self.table.item(r, column).checkState() == Qt.Checked
+                    for i in self.row_at(r).indices}
+        return set(self.contour.labels if column == LABEL_COL else self.contour.filled)
+
+    def _apply(self, column: int, indices) -> None:
+        """Have exactly these compartments shown, named or filled."""
+        if column == VISIBLE_COL:
+            self._push(set(indices))
+        elif column == LABEL_COL:
+            self._set_labels(indices)
         else:
-            held = set(self.contour.labels if item.column() == LABEL_COL
-                       else self.contour.filled)
-        held = held | set(row.indices) if on else held - set(row.indices)
-        if item.column() == VISIBLE_COL:
-            self._push(held)
-        elif item.column() == LABEL_COL:
-            self._set_labels(held)
-        else:
-            self._set_fills(held)
+            self._set_fills(indices)
+
+    def listed(self) -> list[R.Row]:
+        """The rows the search keeps, in the table's order."""
+        return [self.row_at(r) for r in range(self.table.rowCount())
+                if not self.table.isRowHidden(r)]
+
+    def _toggle(self, column: int) -> None:
+        """Tick `column` on every listed row, every side of each; or clear
+        them all if all are ticked. The rows the search hides keep theirs."""
+        listed = {i for row in self.listed() for i in row.indices}
+        held = self._held(column)
+        clear = self.header.state(column) == Qt.Checked
+        self._apply(column, held - listed if clear else held | listed)
+
+    def _sync_header(self) -> None:
+        """Each header checkbox as its listed rows have theirs. Label and
+        Fill cannot act in 3D, where they draw nothing, nor any of them
+        while the search lists nothing."""
+        rows = [r for r in range(self.table.rowCount()) if not self.table.isRowHidden(r)]
+        for column in CHECK_COLUMNS:
+            states = {self.table.item(r, column).checkState() for r in rows}
+            if states == {Qt.Checked}:
+                state = Qt.Checked
+            elif states - {Qt.Unchecked}:
+                state = Qt.PartiallyChecked
+            else:
+                state = Qt.Unchecked
+            usable = bool(rows) and (column == VISIBLE_COL or not self._three_d)
+            self.header.set_state(column, state, usable)
 
     def _set_checks(self, column: int, indices) -> set[int]:
         """Tick exactly the rows of these compartments in `column`, half
@@ -613,6 +598,7 @@ class AtlasTab(QWidget):
                         item.setCheckState(state)
         finally:
             self._updating = False
+        self._sync_header()
         return wanted
 
     def _set_labels(self, indices) -> None:
@@ -625,20 +611,6 @@ class AtlasTab(QWidget):
         if self.contour is not None:
             self.contour.set_fills(wanted)
 
-    def _labels_for_shown(self) -> None:
-        """Name whatever is currently shown -- the useful bulk action."""
-        self._set_labels(set(self.surface.selection))
-
-    def _no_labels(self) -> None:
-        self._set_labels(set())
-
-    def _fill_for_shown(self) -> None:
-        """Fill whatever is currently shown, matching `Names`."""
-        self._set_fills(set(self.surface.selection))
-
-    def _no_fill(self) -> None:
-        self._set_fills(set())
-
     def _set_indices(self, indices) -> None:
         """Show exactly these COMPARTMENTS, whatever order the rows are in."""
         n = self.surface.meshset.n_compartments
@@ -648,27 +620,13 @@ class AtlasTab(QWidget):
         """Show exactly these compartments, by mesh index, and tick their rows."""
         self._set_indices(indices)
 
-    def _all(self) -> None:
-        self._set_indices(self._row_by_index)
-
-    def _none(self) -> None:
-        self._set_indices(set())
-
-    def _filtered_only(self) -> None:
-        """Show every side of exactly the rows the search keeps."""
-        kept = (self.row_at(r) for r in range(self.table.rowCount())
-                if not self.table.isRowHidden(r))
-        self._set_indices({i for row in kept if row is not None for i in row.indices})
-
-    def _invert(self) -> None:
-        self._set_indices(set(self._row_by_index) - set(self.surface.selection))
-
     def _apply_filter(self, text: str) -> None:
         """Keep the rows the search matches, by `Row.matches` alone: the
         same fields in every tab of a kind, and nothing a column hides."""
         for r in range(self.table.rowCount()):
             row = self.row_at(r)
             self.table.setRowHidden(r, row is None or not row.matches(text))
+        self._sync_header()
 
     # -- picking ---------------------------------------------------------
 
@@ -693,7 +651,6 @@ class AtlasTab(QWidget):
 
 __all__ = [
     "CHECK_COLUMNS",
-    "CHECK_WIDTH",
     "COLUMN_LABELS",
     "FILL_COL",
     "GAP",
@@ -711,4 +668,5 @@ __all__ = [
     "AtlasTab",
     "ColumnLabel",
     "SteadyLabel",
+    "toggle_tips",
 ]

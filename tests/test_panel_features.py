@@ -10,6 +10,7 @@ from viewer_harness import (
     REGISTRY,
     assert_rows_match_drawing,
     checked,
+    clear_all,
     click,
     drawn,
     launched,
@@ -136,7 +137,7 @@ def test_clicking_a_glomerulus_points_the_vfb_button_at_it(monkeypatch):
     with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
         tab = session(viewer).panel.tabs["benton2025"]
         index = tab.surface.meshset.names.index("DA1")
-        _buttons(tab)["None"].click()
+        clear_all(tab)
         tab.table.item(tab.table_row(index), VISIBLE_COL).setCheckState(Qt.Checked)
         pump(300)
         assert click(viewer, tab.surface.meshset.centroid(index)) == "DA1 (left) — Benton 2025"

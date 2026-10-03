@@ -27,6 +27,7 @@ from viewer_harness import (
     session,
     switch_to,
     switcher,
+    tick_all,
     ticked,
 )
 
@@ -40,12 +41,6 @@ SECONDARY = "schlegel2021_s11"
 NEUROPIL = "neuprint_hemibrain_neuropil"
 LINE = "Orco-GAL4 & GH146-GAL4"
 TARGET = "GRABE"
-
-
-def _buttons(tab):
-    from qtpy.QtWidgets import QPushButton
-
-    return {b.text(): b for b in tab.findChildren(QPushButton)}
 
 
 def _boxes(tab, column) -> set[int]:
@@ -120,7 +115,7 @@ def _user_scene(viewer) -> None:
         _tick(primary, VISIBLE_COL, index, on=False)
     if two_d:                       # labels and fills are 2D controls
         cut = sorted(planes_cut(primary.surface))
-        _buttons(primary)["Names"].click()
+        tick_all(primary, LABEL_COL)
         _tick(primary, LABEL_COL, cut[0], on=False)
         for index in cut[1:4]:
             _tick(primary, FILL_COL, index)
@@ -130,12 +125,12 @@ def _user_scene(viewer) -> None:
     _tick(neuropil, VISIBLE_COL, names.index(next(n for n in names if n.startswith("AL"))))
 
     secondary = panel.open(SECONDARY)
-    _buttons(secondary)["All"].click()
+    tick_all(secondary)
     menu = secondary.lines
     menu.setCurrentIndex(next(i for i in range(menu.count())
                               if menu.itemText(i).startswith(LINE + " (")))
     if two_d:
-        _buttons(secondary)["Fill"].click()
+        tick_all(secondary, FILL_COL)
     secondary.filter.setText("DA")
 
     camera = viewer.scene.camera

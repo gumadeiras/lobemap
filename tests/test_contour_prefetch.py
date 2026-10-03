@@ -22,6 +22,7 @@ from viewer_harness import (
     session,
     switch_to,
     switcher,
+    tick_all,
 )
 
 from lobemap.viewer import prefetch
@@ -443,8 +444,6 @@ def test_hiding_an_atlas_stops_its_prefetch_and_showing_it_cuts_the_rest(
 
 @pytest.mark.requires_data
 def test_an_atlas_that_shows_nothing_gets_nothing_cut(monkeypatch):
-    from qtpy.QtWidgets import QPushButton
-
     with launched(monkeypatch, "view", "JRCFIB2018F", "--ndisplay", "2") as (code, viewer):
         sess = session(viewer)
         name = "schlegel2021_s11"
@@ -456,7 +455,7 @@ def test_an_atlas_that_shows_nothing_gets_nothing_cut(monkeypatch):
         assert not overlay.layer.visible
         assert overlay._plan is None and _cached(overlay) == (0, 0)
 
-        next(b for b in tab.findChildren(QPushButton) if b.text() == "All").click()
+        tick_all(tab)
         pump()
         assert drawn(tab.surface, overlay)
         _assert_all_cut_ahead(viewer, overlay)

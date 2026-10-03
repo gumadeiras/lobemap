@@ -15,6 +15,7 @@ import pytest
 from viewer_harness import (
     SPACES,
     canvas_position,
+    clear_all,
     click,
     contour_loops,
     hover,
@@ -38,7 +39,6 @@ def _inside_contour(overlay, owner: int) -> np.ndarray:
 @pytest.mark.parametrize("space", SPACES)
 def test_hover_names_the_glomerulus_in_3d_and_2d(monkeypatch, space):
     from qtpy.QtCore import Qt
-    from qtpy.QtWidgets import QPushButton
 
     from lobemap.viewer.panel import VISIBLE_COL
 
@@ -51,7 +51,7 @@ def test_hover_names_the_glomerulus_in_3d_and_2d(monkeypatch, space):
         index = surface.meshset.n_compartments // 2
         name = surface.meshset.names[index]
         # Through the table: nothing, then one row ticked, every side of it.
-        next(b for b in tab.findChildren(QPushButton) if b.text() == "None").click()
+        clear_all(tab)
         tab.table.item(tab.table_row(index), VISIBLE_COL).setCheckState(Qt.Checked)
         pump(300)
         # The row's name and side, and whose it is, in words.

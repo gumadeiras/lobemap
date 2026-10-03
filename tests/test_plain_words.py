@@ -80,7 +80,7 @@ def test_no_string_in_any_brain_or_mode_reads_as_code(monkeypatch, allowed, regi
     assert any(item.text == "depth" for item in seen), "no oblique slider read"
     # The restored buttons, their popups and the new controls were read, in
     # every brain, in each mode they show in.
-    from lobemap.viewer import buttons, camera_rows
+    from lobemap.viewer import buttons, camera_rows, panel_tab
 
     shown_in: dict[str, set] = {}
     for item, where in seen.items():
@@ -96,8 +96,16 @@ def test_no_string_in_any_brain_or_mode_reads_as_code(monkeypatch, allowed, regi
         camera_rows.THREE_D_ONLY: ("2d_default",), camera_rows.ZOOM: both,
         camera_rows.PERSPECTIVE: both,
     }
+    # The header checkboxes' tooltips: a glomerulus table's in every brain
+    # as it opens, a neuropil table's once its tab is built.
+    expected.update(dict.fromkeys(panel_tab.toggle_tips(True).values(), both))
+    neuropils = dict.fromkeys(panel_tab.toggle_tips(False).values(), ("2d_all", "3d_all"))
     for text, states in expected.items():
         for space in SPACES:
+            for state in states:
+                assert (space, state) in shown_in.get(text, set()), (text, space, state)
+    for text, states in neuropils.items():
+        for space in SPACES[:-1]:                     # GRABE has no neuropils
             for state in states:
                 assert (space, state) in shown_in.get(text, set()), (text, space, state)
     bad = [(item.where, item.text, why, min(seen[item]))

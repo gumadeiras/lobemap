@@ -400,6 +400,43 @@ def checked(tab) -> set[int]:
     return ticked(tab)
 
 
+def click_header(tab, column: int) -> None:
+    """Click a column's header with the left button, as a user does."""
+    from qtpy.QtCore import QPoint, Qt
+    from qtpy.QtTest import QTest
+
+    header = tab.table.horizontalHeader()
+    x = header.sectionViewportPosition(column) + header.sectionSize(column) // 2
+    QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton,
+                     Qt.KeyboardModifier.NoModifier, QPoint(x, header.height() // 2))
+    pump()
+
+
+def tick_all(tab, column=None) -> None:
+    """Click `column`'s header checkbox, Show by default, until it is ticked:
+    every listed row ticked."""
+    _click_until(tab, column, "Checked")
+
+
+def clear_all(tab, column=None) -> None:
+    """Click `column`'s header checkbox, Show by default, until it is clear."""
+    _click_until(tab, column, "Unchecked")
+
+
+def _click_until(tab, column, state: str) -> None:
+    from qtpy.QtCore import Qt
+
+    from lobemap.viewer.panel import VISIBLE_COL
+
+    column = VISIBLE_COL if column is None else column
+    want = getattr(Qt.CheckState, state)
+    for _click in range(2):
+        if tab.header.state(column) == want:
+            return
+        click_header(tab, column)
+    assert tab.header.state(column) == want, (column, tab.header.state(column))
+
+
 def every_index(tab) -> range:
     """Every compartment of a tab's mesh, every side of every row."""
     return range(tab.surface.meshset.n_compartments)

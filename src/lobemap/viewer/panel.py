@@ -39,7 +39,6 @@ from qtpy.QtWidgets import (
 from ..core import reference
 from .panel_tab import (
     CHECK_COLUMNS,
-    CHECK_WIDTH,
     FILL_COL,
     GAP,
     GLOMERULUS_COLUMNS,
@@ -425,7 +424,6 @@ class CompartmentPanel(QTabWidget):
 
 __all__ = [
     "CHECK_COLUMNS",
-    "CHECK_WIDTH",
     "FILL_COL",
     "GLOMERULI",
     "GLOMERULUS_COLUMNS",

@@ -11,7 +11,15 @@ from __future__ import annotations
 import shutil
 
 import pytest
-from viewer_harness import contour_loops, hover, launched, pump, rendered_labels, session
+from viewer_harness import (
+    clear_all,
+    contour_loops,
+    hover,
+    launched,
+    pump,
+    rendered_labels,
+    session,
+)
 
 pytestmark = pytest.mark.requires_data(
     "grabe2015_glomeruli", "grabe2015_labels", "grabe2015_stack")
@@ -39,7 +47,6 @@ def test_a_misspelled_name_is_refused(registry, registry_root, tmp_path):
 
 def test_the_viewer_shows_the_doubt_where_it_names_the_glomerulus(monkeypatch):
     from qtpy.QtCore import Qt
-    from qtpy.QtWidgets import QPushButton
 
     from lobemap.viewer.panel import LABEL_COL, NAME_COL, VISIBLE_COL
 
@@ -63,7 +70,7 @@ def test_the_viewer_shows_the_doubt_where_it_names_the_glomerulus(monkeypatch):
         assert tab.table.item(tab.table_row(da1), NAME_COL).text() == "DA1"
 
         # The slice label: the VP2 row alone, labeled, on a plane through it.
-        next(b for b in tab.findChildren(QPushButton) if b.text() == "None").click()
+        clear_all(tab)
         tab.table.item(tab.table_row(vp2), VISIBLE_COL).setCheckState(Qt.Checked)
         tab.table.item(tab.table_row(vp2), LABEL_COL).setCheckState(Qt.Checked)
         axis = int(viewer.dims.order[0])

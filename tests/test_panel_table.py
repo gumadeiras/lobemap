@@ -14,6 +14,7 @@ one, so a box ticked acts on each.
 from __future__ import annotations
 
 import pytest
+from viewer_harness import clear_all, tick_all
 
 pytest.importorskip("napari")
 
@@ -42,15 +43,6 @@ def _col(tab, name):
     from lobemap.viewer.panel import GLOMERULUS_COLUMNS
 
     return GLOMERULUS_COLUMNS.index(name)
-
-
-def _click(tab, text):
-    """Press one of the tab's buttons, the way a user does."""
-    from qtpy.QtWidgets import QPushButton
-
-    buttons = {b.text(): b for b in tab.findChildren(QPushButton)}
-    assert text in buttons, f"no {text!r} button in {sorted(buttons)}"
-    buttons[text].click()
 
 
 def _drawn(tab) -> set[int]:
@@ -134,18 +126,19 @@ def test_highlight_finds_the_row_for_an_index(tab):
 
 def test_show_none_then_all_round_trips(tab):
     n = tab.surface.meshset.n_compartments
-    _click(tab, "None")
+    clear_all(tab)
     assert tab.surface.selection == set()
-    assert _drawn(tab) == set(), "Show none left glomeruli on screen"
-    _click(tab, "All")
+    assert _drawn(tab) == set(), "clearing Show left glomeruli on screen"
+    tick_all(tab)
     assert tab.surface.selection == set(range(n))
-    assert _drawn(tab) == set(range(n)), "Show all did not draw them all"
+    assert _drawn(tab) == set(range(n)), "ticking Show did not draw them all"
 
 
-def test_filtered_only_selects_the_right_compartments(tab):
+def test_the_search_then_show_selects_the_right_compartments(tab):
     """The filter hides rows; the selection must be in index space."""
+    clear_all(tab)
     tab.filter.setText("DA1")
-    _click(tab, "Matches")
+    tick_all(tab)
     chosen = {tab.surface.meshset.names[i] for i in _drawn(tab)}
     assert chosen, "nothing matched DA1"
     assert all("da1" in n.lower() for n in chosen), chosen
@@ -263,20 +256,20 @@ def test_fill_and_label_still_work_on_a_neuropil_tab(fafb_tabs):
 
 
 def test_columns_are_sized_to_fit_the_dock(fafb_tabs):
-    """Checkboxes a fixed width, the name to its contents, and the
+    """The checkbox columns and the name to their contents, and the
     receptor takes what is left, shortened rather than scrolled."""
     from qtpy.QtWidgets import QHeaderView
 
-    from lobemap.viewer.panel import CHECK_WIDTH, FILL_COL, LABEL_COL, VISIBLE_COL
+    from lobemap.viewer.panel import CHECK_COLUMNS
 
-    assert 36 <= CHECK_WIDTH <= 40
     tab = fafb_tabs["benton2025"]
     header = tab.table.horizontalHeader()
     modes = [header.sectionResizeMode(c) for c in range(tab.table.columnCount())]
-    assert modes == [QHeaderView.Fixed, QHeaderView.ResizeToContents,
-                     QHeaderView.Fixed, QHeaderView.Fixed, QHeaderView.Stretch]
-    for col in (VISIBLE_COL, LABEL_COL, FILL_COL):
-        assert tab.table.columnWidth(col) == CHECK_WIDTH
+    assert modes == [QHeaderView.ResizeToContents] * 4 + [QHeaderView.Stretch]
+    for col in CHECK_COLUMNS:
+        # The header's checkbox and name: wider than a cell's checkbox.
+        assert tab.table.columnWidth(col) == header.sectionSizeFromContents(col).width()
+        assert tab.table.columnWidth(col) >= tab.table.sizeHintForColumn(col)
     # The full receptor list is in the tooltip, however short the cell.
     rec = _col(tab, "Receptor")
     cells = [tab.table.item(r, rec) for r in range(tab.table.rowCount())]
@@ -307,25 +300,26 @@ def _fill_alphas(contour) -> set[float]:
 
 def test_fill_all_works_on_a_neuropil_layer(session):
     """End to end, in 2D, where the contours actually draw."""
+    from lobemap.viewer.panel import FILL_COL
 
     viewer, sess = session
     tab = sess.panel.tabs["fafb_neuropil"]
     if tab.contour is None:
         pytest.skip("no contour overlay")
     viewer.dims.ndisplay = 2
-    _click(tab, "All")
+    tick_all(tab)
     assert _drawn(tab), "the slice cuts no neuropil"
 
-    _click(tab, "Fill")
+    tick_all(tab, FILL_COL)
     assert tab.contour.filled == set(tab.surface.selection)
     assert _fill_alphas(tab.contour) == {round(tab.contour.FILL_ALPHA, 4)}
 
-    _click(tab, "No fill")
+    clear_all(tab, FILL_COL)
     assert tab.contour.filled == set()
     assert _fill_alphas(tab.contour) == set()
 
 
-def test_fill_buttons_track_the_checkboxes(session):
+def test_the_fill_header_ticks_and_clears_every_box(session):
     from qtpy.QtCore import Qt
 
     from lobemap.viewer.panel import FILL_COL
@@ -333,52 +327,23 @@ def test_fill_buttons_track_the_checkboxes(session):
     viewer, sess = session
     viewer.dims.ndisplay = 2
     tab = sess.panel.tabs["benton2025"]
-    _click(tab, "Fill")
+    tick_all(tab, FILL_COL)
     states = {tab.table.item(r, FILL_COL).checkState()
               for r in range(tab.table.rowCount())}
-    assert states == {Qt.Checked}, "Fill all left boxes unticked"
-    _click(tab, "No fill")
+    assert states == {Qt.Checked}, "ticking Fill left boxes unticked"
+    clear_all(tab, FILL_COL)
     states = {tab.table.item(r, FILL_COL).checkState()
               for r in range(tab.table.rowCount())}
-    assert states == {Qt.Unchecked}, "Fill none left boxes ticked"
+    assert states == {Qt.Unchecked}, "clearing Fill left boxes ticked"
 
 
-def test_the_buttons_are_two_aligned_rows(fafb_tabs):
-    """A labelled row per kind of action, the buttons lined up in columns."""
-    from qtpy.QtWidgets import QGridLayout
+def test_the_only_button_is_open_in_virtual_fly_brain(fafb_tabs):
+    """The header checkboxes are the bulk controls: no row of buttons."""
+    from qtpy.QtWidgets import QPushButton
 
-    tab = fafb_tabs["benton2025"]
-    grid = next(iter(tab.findChildren(QGridLayout)))
-    placed: dict[int, dict[int, str]] = {}
-    for i in range(grid.count()):
-        row, col, _, _ = grid.getItemPosition(i)
-        placed.setdefault(row, {})[col] = grid.itemAt(i).widget().text()
-
-    assert [placed[0][c] for c in sorted(placed[0])] == [
-        "Show", "All", "None", "Matches", "Invert"
-    ]
-    # In 3D, which this fixture is, the slice row says when it works.
-    assert [placed[1][c] for c in sorted(placed[1])] == [
-        "Slice view only", "Names", "No names", "Fill", "No fill"
-    ]
-
-
-def test_show_all_and_show_none_still_drive_visibility(fafb_tabs):
-    """Renaming must not have detached them from their slots."""
-    from qtpy.QtWidgets import QGridLayout, QPushButton
-
-    tab = fafb_tabs["benton2025"]
-    grid = next(iter(tab.findChildren(QGridLayout)))
-    by_text = {
-        grid.itemAt(i).widget().text(): grid.itemAt(i).widget()
-        for i in range(grid.count())
-        if isinstance(grid.itemAt(i).widget(), QPushButton)
-    }
-    n = tab.surface.meshset.n_compartments
-    by_text["None"].click()
-    assert tab.surface.selection == set()
-    by_text["All"].click()
-    assert tab.surface.selection == set(range(n))
+    for tab in fafb_tabs.values():
+        assert [b.text() for b in tab.findChildren(QPushButton)] == [
+            "Open in Virtual Fly Brain"]
 
 
 def _name_cells(tab):
@@ -452,7 +417,7 @@ def session(core_data, registry):
 
 @pytest.mark.parametrize("layer", ["fafb_neuropil", "benton2025"])
 def test_showing_in_2d_draws_contours_not_meshes(session, layer):
-    """The bug: `Show all` in 2D switched the mesh on under the slice.
+    """The bug: showing every row in 2D switched the mesh on under the slice.
 
     `AtlasSurface.refresh` turns its layer on whenever anything is
     selected, which is right in 3D. The display-mode hook only fires on an
@@ -464,18 +429,18 @@ def test_showing_in_2d_draws_contours_not_meshes(session, layer):
         pytest.skip("no contour overlay")
     viewer.dims.ndisplay = 2
 
-    _click(tab, "All")
+    tick_all(tab)
     assert tab.surface.layer.visible is False, "mesh switched on in 2D"
     assert tab.contour.layer.visible is True, "contours left off in 2D"
 
-    _click(tab, "None")
+    clear_all(tab)
     assert tab.surface.layer.visible is False
     assert tab.contour.layer.visible is False
 
 
 @pytest.mark.parametrize("layer", ["fafb_neuropil", "benton2025"])
 def test_a_single_checkbox_obeys_the_mode_too(session, layer):
-    """`set_visible` bypassed `_push`, so fixing the buttons left this."""
+    """`set_visible` bypassed `_push`, so fixing the bulk controls left this."""
     from qtpy.QtCore import Qt
 
     from lobemap.viewer.panel import VISIBLE_COL
@@ -485,7 +450,7 @@ def test_a_single_checkbox_obeys_the_mode_too(session, layer):
     if tab.contour is None:
         pytest.skip("no contour overlay")
     viewer.dims.ndisplay = 2
-    _click(tab, "None")
+    clear_all(tab)
 
     tab.table.item(0, VISIBLE_COL).setCheckState(Qt.Checked)
     assert tab.surface.layer.visible is False, "mesh switched on in 2D"
@@ -496,7 +461,7 @@ def test_3d_still_shows_the_mesh(session):
     viewer, sess = session
     tab = sess.panel.tabs["benton2025"]
     viewer.dims.ndisplay = 3
-    _click(tab, "All")
+    tick_all(tab)
     assert tab.surface.layer.visible is True
     assert _drawn(tab) == set(range(tab.surface.meshset.n_compartments))
     if tab.contour is not None:
