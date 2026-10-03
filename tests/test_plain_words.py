@@ -40,7 +40,7 @@ def test_the_check_tells_code_from_words(allowed):
         "VA3 (left) — Benton 2025", "AL, antennal lobe (right) — Neuropils (FlyWire)",
         "Orco-GAL4 & GH146-GAL4 (12)", "MB_PED, Left", "Neuropil stain (from synapses)",
         "Grabe 2015 labels this region 'VP2_left_VM6andVC6'.", "Male CNS (EM)",
-        ("FAFB (full adult fly brain): female brain, electron microscopy. "
+        ("FAFB (full adult fly brain): female, electron microscopy. "
          "Shown in the FAFB14 template."), "Glomerulus colors (3)",
     ]
     for text in words:

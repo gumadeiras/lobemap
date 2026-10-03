@@ -90,7 +90,7 @@ def test_a_failure_after_the_hooks_are_installed_leaves_none(monkeypatch, capfd)
         capfd.readouterr()
         switch_to(viewer, "FAFB14")
         assert failures, "the injected failure was never reached"
-        _assert_intact(viewer, before, "FAFB (female brain, EM)")
+        _assert_intact(viewer, before, "FAFB (female, EM)")
         assert "the dock refused" in capfd.readouterr().err
 
 

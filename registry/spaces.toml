@@ -27,7 +27,7 @@
 # recorded per space in `notes` below.
 
 [FAFB14]
-title = "FAFB (female brain, EM)"
+title = "FAFB (female, EM)"
 units = "nm"
 flybrains_template = "FAFB14"
 lateral_convention = "mirrored"
@@ -164,7 +164,7 @@ VNC and CV, so brain = CentralBrain + Optic(L) + Optic(R)."""
 # without rotating leaves 59.6 um RMS where a rotation leaves 8.5.
 anatomical_rotation = { axis = [-0.430254, 0.798427, -0.421184], degrees = 108.85 }
 primary_atlas = "grabe2015"
-title = "Grabe 2015 (live brain, light microscopy)"
+title = "Grabe 2015 (live, light microscopy)"
 units = "um"
 notes = """Island: no bridging registration to any EM space. One atlas, with \
 its own LM stack as the only reference layer."""

@@ -175,7 +175,7 @@ The window has three columns. On the left, the **View** dock, tabbed with napari
 
 ### The View dock
 
-- **Brain** opens another brain without restarting: FAFB (female brain, EM), Hemibrain (female, EM), Male CNS (EM) or Grabe 2015 (live brain, light microscopy). Its tooltip spells out the abbreviations and names the template the brain is shown in. Only brains with data on disk are listed.
+- **Brain** opens another brain without restarting: FAFB (female, EM), Hemibrain (female, EM), Male CNS (EM) or Grabe 2015 (live, light microscopy). Its tooltip spells out the abbreviations and names the template the brain is shown in. Only brains with data on disk are listed.
 - **Show** switches between **3D**, which draws the meshes, and **Slice**, which draws one section at a time: the image, and exact mesh–plane outlines that stay sharp at any zoom. **Fit to window** fits the brain to the window; in 3D it also turns back to the front view, dorsal side up, with the rotation applied. It never moves the slice or the angles.
 - **Sections** chooses which sections the slider steps through. Each choice is named by the brain's plane nearest the image grid and the angle between them, for example `Frontal (17.5° off true)` in FAFB: unaligned, a section follows the image's own grid. **Align to the brain's true planes**, off by default, cuts the sections along the brain's own frontal, horizontal and sagittal planes instead, and the menu then reads `Frontal (true plane)`. Both work in Slice view only; in 3D they are disabled and say so.
 - **Mirror the brain left to right** shows the brain as its mirror image about its mid-plane, to compare a left lobe with a right one. It is for display only: the data do not change, and the corner arrows follow it.

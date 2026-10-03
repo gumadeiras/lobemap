@@ -22,10 +22,10 @@ pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
 
 TITLES = {
-    "FAFB14": "FAFB (female brain, EM)",
+    "FAFB14": "FAFB (female, EM)",
     "JRCFIB2018F": "Hemibrain (female, EM)",
     "JRCFIB2022M": "Male CNS (EM)",
-    "GRABE": "Grabe 2015 (live brain, light microscopy)",
+    "GRABE": "Grabe 2015 (live, light microscopy)",
 }
 PANEL = "Glomeruli and neuropils"
 #: The narrowest canvas the layout may leave at 1440 px. The left column
@@ -319,8 +319,16 @@ def test_the_view_dock_says_everything_in_words(monkeypatch):
         menu = sw.combo
         brains = {menu.itemData(i): menu.itemText(i) for i in range(menu.count())}
         assert brains == TITLES
+        # The row is labeled Brain: no title says it again.
+        assert sw.layout().labelForField(menu).text() == "Brain"
+        repeated = [t for t in brains.values() if re.search(r"\bbrain\b", t, re.IGNORECASE)]
+        assert not repeated, brains
         tips = {menu.itemData(i): menu.itemData(i, Qt.ItemDataRole.ToolTipRole)
                 for i in range(menu.count())}
+        assert tips["FAFB14"] == ("FAFB (full adult fly brain): female, electron "
+                                  "microscopy. Shown in the FAFB14 template.")
+        assert tips["GRABE"] == ("Grabe 2015: live, light microscopy. Shown in the "
+                                 "Grabe 2015 template.")
         for space, template in (("FAFB14", "FAFB14"), ("JRCFIB2018F", "JRCFIB2018F"),
                                 ("JRCFIB2022M", "JRCFIB2022M"),
                                 ("GRABE", "Grabe 2015")):
@@ -378,9 +386,9 @@ def test_the_status_line_says_what_happened(monkeypatch):
 
         sw._load = missing
         switch_to(viewer, "FAFB14")
-        assert seen == ["Opening FAFB (female brain, EM)…"]
+        assert seen == ["Opening FAFB (female, EM)…"]
         assert sw.status.text() == (
-            "Could not open FAFB (female brain, EM): its data are not downloaded; "
+            "Could not open FAFB (female, EM): its data are not downloaded; "
             "run lobemap fetch. Your view is unchanged.")
         assert session(viewer).space == "GRABE"
         assert sw.combo.currentData() == "GRABE"
@@ -393,7 +401,7 @@ def test_the_status_line_says_what_happened(monkeypatch):
         switch_to(viewer, "FAFB14")
         assert session(viewer).space == "FAFB14"
         assert sw.status.text() == (
-            "Opened FAFB (female brain, EM), but could not fit it to the window.")
+            "Opened FAFB (female, EM), but could not fit it to the window.")
 
     assert module.plain_reason(MemoryError()) == "there is not enough memory"
     assert module.plain_reason(PermissionError()) == (
