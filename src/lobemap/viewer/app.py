@@ -14,6 +14,7 @@ import numpy as np
 
 from ..core.registry import Registry
 from .axes import apply_axis_mode
+from .chrome import lock_outlines
 from .images import (
     BASE_DISPLAY,
     ROLE_DISPLAY,
@@ -202,12 +203,12 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
     Returns the viewer callbacks it added, so a scene switch can remove them.
 
     On the VIEWER, not on each layer. napari sends a layer's mouse-move
-    callbacks only while that layer is the active one, and the active layer
-    after a load is the last one added -- a contour layer, hidden in 3D --
-    so hovering named nothing until the user happened to select the right
-    layer by hand. The viewer's callbacks run on every move, and this asks
-    each layer the current mode draws: surfaces in 3D, contours in 2D, the
-    atlases before the reference shells.
+    callbacks only while that layer is the active one, and one atlas is
+    drawn by two layers -- a mesh in 3D, its outlines in 2D -- while the
+    user can make any layer active, so hovering named nothing until the
+    right layer happened to be selected. The viewer's callbacks run on
+    every move, and this asks each layer the current mode draws: surfaces
+    in 3D, contours in 2D, the atlases before the reference shells.
 
     In 3D the ray is tested against the shown compartments' boxes and then
     their triangles (`AtlasSurface.pick`), not against every triangle of
@@ -265,6 +266,20 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
     return [_on_move]
 
 
+def show_main_layer(viewer, registry: Registry, session: SceneSession) -> None:
+    """Make the primary atlas's 3D layer the active one.
+
+    napari makes the last layer added active, which after a load is an
+    outline layer: the layer settings showed napari's drawing tools for it,
+    and the status bar their keys. The primary atlas is what a scene opens
+    on, so its controls are the ones worth showing first.
+    """
+    primary = registry.primary_atlas(session.space)
+    surface = session.surfaces.get(primary.id) if primary is not None else None
+    if surface is not None:
+        viewer.layers.selection.active = surface.layer
+
+
 def window_title(registry: Registry, space: str) -> str:
     """'lobemap — Hemibrain (female, EM)': the brain open, by its title."""
     return f"lobemap — {registry.spaces[space].title or space}"
@@ -320,6 +335,8 @@ def load_space(
             session.show(show)
         install_home_orientation(viewer, registry.spaces[space],
                                  reflect_axis=session.reflect_axis)
+        lock_outlines(viewer)
+        show_main_layer(viewer, registry, session)
     except BaseException:
         session.teardown()
         raise
@@ -414,6 +431,7 @@ __all__ = [
     "maximize",
     "orient_anterior",
     "run",
+    "show_main_layer",
     "show_primary_atlas",
     "show_targets",
     "window_title",
