@@ -4,7 +4,9 @@ Brain, 3D or Slice, Fit to window, the zoom and the perspective, the sections a
 slice steps through and their alignment, the mirror, the flip and the rotation:
 the controls that belong to the scene rather than to one atlas, whose controls
 are the compartment panel's. Every control is in view in both modes; one that
-applies to one mode stays visible in the other, disabled, and says why. The
+applies to one mode stays visible in the other, disabled, and says why. A box
+or menu changes under the mouse wheel only once it has focus (`wheel`), so a
+scroll over the dock changes nothing. The
 mirror and the flip stand alone, with no row label to repeat their words, and
 are worded apart: the mirror reflects the brain, and the flip turns the picture
 upside down.
@@ -53,6 +55,7 @@ from .request import MissingAssets, loadable_spaces
 from .rotation_rows import RotationRows
 from .slicing import AXIS_LETTERS, order_for, slice_axes
 from .view import capture_view, restore_view, upside_down
+from .wheel import guard_wheel
 
 #: The plane a section lies in, and the axis the slider steps along across
 #: it, by that anatomical axis.
@@ -299,6 +302,8 @@ class SpaceSwitcher(QWidget):
             # One height: the boxes and checkboxes were 20 px, their text a
             # few pixels from their edges, and the Sections menu 26.
             control.setFixedHeight(CONTROL_HEIGHT)
+        guard_wheel(self.combo, self.slice, self.camera.zoom, self.camera.perspective,
+                    *self.rotation.box.values())
         # napari's theme pads a push button by half a grid unit all round,
         # which left its text touching the sides: a grid unit either side
         # instead. It pads a box's text by 1 px above and below, and holds

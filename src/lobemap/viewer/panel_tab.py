@@ -36,6 +36,7 @@ from qtpy.QtWidgets import (
 
 from . import rows as R
 from .check_header import CheckHeader
+from .wheel import guard_wheel
 
 #: The columns, by position. The first four mean the same in both kinds of
 #: tab; a glomerulus tab adds the receptor. A row is a compartment with all
@@ -236,6 +237,7 @@ class AtlasTab(QWidget):
         self.lines.setToolTip(LINE_TIP)
         self.lines.addItem(LINE_PROMPT, ())
         self.lines.currentIndexChanged.connect(self._apply_line)
+        guard_wheel(self.lines)
         layout.addWidget(self.lines)
 
         # The details first, though they sit below the table: selecting a

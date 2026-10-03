@@ -175,6 +175,8 @@ The window has three columns. On the left, the **View** dock, tabbed with napari
 
 ### The View dock
 
+The mouse wheel changes a box or menu only after you click it or reach it with Tab, so scrolling over the dock changes nothing; the same holds for the panel's **Source** and **Driver line** menus.
+
 - **Brain** opens another brain without restarting: FAFB (female, EM), Hemibrain (female, EM), Male CNS (EM) or Grabe 2015 (live, light microscopy). Its tooltip spells out the abbreviations and names the template the brain is shown in. Only brains with data on disk are listed.
 - **Show** switches between **3D**, which draws the meshes, and **Slice**, which draws one section at a time: the image, and exact mesh–plane outlines that stay sharp at any zoom. **Fit to window** fits the brain to the window; in 3D it also turns back to the front view, dorsal side up, with the rotation applied. It never moves the slice or the angles.
 - **Zoom** is how large the brain is drawn, in screen pixels per micrometer of the brain: napari's own zoom factor, the number its camera popup shows. Scrolling, Fit to window and the popup change it, and typing a number zooms to it, in 3D and in Slice view.

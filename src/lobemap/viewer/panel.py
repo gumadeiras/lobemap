@@ -56,6 +56,7 @@ from .panel_tab import (
     SteadyLabel,
 )
 from .rows import natural_key
+from .wheel import guard_wheel
 
 #: The width the panel asks for, which sets the right-hand column's. Every
 #: tab's table fits it without scrolling sideways.
@@ -181,6 +182,7 @@ class SourcePage(QWidget):
         head.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         #: Which source's table the tab shows.
         self.menu = QComboBox()
+        guard_wheel(self.menu)
         for i, name in enumerate(self.names):
             self.menu.addItem(panel.source_title(name), name)
             self.menu.setItemData(i, panel.about(name), Qt.ItemDataRole.ToolTipRole)
