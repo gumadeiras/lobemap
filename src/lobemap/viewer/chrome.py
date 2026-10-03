@@ -12,7 +12,7 @@ left, and the compartment tables alone on the right.
 napari has no public API for its buttons, its own docks, or a dock with no
 close button. These go through `Window._qt_viewer`, `Window._qt_window`
 and napari's dock widget class, and `tests/test_napari_private.py` checks
-each. lobemap's layers are locked by napari's public `editable`.
+each. lobemap's layers are locked by napari's public `editable` and `locked`.
 """
 
 from __future__ import annotations
@@ -30,6 +30,13 @@ RIGHT_WIDTH = 440
 #: napari's own docks, by the names lobemap shows for them.
 LAYER_SETTINGS = "Layer settings"
 LAYERS = "Layers"
+
+#: Said when a layer of lobemap's is unlocked from the layer list's menu.
+STAYS_LOCKED = (
+    "lobemap's own layers stay locked: the panel and the View tab draw them, "
+    "and deleting one would leave them naming a layer that is gone. To hide "
+    "one, click its eye, or untick its rows in the panel."
+)
 
 #: The viewers whose own layers are kept locked; see `lock_layers`.
 _LOCKING: weakref.WeakSet = weakref.WeakSet()
@@ -120,7 +127,7 @@ def _retitle(dock, name: str) -> None:
 
 
 def lock_layers(viewer) -> None:
-    """Keep lobemap's own layers out of napari's editing modes.
+    """Keep lobemap's own layers out of napari's editing modes, and undeleted.
 
     lobemap draws its layers itself, and napari's modes edit them behind
     its back: a shape drawn into an outline layer is lost at the next
@@ -129,6 +136,13 @@ def lock_layers(viewer) -> None:
     napari's `editable` is the public switch for both: off, the drawing
     and transform tools are disabled and no mode but pan and zoom can be
     entered. Its key help, which lists those modes, is cleared too.
+
+    Deleting one -- the main 3D layer is the one selected at open -- left
+    the panel and hover naming a layer that was gone, with no undo. napari's
+    `locked` keeps a layer from napari's delete button, its keys and its
+    conversions, which delete the layer they convert; it marks the layer
+    with a lock in the list, and says so when a delete passes it by. A layer
+    unlocked from the list's menu is locked again, and that is said too.
 
     A layer of lobemap's is known by the `lobemap` metadata its maker
     writes, which some write only once napari has added the layer. So each
@@ -154,6 +168,7 @@ def _watch(layer) -> None:
 
     lock = functools.partial(_lock, layer)
     layer.events.editable.connect(lock)
+    layer.events.locked.connect(functools.partial(_relock, layer))
     QTimer.singleShot(0, lock)
 
 
@@ -164,6 +179,17 @@ def _lock(layer) -> None:
         layer.editable = False
     if layer.help:
         layer.help = ""
+    if not layer.locked:
+        layer.locked = True
+
+
+def _relock(layer) -> None:
+    """Lock again a layer of lobemap's unlocked from the layer list's menu."""
+    if "lobemap" in layer.metadata and not layer.locked:
+        from napari.utils.notifications import show_info
+
+        layer.locked = True
+        show_info(STAYS_LOCKED)
 
 
 __all__ = [
@@ -171,6 +197,7 @@ __all__ = [
     "LAYER_SETTINGS",
     "LEFT_WIDTH",
     "RIGHT_WIDTH",
+    "STAYS_LOCKED",
     "add_dock",
     "lock_layers",
     "tidy",
