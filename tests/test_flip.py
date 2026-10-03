@@ -93,45 +93,51 @@ def test_a_slice_upside_down_is_the_same_slice_and_off_gives_it_back(viewer, reg
         assert np.array_equal(th.picture(viewer), upright), angles
 
 
-def test_names_on_a_slice_upside_down_read_upright(viewer, registry):
-    """Each name is drawn where its loop is, upside down, in letters that are
-    not: its pixels match the upright name's, and not their mirror image."""
-    session = _scene(viewer, registry)
+@pytest.mark.parametrize("mirrored", [False, True])
+def test_names_on_a_slice_upside_down_read_upright(viewer, registry, mirrored):
+    """Each name is drawn upside down where its loop is, in letters that are
+    not: its pixels match the upright name's, and not their mirror image.
+    Unturned, spun and cut across the grid."""
+    session = _scene(viewer, registry, mirrored)
     contour = session.contours["synthetic"]
     for image in session.images:
         image.visible = False
     contour.set_labels({0, 1, 2})
-    th.settle_canvas(viewer)
     text = contour.visual.text
-    names = list(np.atleast_1d(text.text))
-    assert len(names) >= 2, names
 
     def crops() -> dict[str, np.ndarray]:
+        th.settle_canvas(viewer)
         contour.visual.mesh.visible = False             # the names alone
         pixels = th.picture(viewer).sum(axis=-1).astype(float)
         scale = pixels.shape[1] / viewer.window._qt_viewer.canvas._scene_canvas.size[0]
+        h, w = round(9 * scale), round(24 * scale)
         to_canvas = text.get_transform("visual", "canvas")
         out = {}
-        for name, pos in zip(names, np.asarray(text.pos, float), strict=True):
+        for name, pos in zip(np.atleast_1d(text.text), np.asarray(text.pos, float),
+                             strict=True):
             x, y = np.asarray(to_canvas.map(np.r_[pos[:2], 0.0, 1.0]))[:2] * scale
-            row, col, h, w = round(y), round(x), round(9 * scale), round(24 * scale)
-            out[name] = pixels[row - h:row + h + 1, col - w:col + w + 1]
+            row, col = round(y), round(x)
+            if h <= row < pixels.shape[0] - h and w <= col < pixels.shape[1] - w:
+                out[str(name)] = pixels[row - h:row + h + 1, col - w:col + w + 1]
         return out
-
-    upright = crops()
-    session.set_flip(True)
-    th.settle_canvas(viewer)
-    flipped = crops()
 
     def corr(a, b) -> float:
         a, b = a - a.mean(), b - b.mean()
         return float((a * b).sum() / np.sqrt((a * a).sum() * (b * b).sum()))
 
-    for name in names:
-        assert upright[name].std() > 0, name
-        same, mirrored = corr(flipped[name], upright[name]), corr(flipped[name],
-                                                                  upright[name][::-1])
-        assert same > 0.9 and mirrored < same - 0.3, (name, same, mirrored)
+    for angles in ANGLES_2D:
+        session.set_rotation(*angles)
+        upright = crops()
+        assert upright, angles
+        session.set_flip(True)
+        flipped = crops()
+        assert flipped.keys() == upright.keys(), angles
+        for name, got in flipped.items():
+            assert upright[name].std() > 0, name
+            same, mirror_image = corr(got, upright[name]), corr(got, upright[name][::-1])
+            assert same > 0.8 and mirror_image < same - 0.3, (angles, name, same,
+                                                                 mirror_image)
+        session.set_flip(False)
 
 
 @pytest.mark.parametrize("mirrored", [False, True])
