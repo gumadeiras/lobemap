@@ -10,6 +10,7 @@ panel asks for. The titles are measured on the tab bar as drawn.
 from __future__ import annotations
 
 import contextlib
+import itertools
 
 import pytest
 from viewer_harness import launched, pump, session, switch_to
@@ -208,3 +209,145 @@ def test_the_tab_bar_draws_what_qt_draws_but_for_where_each_title_sits(monkeypat
             images.append(tabs.tabBar().grab().toImage())
         assert images[0].size() == images[1].size()
         assert images[0] == images[1]
+
+
+# -- heights and the spacing grid -----------------------------------------
+
+
+def _rooms(panel, sess) -> dict[str, tuple[int, int]]:
+    """Each kind of control's least (height, its text's line height), over
+    every table now: the tabs, the table's rows and header, the search, the
+    menus and the buttons."""
+    from qtpy.QtWidgets import QPushButton
+
+    least: dict[str, tuple[int, int]] = {}
+
+    def note(kind: str, height: int, metrics) -> None:
+        room = (height, metrics.height())
+        if kind not in least or room[0] - room[1] < least[kind][0] - least[kind][1]:
+            least[kind] = room
+
+    bar = panel.tabBar()
+    for i in range(bar.count()):
+        note("tab", bar.tabRect(i).height(), bar.fontMetrics())
+    for name in list(sess.parts):
+        tab = panel.open(name)
+        pump(50)
+        table = tab.table
+        note("table row", table.rowHeight(0), table.fontMetrics())
+        note("table header", table.horizontalHeader().height(),
+             table.horizontalHeader().fontMetrics())
+        note("search", tab.filter.height(), tab.filter.fontMetrics())
+        if tab.lines.isVisible():
+            note("driver line", tab.lines.height(), tab.lines.fontMetrics())
+        for button in tab.findChildren(QPushButton):
+            if button.isVisible():
+                note("button", button.height(), button.fontMetrics())
+        menu = panel.page_of(name).menu
+        note("source menu", menu.height(), menu.fontMetrics())
+    return least
+
+
+@pytest.mark.parametrize("ndisplay", ["3", "2"])
+def test_every_control_keeps_the_grids_room_around_its_text(monkeypatch, ndisplay):
+    """Sized to its words across, never squeezed down to them: every
+    control's height leaves at least `GAP` above and below its line of
+    text, in every tab of every brain."""
+    from lobemap.viewer.panel_tab import GAP
+
+    with launched(monkeypatch, "view", SPACES[0], "--ndisplay", ndisplay) as (code, viewer):
+        assert code == 0
+        _lay_out(viewer)
+        for space in SPACES:
+            if space != SPACES[0]:
+                switch_to(viewer, space)
+                pump(100)
+            rooms = _rooms(session(viewer).panel, session(viewer))
+            assert {"tab", "table row", "table header", "search", "button",
+                    "source menu"} <= set(rooms), rooms
+            tight = {kind: room for kind, room in rooms.items()
+                     if room[0] < room[1] + 2 * GAP}
+            assert not tight, (space, tight)
+
+
+def _box(widget, page) -> tuple[int, int, int, int]:
+    corner = widget.mapTo(page, widget.rect().topLeft())
+    return corner.x(), corner.y(), widget.width(), widget.height()
+
+
+@pytest.mark.parametrize("ndisplay", ["3", "2"])
+def test_the_panel_sits_on_one_grid(monkeypatch, ndisplay):
+    """Measured on the laid-out widgets, in every tab of every brain.
+
+    One edge for every label's text and one for every control beside a
+    label, the source menu, its citation, both rows of buttons, the values
+    and Open in Virtual Fly Brain; `MARGIN` around a tab's contents; `GAP`
+    between the parts of a group and `GROUP_GAP` between groups; and each
+    button as wide as its words need, not wider than the widest of its
+    column.
+    """
+    from qtpy.QtWidgets import QPushButton
+
+    from lobemap.viewer.panel_tab import GAP, GROUP_GAP, MARGIN
+
+    with launched(monkeypatch, "view", SPACES[0], "--ndisplay", ndisplay) as (code, viewer):
+        assert code == 0
+        _lay_out(viewer)
+        edges, ends = set(), set()
+        for space in SPACES:
+            if space != SPACES[0]:
+                switch_to(viewer, space)
+                pump(100)
+            sess = session(viewer)
+            for name in list(sess.parts):
+                tab = sess.panel.open(name)
+                pump(50)
+                page = sess.panel.page_of(name)
+                box = {k: _box(w, page) for k, w in (
+                    ("menu", page.menu), ("citation", page.citation),
+                    ("search", tab.filter), ("lines", tab.lines), ("table", tab.table),
+                    ("count", tab.count), ("title", tab.detail_title))}
+                buttons = {b.text(): b for b in tab.findChildren(QPushButton)}
+                rows = [[buttons[t] for t in ("All", "None", "Matches", "Invert")],
+                        [buttons[t] for t in ("Names", "No names", "Fill", "No fill")]]
+                form = tab.detail_title.parentWidget().layout()
+                values = list(tab.details.values())
+                # One edge for the controls, one for the end of the labels.
+                edges |= {box["menu"][0], box["citation"][0],
+                          *(_box(row[0], page)[0] for row in rows),
+                          *(_box(v, page)[0] for v in values)}
+                if tab.vfb.isVisible():
+                    edges.add(_box(tab.vfb, page)[0])
+                labels = [tab.on_slice, page.layout().itemAt(0).layout().labelForField(page.menu),
+                          *(form.labelForField(v) for v in values)]
+                for label in labels:
+                    margins = label.contentsMargins()
+                    ends.add(_box(label, page)[0] + label.width() - margins.right()
+                             - max(label.indent(), 0))
+                # The margin, and the gaps within and between groups.
+                assert box["menu"][1] == MARGIN, (space, name, box["menu"])
+                assert box["search"][0] == MARGIN, (space, name, box["search"])
+                assert page.width() - sum(box["menu"][0::2]) == MARGIN, (space, name)
+                assert box["citation"][1] - sum(box["menu"][1::2]) == GAP
+                assert box["search"][1] - sum(box["citation"][1::2]) == GROUP_GAP
+                above = box["lines"] if tab.lines.isVisible() else box["search"]
+                if tab.lines.isVisible():
+                    assert box["lines"][1] - sum(box["search"][1::2]) == GAP
+                first, second = (_box(row[0], page) for row in rows)
+                assert first[1] - sum(above[1::2]) == GROUP_GAP, (space, name)
+                assert second[1] - sum(first[1::2]) == GAP, (space, name)
+                assert box["table"][1] - sum(second[1::2]) == GROUP_GAP, (space, name)
+                assert box["count"][1] - sum(box["table"][1::2]) == GAP
+                assert box["title"][1] - sum(box["count"][1::2]) == GROUP_GAP
+                tops = [box["title"], *(_box(v, page) for v in values)]
+                assert {b[1] - sum(a[1::2]) for a, b in itertools.pairwise(tops)} == {GAP}
+                # Buttons in columns, each as wide as its column's widest words.
+                for column in zip(*rows):
+                    xs = {_box(b, page)[0] for b in column}
+                    assert len(xs) == 1, (space, name, [b.text() for b in column])
+                    for b in column:
+                        need = b.fontMetrics().horizontalAdvance(b.text())
+                        assert need < b.width() <= max(
+                            o.sizeHint().width() for o in column), (space, b.text())
+        assert len(edges) == 1, edges
+        assert len(ends) == 1, ends

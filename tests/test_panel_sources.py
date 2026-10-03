@@ -168,7 +168,7 @@ def _places(page, panel) -> dict:
         return (corner.x(), corner.y(), widget.width(), widget.height())
 
     return {"menu": rect(page.menu), "citation": rect(page.citation),
-            "stack": rect(page.stack)}
+            "tables": rect(page.body)}
 
 
 def test_the_menu_sits_in_the_same_place_in_every_tab_and_brain(monkeypatch):

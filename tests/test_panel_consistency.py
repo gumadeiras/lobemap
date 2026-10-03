@@ -291,7 +291,7 @@ def _chrome(panel, name, tab) -> tuple[str, ...]:
            *_title_about(panel, name),
            tab.filter.placeholderText(), tab.lines.itemText(0), tab.lines.toolTip()]
     out += [label.text() for label in page.findChildren(QLabel)
-            if not page.stack.isAncestorOf(label)]
+            if not page.body.isAncestorOf(label)]
     out += [label.text() for label in tab.findChildren(QLabel) if id(label) not in values]
     for button in tab.findChildren(QPushButton):
         out += [button.text(), button.toolTip()]

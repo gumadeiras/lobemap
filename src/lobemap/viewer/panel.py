@@ -25,7 +25,7 @@ from qtpy.QtWidgets import (
     QComboBox,
     QFormLayout,
     QLabel,
-    QStackedWidget,
+    QStackedLayout,
     QStyle,
     QStyleOptionTab,
     QStyleOptionTabBarBase,
@@ -41,14 +41,19 @@ from .panel_tab import (
     CHECK_COLUMNS,
     CHECK_WIDTH,
     FILL_COL,
+    GAP,
     GLOMERULUS_COLUMNS,
+    GROUP_GAP,
     INDEX_ROLE,
     LABEL_COL,
+    MARGIN,
     NAME_COL,
     NEUROPIL_COLUMNS,
     RECEPTOR_COL,
+    SOURCE,
     VISIBLE_COL,
     AtlasTab,
+    ColumnLabel,
     SteadyLabel,
 )
 from .rows import natural_key
@@ -57,14 +62,12 @@ from .rows import natural_key
 #: tab's table fits it without scrolling sideways.
 WIDTH = 440
 
-#: Room around each tab's title. napari's 3 x 6 px left the text almost
-#: touching the tab's edges.
-TAB_PADDING = "QTabBar::tab { padding: 6px 12px; }"
+#: Room around each tab's title, on the panel's grid. napari's 3 x 6 px left
+#: the text almost touching the tab's edges.
+TAB_PADDING = "QTabBar::tab { padding: 8px 12px; }"
 
 #: The two tabs, by what they hold, in the order they are shown.
 GLOMERULI, NEUROPILS = "Glomeruli", "Neuropils"
-#: What the menu at the top of each tab chooses.
-SOURCE = "Source"
 
 
 def plain_reason(exc: BaseException) -> str:
@@ -154,7 +157,9 @@ class SourcePage(QWidget):
     per source, of which the menu's choice is shown.
 
     A source not built yet has a blank page standing in until it is chosen
-    with its tab open (`CompartmentPanel.tab`).
+    with its tab open (`CompartmentPanel.tab`). The tables are stacked in a
+    plain widget, which napari's style gives no padding: a stacked widget is
+    a frame, and its pixel of padding put every table off the menu's edge.
     """
 
     def __init__(self, panel, names, citations) -> None:
@@ -163,11 +168,13 @@ class SourcePage(QWidget):
         #: The sources, by scene key, in the menu's order.
         self.names = list(names)
         layout = QVBoxLayout(self)
-        # The table brings its own margins; the menu sits inside the same.
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(MARGIN, MARGIN, MARGIN, MARGIN)
+        layout.setSpacing(0)
 
         head = QFormLayout()
-        head.setContentsMargins(4, 4, 4, 0)
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setHorizontalSpacing(2 * GAP)
+        head.setVerticalSpacing(GAP)
         # Left and full width, whatever the texts: macOS centres a form and
         # sizes its fields to their contents, so each brain and each choice
         # put the menu somewhere else.
@@ -181,14 +188,26 @@ class SourcePage(QWidget):
         #: The chosen source's citation, as tall as the longest of
         #: `citations` needs, so no choice and no brain moves the table.
         self.citation = SteadyLabel(lambda: citations)
-        head.addRow(SOURCE, self.menu)
-        head.addRow("", self.citation)
-        layout.addLayout(head)
+        if panel.viewer is not None:
+            # Smaller than the menu, as the source's metadata: the theme's
+            # base size, which the tab titles have too. As a style, because
+            # napari's style sheet puts back a font set in code.
+            from napari.utils.theme import get_theme
 
-        self.stack = QStackedWidget()
+            size = get_theme(panel.viewer.theme).font_size
+            self.citation.setStyleSheet(f"font-size: {size};")
+        head.addRow(ColumnLabel(SOURCE), self.menu)
+        head.addRow(ColumnLabel(), self.citation)
+        layout.addLayout(head)
+        layout.addSpacing(GROUP_GAP)
+
+        #: Holds the tables, one shown at a time by `stack`.
+        self.body = QWidget()
+        #: One page per source, in the menu's order.
+        self.stack = QStackedLayout(self.body)
         for name in self.names:
             self.stack.addWidget(dict.get(panel.tabs, name) or QWidget())
-        layout.addWidget(self.stack, stretch=1)
+        layout.addWidget(self.body, stretch=1)
         self.menu.currentIndexChanged.connect(self._chosen)
         self._chosen(self.menu.currentIndex())
 

@@ -357,9 +357,9 @@ def test_the_buttons_are_two_aligned_rows(fafb_tabs):
     assert [placed[0][c] for c in sorted(placed[0])] == [
         "Show", "All", "None", "Matches", "Invert"
     ]
-    # In 3D, which this fixture is, the slice row says it does nothing.
+    # In 3D, which this fixture is, the slice row says when it works.
     assert [placed[1][c] for c in sorted(placed[1])] == [
-        "On slice\n(Slice view only)", "Names", "No names", "Fill", "No fill"
+        "Slice view only", "Names", "No names", "Fill", "No fill"
     ]
 
 

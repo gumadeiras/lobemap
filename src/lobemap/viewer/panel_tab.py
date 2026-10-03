@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import webbrowser
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QSize, Qt
 from qtpy.QtGui import QColor, QFont
 from qtpy.QtWidgets import (
     QAbstractItemView,
@@ -28,6 +28,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -47,9 +48,9 @@ NEUROPIL_COLUMNS = ("Show", "Neuropil", "Label", "Fill")
 CHECK_COLUMNS = (VISIBLE_COL, LABEL_COL, FILL_COL)
 CHECK_WIDTH = 38
 
-SHOW_TIP = "Draw every side of it in 3D and on the slice"
-LABEL_TIP = "Write the name of every side on the slice (Slice view only)"
-FILL_TIP = "Fill the outline of every side on the slice (Slice view only)"
+SHOW_TIP = "Draw it in 3D and on the slice"
+LABEL_TIP = "Write the name on the slice (Slice view only)"
+FILL_TIP = "Fill the outline on the slice (Slice view only)"
 
 #: Cells carry their row's key here (`Row.key`). Once the table can be
 #: sorted, the visual row is no longer the row's place and nothing may
@@ -62,12 +63,52 @@ LINE_TIP = ("Show the glomeruli that a driver line labels, "
             "from lobemap's reference table")
 
 ON_SLICE = "On slice"
-#: The same row in 3D, where it draws nothing. Two lines, so the label
-#: column stays as narrow as the buttons beside it allow.
-ON_SLICE_3D = "On slice\n(Slice view only)"
+#: The same row in 3D, where it draws nothing: when it works, in the View
+#: dock's words. One line, as in 2D, so changing mode moves nothing below.
+ON_SLICE_3D = "Slice view only"
 
 VFB_TEXT = "Open in Virtual Fly Brain"
 VFB_NONE = "Select a glomerulus with a Virtual Fly Brain term to open it"
+
+#: The panel's spacing grid, in pixels. The parts of one group -- a search
+#: and its driver lines, a row of buttons, a value and the next -- sit `GAP`
+#: apart; groups sit `GROUP_GAP` apart, a tab's contents `MARGIN` inside its
+#: frame, and a label `2 * GAP` before what it labels.
+GAP, GROUP_GAP, MARGIN = 4, 12, 8
+#: What labels the source menu at the top of each tab.
+SOURCE = "Source"
+SHOW = "Show"
+
+
+#: Every label of the panel's label column, in either kind of tab.
+COLUMN_LABELS = (SOURCE, SHOW, ON_SLICE, ON_SLICE_3D,
+                 *R.GLOMERULUS_DETAILS, *R.NEUROPIL_DETAILS)
+
+
+class ColumnLabel(QLabel):
+    """A label of the panel's label column, its text against the right.
+
+    As wide as the widest of `COLUMN_LABELS` in the font and padding it is
+    drawn with, so every label of the column ends at one edge, and the menu,
+    the buttons and the values beside them start at one. Measured when laid
+    out, once napari's style has set the font, not when built, before it
+    has. `gap` is room kept after the text, where the layout beside it
+    leaves too little of its own.
+    """
+
+    def __init__(self, text: str = "", gap: int = 0) -> None:
+        super().__init__(text)
+        self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.setIndent(gap)
+
+    def sizeHint(self) -> QSize:
+        metrics, margins = self.fontMetrics(), self.contentsMargins()
+        widest = max(metrics.horizontalAdvance(text) for text in COLUMN_LABELS)
+        width = widest + margins.left() + margins.right() + max(self.indent(), 0)
+        return QSize(width, super().sizeHint().height())
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
 
 
 def _words(is_atlas: bool) -> tuple[str, str]:
@@ -79,8 +120,8 @@ def _bulk_buttons(is_atlas: bool) -> tuple[tuple[str, str], tuple[str, str]]:
     """(text, tooltip) of the Show row, then of the On slice row."""
     one, many = _words(is_atlas)
     show = (
-        ("All", f"Show every {one} in this tab"),
-        ("None", f"Hide every {one} in this tab"),
+        ("All", f"Show every {one} in this table"),
+        ("None", f"Hide every {one} in this table"),
         ("Matches", f"Show only the {many} that match the search"),
         ("Invert", f"Show the hidden {many} and hide the shown ones"),
     )
@@ -184,8 +225,11 @@ class AtlasTab(QWidget):
         self._three_d: bool | None = None
         one, _many = _words(is_atlas)
 
+        # Four groups, top to bottom: finding rows, acting on them, the
+        # table with its count, and the selected row's details.
         layout = QVBoxLayout()
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(GAP)
 
         self.filter = QLineEdit()
         self.filter.setPlaceholderText(
@@ -206,12 +250,14 @@ class AtlasTab(QWidget):
         # The details first, though they sit below the table: selecting a
         # row fills them, and the table can select one as it is built.
         details = self._make_details(one)
+        layout.addSpacing(GROUP_GAP - GAP)
         layout.addLayout(self._make_buttons(is_atlas))
+        layout.addSpacing(GROUP_GAP - GAP)
         layout.addWidget(self._make_table(), stretch=1)
-        layout.addWidget(details)
-
         self.count = QLabel()
         layout.addWidget(self.count)
+        layout.addSpacing(GROUP_GAP - GAP)
+        layout.addWidget(details)
         self.setLayout(layout)
 
         self._fill_lines(lines or {})
@@ -230,9 +276,14 @@ class AtlasTab(QWidget):
     # -- building --------------------------------------------------------
 
     def _make_buttons(self, is_atlas: bool) -> QGridLayout:
-        """The Show row above the On slice row, each button in a column."""
+        """The Show row above the On slice row, each button in a column.
+
+        Each button as wide as the wider of its column needs, and no wider;
+        the labels in the label column, their text ending `2 * GAP` before
+        the buttons, as a label ends before its menu or value.
+        """
         grid = QGridLayout()
-        grid.setSpacing(4)
+        grid.setSpacing(GAP)
         show, on_slice = _bulk_buttons(is_atlas)
         slots = {
             "All": self._all, "None": self._none,
@@ -240,26 +291,28 @@ class AtlasTab(QWidget):
             "Names": self._labels_for_shown, "No names": self._no_labels,
             "Fill": self._fill_for_shown, "No fill": self._no_fill,
         }
-        self.on_slice = QLabel(ON_SLICE)
+        # A label ends 2 * GAP before what it labels: the grid's own gap
+        # between columns, and as much again kept after the text.
+        self.on_slice = ColumnLabel(ON_SLICE, gap=GAP)
         self._two_d_buttons: list[QPushButton] = []
-        for r, (title, buttons) in enumerate(((QLabel("Show"), show),
+        for r, (title, buttons) in enumerate(((ColumnLabel(SHOW, gap=GAP), show),
                                               (self.on_slice, on_slice))):
             grid.addWidget(title, r, 0)
             for c, (text, tip) in enumerate(buttons, start=1):
                 button = QPushButton(text)
                 button.setToolTip(tip)
                 button.clicked.connect(slots[text])
+                # Its words and a gap each side, at least. The table is
+                # built before napari's style reaches it, when a macOS push
+                # button asks for 90 px; a dock never gives back a minimum
+                # width it once had, and the column then could not be 440.
+                button.setMinimumWidth(
+                    button.fontMetrics().horizontalAdvance(text) + 2 * GAP)
                 grid.addWidget(button, r, c)
                 if r == 1:
                     self._two_d_buttons.append(button)
-        for c in range(1, 5):
-            grid.setColumnStretch(c, 1)
-        # As wide as the 3D wording in either mode, so switching modes does
-        # not shift the buttons sideways.
-        metrics = self.on_slice.fontMetrics()
-        grid.setColumnMinimumWidth(0, max(
-            metrics.horizontalAdvance(line) for line in ON_SLICE_3D.splitlines()
-        ))
+        # The rest of the width is left empty, after the buttons.
+        grid.setColumnStretch(5, 1)
         return grid
 
     def _make_table(self) -> QTableWidget:
@@ -355,11 +408,14 @@ class AtlasTab(QWidget):
         """
         box = QWidget()
         form = QFormLayout(box)
-        form.setContentsMargins(2, 4, 2, 0)
-        form.setVerticalSpacing(2)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setVerticalSpacing(GAP)
+        form.setHorizontalSpacing(2 * GAP)
         # The values take the width there is, whatever their text: on macOS
-        # they kept their own, so each row selected moved them.
+        # they kept their own, so each row selected moved them. And the form
+        # starts at the left: macOS centred it.
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.detail_title = QLabel()
         bold = QFont(self.detail_title.font())
         bold.setBold(True)
@@ -370,12 +426,14 @@ class AtlasTab(QWidget):
         self.details: dict[str, QLabel] = {}
         for name in self.detail_fields:
             value = SteadyLabel(lambda name=name: [row.details[name] for row in self.rows.values()])
-            form.addRow(name, value)
+            form.addRow(ColumnLabel(name), value)
             self.details[name] = value
-        #: Opens the Virtual Fly Brain term page of the selected glomerulus.
+        #: Opens the Virtual Fly Brain term page of the selected glomerulus,
+        #: under the values and as wide as its words.
         self.vfb = QPushButton(VFB_TEXT)
+        self.vfb.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.vfb.clicked.connect(self._open_vfb)
-        form.addRow(self.vfb)
+        form.addRow(ColumnLabel(), self.vfb)
         return box
 
     # -- rows ------------------------------------------------------------
@@ -636,15 +694,21 @@ class AtlasTab(QWidget):
 __all__ = [
     "CHECK_COLUMNS",
     "CHECK_WIDTH",
+    "COLUMN_LABELS",
     "FILL_COL",
+    "GAP",
     "GLOMERULUS_COLUMNS",
+    "GROUP_GAP",
     "INDEX_ROLE",
     "LABEL_COL",
     "LINE_PROMPT",
+    "MARGIN",
     "NAME_COL",
     "NEUROPIL_COLUMNS",
     "RECEPTOR_COL",
+    "SOURCE",
     "VISIBLE_COL",
     "AtlasTab",
+    "ColumnLabel",
     "SteadyLabel",
 ]

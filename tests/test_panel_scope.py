@@ -59,4 +59,4 @@ def test_each_bulk_button_says_which_rows_it_acts_on(monkeypatch):
                 if label == "Open in Virtual Fly Brain":
                     continue
                 assert kind in button.toolTip(), (label, button.toolTip())
-            assert tab.on_slice.text() == "On slice\n(Slice view only)"
+            assert tab.on_slice.text() == "Slice view only"
