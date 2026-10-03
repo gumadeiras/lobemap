@@ -19,6 +19,29 @@ needs_flybrains = pytest.mark.skipif(
 )
 
 
+def _bridged(source: str, target: str) -> bool:
+    """Whether a bridging route between two spaces is registered here.
+
+    FAFB14 to JRCFIB2018F runs through the JRC2018F H5 warps, a separate
+    download (`flybrains.download_jrc_transforms`) that CI does not make.
+    """
+    spaces = __import__("lobemap.core.spaces", fromlist=["x"])
+    if not spaces.available():
+        return False
+    try:
+        spaces.describe_path(source, target)
+    except Exception:
+        return False
+    return True
+
+
+needs_bridge = pytest.mark.skipif(
+    not _bridged("FAFB14", "JRCFIB2018F"),
+    reason="no bridging transforms between FAFB14 and JRCFIB2018F installed "
+           "(flybrains.download_jrc_transforms)",
+)
+
+
 def cube(offset=(0.0, 0.0, 0.0), size=10.0):
     v = np.array(
         [
@@ -147,7 +170,7 @@ def test_identity_bridge_is_a_noop():
     assert out is ms
 
 
-@needs_flybrains
+@needs_bridge
 def test_roundtrip_preserves_position():
     """um -> native -> transform -> back -> um must be self-consistent."""
     pts = np.array([[100.0, 120.0, 90.0], [110.0, 125.0, 95.0]])
@@ -157,7 +180,7 @@ def test_roundtrip_preserves_position():
     assert np.abs(back - pts).max() < 1.0  # um
 
 
-@needs_flybrains
+@needs_bridge
 def test_bridge_records_the_resolved_route():
     ms = meshset()
     out = R.resolve_meshset(
@@ -173,7 +196,7 @@ def test_bridge_records_the_resolved_route():
     assert np.array_equal(out.faces, ms.faces)
 
 
-@needs_flybrains
+@needs_bridge
 def test_mirror_is_applied_before_bridging():
     """Mirror-then-bridge must differ from bridge-then-mirror.
 
