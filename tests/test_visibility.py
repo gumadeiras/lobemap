@@ -19,6 +19,7 @@ from viewer_harness import (
     assert_rows_match_drawing,
     checked,
     drawn,
+    every_index,
     launched,
     mode_layer,
     pump,
@@ -40,7 +41,7 @@ def _tick(tab, index: int, on: bool) -> None:
 
     from lobemap.viewer.panel import VISIBLE_COL
 
-    row = tab._row_of(index)
+    row = tab.table_row(index)
     tab.table.item(row, VISIBLE_COL).setCheckState(Qt.Checked if on else Qt.Unchecked)
 
 
@@ -241,7 +242,7 @@ def test_the_eye_of_the_layer_the_mode_does_not_draw_means_the_atlas(monkeypatch
             assert checked(tab) == set()
             other.visible = True                      # the user's click on that eye
             pump(300)
-            assert checked(tab) == set(range(tab.table.rowCount()))
+            assert checked(tab) == set(every_index(tab))
             assert not other.visible
             assert_rows_match_drawing(sess)
             _tick(tab, 0, False)                      # a partial selection is kept

@@ -15,7 +15,15 @@ from itertools import pairwise
 
 import numpy as np
 import pytest
-from viewer_harness import SPACES, launched, pump, session, switch_to, switcher
+from viewer_harness import (
+    SPACES,
+    every_index,
+    launched,
+    pump,
+    session,
+    switch_to,
+    switcher,
+)
 
 from lobemap.viewer.chrome import LEFT_WIDTH, RIGHT_WIDTH
 
@@ -372,7 +380,7 @@ def test_the_main_layer_is_active_and_no_layer_of_lobemaps_can_be_edited(monkeyp
         assert_locked()
         # napari makes a layer editable again on entering 2D, and a surface
         # whenever it is given new data, as a row ticked on gives it.
-        tab.select(range(tab.table.rowCount()))
+        tab.select(every_index(tab))
         pump(400)
         for ndisplay in (3, 2):
             viewer.dims.ndisplay = ndisplay
@@ -408,8 +416,8 @@ def test_the_canvas_keeps_its_width_through_every_brain(monkeypatch):
                 tab = sess.panel.tab(name)
                 if tab is not None:
                     # Each selection is a colormap napari keeps by name.
-                    tab.select(range(0, tab.table.rowCount(), 2))
-                    tab.select(range(tab.table.rowCount()))
+                    tab.select(every_index(tab)[::2])
+                    tab.select(every_index(tab))
             for ndisplay in (2, 3):
                 viewer.dims.ndisplay = ndisplay
                 pump(300)

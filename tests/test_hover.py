@@ -27,9 +27,9 @@ pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
 
 
-def _inside_contour(overlay) -> np.ndarray:
-    """A world point inside the largest drawn loop of the overlay."""
-    paths = [loop for _owner, loop in contour_loops(overlay)]
+def _inside_contour(overlay, owner: int) -> np.ndarray:
+    """A world point inside the largest drawn loop of one compartment."""
+    paths = [loop for drawn, loop in contour_loops(overlay) if drawn == owner]
     assert paths, "nothing drawn to hover over"
     path = max(paths, key=len)
     return path.mean(axis=0)
@@ -50,9 +50,9 @@ def test_hover_names_the_glomerulus_in_3d_and_2d(monkeypatch, space):
         surface = tab.surface
         index = surface.meshset.n_compartments // 2
         name = surface.meshset.names[index]
-        # Through the table: nothing, then one row ticked.
+        # Through the table: nothing, then one row ticked, every side of it.
         next(b for b in tab.findChildren(QPushButton) if b.text() == "None").click()
-        tab.table.item(tab._row_of(index), VISIBLE_COL).setCheckState(Qt.Checked)
+        tab.table.item(tab.table_row(index), VISIBLE_COL).setCheckState(Qt.Checked)
         pump(300)
         # The row's name and side, and whose it is, in words.
         from lobemap.core.names import parse_roi
@@ -67,11 +67,11 @@ def test_hover_names_the_glomerulus_in_3d_and_2d(monkeypatch, space):
         assert hover(viewer, surface.meshset.centroid(index)) == want
         assert tab.selected() is None
         assert click(viewer, surface.meshset.centroid(index)) == want
-        assert tab.selected().index == index
+        assert index in tab.selected().indices
 
         viewer.dims.ndisplay = 2
         pump()
-        assert hover(viewer, _inside_contour(tab.contour)) == want
+        assert hover(viewer, _inside_contour(tab.contour, index)) == want
 
         viewer.dims.ndisplay = 3
         pump()

@@ -159,10 +159,10 @@ def test_rows_toggled_in_every_brain_add_no_colormap(monkeypatch):
             tab = sess.panel.tab(name)
             if tab is None:
                 continue
-            rows = tab.table.rowCount()
+            n = tab.surface.meshset.n_compartments
             for k in range(6):
-                tab.select(range(k % 3, rows, 3))
-            tab.select(range(rows))
+                tab.select(range(k % 3, n, 3))
+            tab.select(range(n))
         pump(300)
         layers = {}
         for surface in sess.surfaces.values():

@@ -25,7 +25,6 @@ from .panel_tab import (
     NAME_COL,
     NEUROPIL_COLUMNS,
     RECEPTOR_COL,
-    SIDE_COL,
     VISIBLE_COL,
     AtlasTab,
 )
@@ -251,7 +250,6 @@ __all__ = [
     "NAME_COL",
     "NEUROPIL_COLUMNS",
     "RECEPTOR_COL",
-    "SIDE_COL",
     "TAB_PADDING",
     "VISIBLE_COL",
     "WIDTH",

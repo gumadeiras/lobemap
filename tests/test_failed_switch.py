@@ -27,6 +27,7 @@ from viewer_harness import (
     session,
     switch_to,
     switcher,
+    ticked,
 )
 
 pytestmark = pytest.mark.requires_data
@@ -48,16 +49,13 @@ def _buttons(tab):
 
 
 def _boxes(tab, column) -> set[int]:
-    from qtpy.QtCore import Qt
-
-    return {tab._index_of(r) for r in range(tab.table.rowCount())
-            if tab.table.item(r, column).checkState() == Qt.Checked}
+    return ticked(tab, column)
 
 
 def _tick(tab, column, index, on=True) -> None:
     from qtpy.QtCore import Qt
 
-    tab.table.item(tab._row_of(index), column).setCheckState(
+    tab.table.item(tab.table_row(index), column).setCheckState(
         Qt.Checked if on else Qt.Unchecked)
 
 
@@ -192,7 +190,7 @@ def _rendered(viewer) -> dict:
             "label boxes": _boxes(tab, LABEL_COL),
             "fill boxes": _boxes(tab, FILL_COL),
             "filter": tab.filter.text(),
-            "hidden rows": {tab._index_of(r) for r in range(tab.table.rowCount())
+            "hidden rows": {tab.row_at(r).key for r in range(tab.table.rowCount())
                             if tab.table.isRowHidden(r)},
             "line": tab.lines.currentText(),
             "count": tab.count.text(),

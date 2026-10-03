@@ -12,7 +12,16 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from viewer_harness import SPACES, click, contour_loops, hover, launched, pump, session
+from viewer_harness import (
+    SPACES,
+    click,
+    contour_loops,
+    every_index,
+    hover,
+    launched,
+    pump,
+    session,
+)
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
@@ -81,7 +90,7 @@ def test_hovering_changes_only_the_status_bar(monkeypatch, space):
         # end, and the primary atlas's tab open.
         for name in list(sess.parts):
             tab = sess.panel.tab(name)
-            tab.select(range(tab.table.rowCount()))
+            tab.select(every_index(tab))
             tab.table.selectRow(tab.table.rowCount() - 1)
             tab.table.scrollToBottom()
         sess.panel.setCurrentWidget(sess.panel.tabs[sess.registry.primary_atlas(space).id])
@@ -138,7 +147,7 @@ def test_a_click_selects_and_a_drag_does_not(monkeypatch):
             said = click(viewer, target)
             row = primary.selected()
             assert sess.panel.currentWidget() is primary
-            assert row is not None and row.index == index, ndisplay
+            assert row is not None and index in row.indices, ndisplay
             assert said == primary.describe(index)
             assert primary.detail_title.text().startswith(row.name)
             viewer.dims.ndisplay = 3

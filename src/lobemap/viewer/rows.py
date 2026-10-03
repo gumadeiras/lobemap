@@ -1,11 +1,16 @@
 """What each row of the panel says, before any widget shows it.
 
-One row per compartment of a mesh: a glomerulus of an atlas, or a neuropil
-of a reference set. Every tab of a kind builds its rows here, so a column,
-a detail and the search mean the same thing in all of them -- which they
-did not while each was worked out inside the table: the name kept its side
-in two atlases and dropped it in two others, and the search matched columns
-the tab had hidden.
+One row per compartment: a glomerulus of an atlas, or a neuropil of a
+reference set, with every side of it in that one row. An atlas publishes
+each side as a mesh of its own -- `VA3(L)` and `VA3(R)` -- and each is a
+`Side` here; `combine` puts the sides of one name into one `Row`, so Show,
+Label and Fill act on every side at once, and the details say which sides
+there are and how they differ.
+
+Every tab of a kind builds its rows here, so a column, a detail and the
+search mean the same thing in all of them -- which they did not while each
+was worked out inside the table: the name kept its side in two atlases and
+dropped it in two others, and the search matched columns the tab had hidden.
 
 Nothing here imports Qt.
 """
@@ -25,20 +30,22 @@ MISSING_TIP = "Not recorded"
 SIDES = {"L": "Left", "R": "Right"}
 #: A neuropil with no side suffix is one structure across the midline.
 MIDLINE = "Midline"
-#: Rows of one name sort left, right, midline, then unrecorded.
+#: The sides of a row, in the order they are listed.
 _SIDE_ORDER = {"Left": 0, "Right": 1, MIDLINE: 2, MISSING: 3}
 
 #: Written after a glomerulus name the atlas does not share with its space's
 #: standard vocabulary: a rename or a split. Its tooltip says which.
 RENAMED_MARK = "*"
 
+#: Which sides the atlas has of the compartment; the first detail of either kind.
+SIDES_FIELD = "Sides"
 STANDARD_NAME = "Standard name"
 #: The details of a glomerulus, in the order they are listed.
-GLOMERULUS_DETAILS = (STANDARD_NAME, *reference.FIELDS)
+GLOMERULUS_DETAILS = (SIDES_FIELD, STANDARD_NAME, *reference.FIELDS)
 FULL_NAME = "Full name"
 SOURCE = "Source"
 #: The details of a neuropil, in the order they are listed.
-NEUROPIL_DETAILS = (FULL_NAME, SOURCE)
+NEUROPIL_DETAILS = (SIDES_FIELD, FULL_NAME, SOURCE)
 
 RECEPTOR = "Receptor"
 
@@ -58,29 +65,32 @@ def _value(text: str | None) -> str:
     return (text or "").strip() or MISSING
 
 
-@dataclass(frozen=True)
-class Row:
-    """One compartment as the panel shows it."""
+def _searchable(*values: str) -> tuple[str, ...]:
+    return tuple(v.lower() for v in values if v and v != MISSING)
 
-    #: The compartment's index in its mesh, which a sorted table's row
-    #: number is not.
+
+@dataclass(frozen=True)
+class Side:
+    """One side of a compartment, as its atlas publishes it: `VA3(L)`."""
+
+    #: Its index in the mesh.
     index: int
-    #: The name as the atlas publishes it, without its side, and with any
-    #: doubt about it: `VP2 (VM6?)`.
+    #: The name without its side, with any doubt about it: `VP2 (VM6?)`.
     name: str
     #: The name exactly as published: `VP2(L)`, `AL_R`.
     published: str
     #: `Left`, `Right`, `Midline` or `MISSING`.
-    side: str
-    #: Field -> value, in the order of the kind's details; `MISSING` where
-    #: nothing is recorded.
+    where: str
+    #: Field -> value, for every detail of its kind but the sides.
     details: dict[str, str] = field(default_factory=dict)
-    #: Why this glomerulus's identity is in doubt, or "".
+    #: What the atlas's identity for it may really be, `VM6?`, or "".
+    note: str = ""
+    #: Why its identity is in doubt, or "".
     doubt: str = ""
-    #: What the standard name is, when it is not the published one, or "".
+    #: What its standard name is, when it is not the published one, or "".
     standard_note: str = ""
-    #: The reference table's own name for this glomerulus, or "": what the
-    #: driver lines are keyed on.
+    #: The reference table's own name for it, or "": what driver lines are
+    #: keyed on.
     reference_name: str = ""
     #: Its Virtual Fly Brain term page, or "".
     vfb: str = ""
@@ -88,26 +98,123 @@ class Row:
     search: tuple[str, ...] = ()
 
     @property
+    def tip(self) -> str:
+        """Why its name is marked: the doubt, then the standard name."""
+        return "\n\n".join(t for t in (self.doubt, self.standard_note) if t)
+
+
+@dataclass(frozen=True)
+class Row:
+    """One compartment as the panel shows it: every side of it, in one row."""
+
+    #: Its place among its tab's rows, which a sorted table's row number is not.
+    key: int
+    #: The name without a side, with the doubt of any side: `VP2 (VM6?)`.
+    name: str
+    #: Left, right, midline, then unrecorded.
+    sides: tuple[Side, ...]
+    #: Field -> value, in the order of the kind's details, `Sides` first; a
+    #: value the sides disagree on is given for each side, a line each.
+    details: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def indices(self) -> tuple[int, ...]:
+        """Its sides' indices in the mesh: what Show, Label and Fill act on."""
+        return tuple(side.index for side in self.sides)
+
+    @property
     def shown_name(self) -> str:
-        """The name with the mark that says its standard name differs."""
-        return self.name + (RENAMED_MARK if self.standard_note else "")
+        """The name, marked if any side's standard name differs from it."""
+        renamed = any(side.standard_note for side in self.sides)
+        return self.name + (RENAMED_MARK if renamed else "")
 
     @property
     def name_tip(self) -> str:
-        return "\n\n".join(t for t in (self.doubt, self.standard_note) if t)
+        """Why the name is marked; for each side, if they say different things."""
+        return _per_side([(side.where, side.tip) for side in self.sides],
+                         sep="\n\n", skip_empty=True)
+
+    @property
+    def reference_name(self) -> str:
+        return next((s.reference_name for s in self.sides if s.reference_name), "")
+
+    @property
+    def vfb(self) -> str:
+        return next((s.vfb for s in self.sides if s.vfb), "")
+
+    def side(self, index: int) -> Side:
+        """The side at mesh index `index`."""
+        return next(side for side in self.sides if side.index == index)
 
     def sort_key(self):
-        """Natural order on the name, then the side."""
-        return natural_key(self.name), _SIDE_ORDER.get(self.side, len(_SIDE_ORDER))
+        """Natural order on the name."""
+        return natural_key(self.name)
 
     def matches(self, needle: str) -> bool:
-        """Whether a search for `needle` keeps this row. Empty keeps all."""
+        """Whether a search for `needle` keeps this row. Empty keeps all.
+
+        Anything a side is searched on, so `DA1(R)` finds the row of DA1.
+        """
         needle = needle.strip().lower()
-        return not needle or any(needle in text for text in self.search)
+        return not needle or any(
+            needle in text for side in self.sides for text in side.search
+        )
 
 
-def _searchable(*values: str) -> tuple[str, ...]:
-    return tuple(v.lower() for v in values if v and v != MISSING)
+def _per_side(pairs, sep: str = "\n", skip_empty: bool = False) -> str:
+    """One value if every side agrees, else 'Left: x', a line per side."""
+    if len({value for _where, value in pairs}) <= 1:
+        return pairs[0][1] if pairs else ""
+    return sep.join(f"{where}: {value}" for where, value in pairs
+                    if value or not skip_empty)
+
+
+def _join(words: list[str]) -> str:
+    """'left', 'left and right', 'left, right and midline'."""
+    return words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}"
+
+
+def sides_text(sides) -> str:
+    """Which sides a row has, as its Sides detail: 'Left and right'.
+
+    A doubt that only some sides carry, or that differs between them, is
+    written after each: 'Left (VM6?) and right'. One every side shares is in
+    the name already.
+    """
+    differ = len({side.note for side in sides}) > 1
+    words = [side.where.lower() if side.where != MISSING else MISSING for side in sides]
+    if differ:
+        words = [f"{w} ({side.note})" if side.note else w
+                 for w, side in zip(words, sides, strict=True)]
+    text = _join(words)
+    return text[:1].upper() + text[1:]
+
+
+def combine(sides, fields) -> list[Row]:
+    """One row per name: the sides of each, in the order the mesh first has it.
+
+    `fields` are the kind's details after `Sides`.
+    """
+    groups: dict[str, list[Side]] = {}
+    for side in sides:
+        groups.setdefault(parse_roi(side.published)[0], []).append(side)
+    rows = []
+    for key, group in enumerate(groups.values()):
+        group.sort(key=lambda s: _SIDE_ORDER.get(s.where, len(_SIDE_ORDER)))
+        bare = parse_roi(group[0].published)[0]
+        notes = list(dict.fromkeys(side.note for side in group if side.note))
+        details = {SIDES_FIELD: sides_text(group)}
+        details.update({
+            name: _per_side([(side.where, side.details[name]) for side in group])
+            for name in fields
+        })
+        rows.append(Row(
+            key=key,
+            name=f"{bare} ({', '.join(notes)})" if notes else bare,
+            sides=tuple(group),
+            details=details,
+        ))
+    return rows
 
 
 def _joined(annotation, comp, published: str) -> dict:
@@ -138,76 +245,89 @@ def _standard_note(bare: str, comp) -> str:
             + (f" ({how})." if how else "."))
 
 
-def hover_line(row: Row, title: str) -> str:
+def hover_line(side: Side, title: str) -> str:
     """What the status bar says under the cursor: 'VA3 (left) — Benton 2025'.
 
-    A doubt joins the side, 'VP2 (VM6?, left)', and a neuropil gives its
-    full name: 'AL, antennal lobe (right) — Neuropils (FlyWire)'.
+    The side under the cursor, not its row's. A doubt joins the side,
+    'VP2 (VM6?, left)', and a neuropil gives its full name: 'AL, antennal
+    lobe (right) — Neuropils (FlyWire)'.
     """
-    name = row.name
-    full = row.details.get(FULL_NAME, MISSING)
+    name = side.name
+    full = side.details.get(FULL_NAME, MISSING)
     if full != MISSING:
         name = f"{name}, {full}"
-    if row.side != MISSING:
-        side = row.side.lower()
+    if side.where != MISSING:
+        where = side.where.lower()
         # A name ends in a parenthesis only with a doubt: its side went.
-        name = f"{name[:-1]}, {side})" if name.endswith(")") else f"{name} ({side})"
+        name = f"{name[:-1]}, {where})" if name.endswith(")") else f"{name} ({where})"
     return f"{name} — {title}"
 
 
-def glomerulus_rows(names, compartments, annotation) -> list[Row]:
-    """The rows of an atlas tab, one per mesh name, in mesh order.
+def glomerulus_sides(names, compartments, annotation) -> list[Side]:
+    """Each mesh name of an atlas as a side, in mesh order.
 
     `annotation` is `core.reference.load`'s table; a glomerulus it does not
     list shows `MISSING` in each of its fields.
     """
     by_index = {c.local_id: c for c in compartments or ()}
-    rows = []
+    out = []
     for index, published in enumerate(names):
         comp = by_index.get(index)
         bare, suffix = parse_roi(published)
-        doubt_note = comp.uncertain if comp else ""
-        name = f"{bare} ({doubt_note})" if doubt_note else bare
-        side = (comp.side if comp else None) or suffix
+        note = comp.uncertain if comp else ""
+        name = f"{bare} ({note})" if note else bare
+        where = (comp.side if comp else None) or suffix
         props = _joined(annotation, comp, published)
         standard = ", ".join(comp.canonical) if comp and comp.canonical else ""
         details = {STANDARD_NAME: _value(standard)}
         details.update({key: _value(props.get(key)) for key in reference.FIELDS})
-        rows.append(Row(
+        out.append(Side(
             index=index,
             name=name,
             published=published,
-            side=SIDES.get(side, MISSING),
+            where=SIDES.get(where, MISSING),
             details=details,
+            note=note,
             doubt=comp.uncertain_reason if comp else "",
             standard_note=_standard_note(bare, comp),
             reference_name=props.get(reference.KEY, ""),
             vfb=props.get(reference.VFB, ""),
             search=_searchable(name, published, *details.values()),
         ))
-    return rows
+    return out
 
 
-def neuropil_rows(names, full_names) -> list[Row]:
-    """The rows of a neuropil tab, one per mesh name, in mesh order.
+def neuropil_sides(names, full_names) -> list[Side]:
+    """Each mesh name of a neuropil set as a side, in mesh order.
 
     `full_names` is `core.reference.neuropil_names`'s table: the name
     without its side -> (full name, the source that gives it).
     """
-    rows = []
+    out = []
     for index, published in enumerate(names):
-        bare, side = parse_roi(published)
+        bare, where = parse_roi(published)
         full, source = full_names.get(bare, ("", ""))
         details = {FULL_NAME: _value(full), SOURCE: _value(source)}
-        rows.append(Row(
+        out.append(Side(
             index=index,
             name=bare,
             published=published,
-            side=SIDES.get(side, MIDLINE),
+            where=SIDES.get(where, MIDLINE),
             details=details,
             search=_searchable(bare, published, details[FULL_NAME]),
         ))
-    return rows
+    return out
+
+
+def glomerulus_rows(names, compartments, annotation) -> list[Row]:
+    """The rows of a glomerulus table, one per glomerulus."""
+    return combine(glomerulus_sides(names, compartments, annotation),
+                   GLOMERULUS_DETAILS[1:])
+
+
+def neuropil_rows(names, full_names) -> list[Row]:
+    """The rows of a neuropil table, one per neuropil."""
+    return combine(neuropil_sides(names, full_names), NEUROPIL_DETAILS[1:])
 
 
 __all__ = [
@@ -220,11 +340,17 @@ __all__ = [
     "RECEPTOR",
     "RENAMED_MARK",
     "SIDES",
+    "SIDES_FIELD",
     "SOURCE",
     "STANDARD_NAME",
     "Row",
+    "Side",
+    "combine",
     "glomerulus_rows",
+    "glomerulus_sides",
     "hover_line",
     "natural_key",
     "neuropil_rows",
+    "neuropil_sides",
+    "sides_text",
 ]

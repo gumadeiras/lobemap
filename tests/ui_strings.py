@@ -349,7 +349,7 @@ def walk(viewer, spaces):
                 for name in list(sess.parts):
                     tab = sess.panel.tab(name)
                     if tab is not None:
-                        tab.select(range(tab.table.rowCount()))
+                        tab.select(range(tab.surface.meshset.n_compartments))
                         tab.table.selectRow(0)
             if state == "2d_oblique":
                 for angle, value in zip(("spin", "tilt", "turn"), TURNED, strict=True):

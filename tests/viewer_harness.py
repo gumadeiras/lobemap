@@ -382,13 +382,27 @@ def drawn(surface, contour=None) -> set[int]:
     return out | (resident & opaque)
 
 
-def checked(tab) -> set[int]:
+def ticked(tab, column=None) -> set[int]:
+    """Every side of the rows whose box in `column`, Show by default, is
+    ticked in full: the compartments the table says are on."""
     from qtpy.QtCore import Qt
 
     from lobemap.viewer.panel import VISIBLE_COL
 
-    return {tab._index_of(r) for r in range(tab.table.rowCount())
-            if tab.table.item(r, VISIBLE_COL).checkState() == Qt.Checked}
+    column = VISIBLE_COL if column is None else column
+    return {i for r in range(tab.table.rowCount())
+            if tab.table.item(r, column).checkState() == Qt.CheckState.Checked
+            for i in tab.row_at(r).indices}
+
+
+def checked(tab) -> set[int]:
+    """The compartments whose rows are ticked to show."""
+    return ticked(tab)
+
+
+def every_index(tab) -> range:
+    """Every compartment of a tab's mesh, every side of every row."""
+    return range(tab.surface.meshset.n_compartments)
 
 
 def planes_cut(surface) -> set[int]:
@@ -414,6 +428,8 @@ def planes_cut(surface) -> set[int]:
 def assert_rows_match_drawing(sess) -> None:
     """Every tab: checked rows, count text and rendered geometry agree.
 
+    A row is every side of a compartment; the count counts rows.
+
     Call it once the scene has settled (`pump(300)`): a compartment checked
     after compaction reaches the mesh with the next compaction. In 2D only
     the checked compartments this plane crosses can have a contour, so
@@ -426,9 +442,10 @@ def assert_rows_match_drawing(sess) -> None:
         got = drawn(tab.surface, contour)
         want = planes_cut(tab.surface) if two_d else rows
         n = tab.table.rowCount()
+        on = sum(bool(set(row.indices) & rows) for row in tab.rows.values())
         assert rows == tab.surface.selection, (name, "rows != selection")
         assert got == want, (name, sorted(got ^ want)[:8])
-        assert tab.count.text() == f"{len(rows)} of {n} shown", (name, tab.count.text())
+        assert tab.count.text() == f"{on} of {n} shown", (name, tab.count.text())
         if not rows:
             assert not tab.surface.layer.visible, name
             if contour is not None:

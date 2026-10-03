@@ -7,7 +7,8 @@ Sorting is the risky one. Every handler used to treat the visual row as
 the compartment id -- `_set_rows`, the filter, `highlight` -- which is
 true only while the table is in insertion order. Once a header click can
 reorder it, a row number means nothing, so these check behavior AFTER a
-sort rather than before.
+sort rather than before. Nor is a row one compartment: it is every side of
+one, so a box ticked acts on each.
 """
 
 from __future__ import annotations
@@ -73,15 +74,15 @@ def _drawn(tab) -> set[int]:
     return {round(float(v)) for v, a in zip(values, alpha) if a > 0}
 
 
-def test_it_opens_sorted_by_glomerulus_then_side(tab):
-    from lobemap.viewer.panel import NAME_COL, SIDE_COL
+def test_it_opens_sorted_by_glomerulus_one_row_each(tab):
+    from lobemap.viewer.panel import NAME_COL
 
-    shown = [(tab.table.item(r, NAME_COL).text(), tab.table.item(r, SIDE_COL).text())
-             for r in range(tab.table.rowCount())]
-    keys = [tab.rows[tab._index_of(r)].sort_key() for r in range(tab.table.rowCount())]
+    shown = [tab.table.item(r, NAME_COL).text() for r in range(tab.table.rowCount())]
+    keys = [tab.row_at(r).sort_key() for r in range(tab.table.rowCount())]
     assert keys == sorted(keys)
-    # D on the left before D on the right, both before DA1.
-    assert shown[:3] == [("D", "Left"), ("D", "Right"), ("DA1", "Right")], shown[:3]
+    # D once, for both its sides, then DA1.
+    assert shown[:3] == ["D", "DA1", "DA2"], shown[:3]
+    assert len(shown) == len(set(shown)) == len(tab.rows)
     assert tab.table.isSortingEnabled()
 
 
@@ -106,13 +107,14 @@ def test_a_row_no_longer_means_a_compartment_index(tab):
     from lobemap.viewer.panel import NAME_COL
 
     tab.table.sortItems(NAME_COL, Qt.DescendingOrder)
-    pairs = {r: tab._index_of(r) for r in range(tab.table.rowCount())}
-    assert any(r != i for r, i in pairs.items()), "sorting changed nothing"
+    pairs = {r: tab.row_at(r) for r in range(tab.table.rowCount())}
+    assert any(r != row.key for r, row in pairs.items()), "sorting changed nothing"
     # Still a bijection: every compartment present exactly once.
-    assert sorted(pairs.values()) == list(range(tab.table.rowCount()))
+    assert sorted(i for row in pairs.values() for i in row.indices) == \
+        list(range(tab.surface.meshset.n_compartments))
     # And picking still lands on the right glomerulus.
     tab.highlight(0)
-    assert tab._index_of(tab.table.currentRow()) == 0
+    assert 0 in tab.row_at(tab.table.currentRow()).indices
     tab.table.sortItems(NAME_COL, Qt.AscendingOrder)
 
 
@@ -123,7 +125,7 @@ def test_highlight_finds_the_row_for_an_index(tab):
     index = 7
     tab.highlight(index)
     row = tab.table.currentRow()
-    assert tab._index_of(row) == index, (
+    assert index in tab.row_at(row).indices, (
         "highlight jumped to a row number, not to the compartment"
     )
     assert tab.table.item(row, NAME_COL).text() == \
@@ -131,7 +133,7 @@ def test_highlight_finds_the_row_for_an_index(tab):
 
 
 def test_show_none_then_all_round_trips(tab):
-    n = tab.table.rowCount()
+    n = tab.surface.meshset.n_compartments
     _click(tab, "None")
     assert tab.surface.selection == set()
     assert _drawn(tab) == set(), "Show none left glomeruli on screen"
@@ -157,13 +159,14 @@ def test_the_fill_column_drives_the_contour_overlay(tab):
     from lobemap.viewer.panel import FILL_COL
 
     assert tab.contour is not None
-    row = 3
-    index = tab._index_of(row)
-    assert index not in tab.contour.filled
+    # D: a glomerulus with both sides in the hemibrain.
+    row = 0
+    sides = set(tab.row_at(row).indices)
+    assert len(sides) == 2 and not sides & tab.contour.filled
     tab.table.item(row, FILL_COL).setCheckState(Qt.Checked)
-    assert index in tab.contour.filled, "ticking fill did not reach the layer"
+    assert sides <= tab.contour.filled, "ticking fill did not reach every side"
     tab.table.item(row, FILL_COL).setCheckState(Qt.Unchecked)
-    assert index not in tab.contour.filled
+    assert not sides & tab.contour.filled
 
 
 def test_fill_and_label_are_independent(tab):
@@ -172,12 +175,12 @@ def test_fill_and_label_are_independent(tab):
     from lobemap.viewer.panel import FILL_COL, LABEL_COL
 
     row = 5
-    index = tab._index_of(row)
+    sides = set(tab.row_at(row).indices)
     tab.table.item(row, FILL_COL).setCheckState(Qt.Checked)
-    assert index in tab.contour.filled
-    assert index not in tab.contour.labels
+    assert sides <= tab.contour.filled
+    assert not sides & tab.contour.labels
     tab.table.item(row, LABEL_COL).setCheckState(Qt.Checked)
-    assert index in tab.contour.filled and index in tab.contour.labels
+    assert sides <= tab.contour.filled and sides <= tab.contour.labels
     tab.table.item(row, FILL_COL).setCheckState(Qt.Unchecked)
 
 
@@ -230,18 +233,16 @@ def test_a_neuropil_layer_is_not_described_as_glomeruli(fafb_tabs):
     """A neuropil has no receptor, and its details are its full name."""
     tab = fafb_tabs["fafb_neuropil"]
     assert tab.is_atlas is False
-    assert _visible_headers(tab) == ["Show", "Neuropil", "Side", "Label", "Fill"]
-    assert tab.detail_fields == ("Full name", "Source")
+    assert _visible_headers(tab) == ["Show", "Neuropil", "Label", "Fill"]
+    assert tab.detail_fields == ("Sides", "Full name", "Source")
 
 
 def test_an_atlas_layer_keeps_its_columns(fafb_tabs):
     tab = fafb_tabs["benton2025"]
     assert tab.is_atlas is True
-    assert _visible_headers(tab) == [
-        "Show", "Glomerulus", "Side", "Label", "Fill", "Receptor"
-    ]
+    assert _visible_headers(tab) == ["Show", "Glomerulus", "Label", "Fill", "Receptor"]
     # The rest of the annotation is in the details, in a fixed order.
-    assert tab.detail_fields == ("Standard name", "Receptor", "Co-receptor",
+    assert tab.detail_fields == ("Sides", "Standard name", "Receptor", "Co-receptor",
                                  "Sensory neuron", "Sensillum", "Organ")
 
 
@@ -254,16 +255,16 @@ def test_fill_and_label_still_work_on_a_neuropil_tab(fafb_tabs):
     tab = fafb_tabs["fafb_neuropil"]
     if tab.contour is None:
         pytest.skip("no contour overlay for the neuropil layer")
-    index = tab._index_of(2)
+    sides = set(tab.row_at(2).indices)
     tab.table.item(2, FILL_COL).setCheckState(Qt.Checked)
-    assert index in tab.contour.filled
+    assert sides <= tab.contour.filled
     tab.table.item(2, LABEL_COL).setCheckState(Qt.Checked)
-    assert index in tab.contour.labels
+    assert sides <= tab.contour.labels
 
 
 def test_columns_are_sized_to_fit_the_dock(fafb_tabs):
-    """Checkboxes a fixed width, the name and side to their contents, and
-    the receptor takes what is left, shortened rather than scrolled."""
+    """Checkboxes a fixed width, the name to its contents, and the
+    receptor takes what is left, shortened rather than scrolled."""
     from qtpy.QtWidgets import QHeaderView
 
     from lobemap.viewer.panel import CHECK_WIDTH, FILL_COL, LABEL_COL, VISIBLE_COL
@@ -273,8 +274,7 @@ def test_columns_are_sized_to_fit_the_dock(fafb_tabs):
     header = tab.table.horizontalHeader()
     modes = [header.sectionResizeMode(c) for c in range(tab.table.columnCount())]
     assert modes == [QHeaderView.Fixed, QHeaderView.ResizeToContents,
-                     QHeaderView.ResizeToContents, QHeaderView.Fixed,
-                     QHeaderView.Fixed, QHeaderView.Stretch]
+                     QHeaderView.Fixed, QHeaderView.Fixed, QHeaderView.Stretch]
     for col in (VISIBLE_COL, LABEL_COL, FILL_COL):
         assert tab.table.columnWidth(col) == CHECK_WIDTH
     # The full receptor list is in the tooltip, however short the cell.
@@ -374,7 +374,7 @@ def test_show_all_and_show_none_still_drive_visibility(fafb_tabs):
         for i in range(grid.count())
         if isinstance(grid.itemAt(i).widget(), QPushButton)
     }
-    n = tab.table.rowCount()
+    n = tab.surface.meshset.n_compartments
     by_text["None"].click()
     assert tab.surface.selection == set()
     by_text["All"].click()
@@ -382,10 +382,11 @@ def test_show_all_and_show_none_still_drive_visibility(fafb_tabs):
 
 
 def _name_cells(tab):
+    """Each side's published name -> the name cell of its row."""
     from lobemap.viewer.panel import NAME_COL
 
-    return {tab.rows[tab._index_of(r)].published: tab.table.item(r, NAME_COL)
-            for r in range(tab.table.rowCount())}
+    return {side.published: tab.table.item(r, NAME_COL)
+            for r in range(tab.table.rowCount()) for side in tab.row_at(r).sides}
 
 
 def test_a_renamed_glomerulus_is_marked_and_says_why(tab):
@@ -416,8 +417,8 @@ def test_the_search_reaches_the_annotation_and_nothing_hidden(tab):
     """The name, as published too, and every annotation field; not the side."""
     def shown(needle):
         tab.filter.setText(needle)
-        hit = {tab.rows[tab._index_of(r)].published for r in range(tab.table.rowCount())
-               if not tab.table.isRowHidden(r)}
+        hit = {side.published for r in range(tab.table.rowCount())
+               if not tab.table.isRowHidden(r) for side in tab.row_at(r).sides}
         tab.filter.setText("")
         return hit
 
@@ -497,7 +498,7 @@ def test_3d_still_shows_the_mesh(session):
     viewer.dims.ndisplay = 3
     _click(tab, "All")
     assert tab.surface.layer.visible is True
-    assert _drawn(tab) == set(range(tab.table.rowCount()))
+    assert _drawn(tab) == set(range(tab.surface.meshset.n_compartments))
     if tab.contour is not None:
         assert tab.contour.layer.visible is False
 

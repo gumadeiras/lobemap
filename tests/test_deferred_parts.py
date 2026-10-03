@@ -19,6 +19,7 @@ from viewer_harness import (
     assert_rows_match_drawing,
     checked,
     drawn,
+    every_index,
     hover,
     launched,
     layer_names,
@@ -98,10 +99,10 @@ def test_a_deferred_part_is_built_when_its_tab_opens(monkeypatch, space, name, n
 
         _buttons(tab)["All"].click()
         pump(300)
-        assert checked(tab) == set(range(n))
+        assert checked(tab) == set(every_index(tab))
         assert_rows_match_drawing(sess)
         if ndisplay == "3":
-            assert drawn(tab.surface) == set(range(n))
+            assert drawn(tab.surface) == set(every_index(tab))
         else:
             assert drawn(tab.surface, sess.contours[name]), "no outline on the plane"
 
@@ -283,7 +284,7 @@ def test_switching_a_stand_in_on_builds_its_part_and_shows_it(monkeypatch):
         # It became the part's mesh layer: no stand-in is left.
         assert tab.surface.layer is stand_in
         assert not [layer for layer in viewer.layers if layer.name.endswith("not loaded yet")]
-        assert checked(tab) == set(range(tab.table.rowCount()))
+        assert checked(tab) == set(every_index(tab))
         assert drawn(tab.surface, sess.contours["fafb_neuropil"])
         assert_rows_match_drawing(sess)
 
@@ -305,7 +306,7 @@ def test_a_stand_in_deleted_by_hand_leaves_its_tab_working(monkeypatch, space, n
         assert sess.contours[name].layer in viewer.layers
         _buttons(tab)["All"].click()
         pump(300)
-        assert checked(tab) == set(range(tab.table.rowCount()))
+        assert checked(tab) == set(every_index(tab))
         assert drawn(tab.surface, sess.contours[name]), "no outline on the plane"
         assert_renders_loops(sess.contours[name])
         assert_rows_match_drawing(sess)

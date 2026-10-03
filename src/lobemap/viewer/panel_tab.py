@@ -36,22 +36,24 @@ from qtpy.QtWidgets import (
 
 from . import rows as R
 
-#: The columns, by position. The first five mean the same in both kinds of
-#: tab; a glomerulus tab adds the receptor.
-VISIBLE_COL, NAME_COL, SIDE_COL, LABEL_COL, FILL_COL, RECEPTOR_COL = range(6)
-GLOMERULUS_COLUMNS = ("Show", "Glomerulus", "Side", "Label", "Fill", R.RECEPTOR)
-NEUROPIL_COLUMNS = ("Show", "Neuropil", "Side", "Label", "Fill")
+#: The columns, by position. The first four mean the same in both kinds of
+#: tab; a glomerulus tab adds the receptor. A row is a compartment with all
+#: its sides, so there is no side column: the details list the sides.
+VISIBLE_COL, NAME_COL, LABEL_COL, FILL_COL, RECEPTOR_COL = range(5)
+GLOMERULUS_COLUMNS = ("Show", "Glomerulus", "Label", "Fill", R.RECEPTOR)
+NEUROPIL_COLUMNS = ("Show", "Neuropil", "Label", "Fill")
 
 #: The checkbox columns, a fixed width each: they hold nothing to size to.
 CHECK_COLUMNS = (VISIBLE_COL, LABEL_COL, FILL_COL)
 CHECK_WIDTH = 38
 
-SHOW_TIP = "Draw it in 3D and on the slice"
-LABEL_TIP = "Write the name on the slice (Slice view only)"
-FILL_TIP = "Fill the outline on the slice (Slice view only)"
+SHOW_TIP = "Draw every side of it in 3D and on the slice"
+LABEL_TIP = "Write the name of every side on the slice (Slice view only)"
+FILL_TIP = "Fill the outline of every side on the slice (Slice view only)"
 
-#: Rows carry their compartment index here. Once the table can be sorted,
-#: the visual row is no longer the compartment id and nothing may assume it.
+#: Cells carry their row's key here (`Row.key`). Once the table can be
+#: sorted, the visual row is no longer the row's place and nothing may
+#: assume it; nor is a row one compartment, but all its sides.
 INDEX_ROLE = Qt.UserRole
 
 #: First entry of the driver-line menu, which applies nothing.
@@ -94,8 +96,7 @@ def _bulk_buttons(is_atlas: bool) -> tuple[tuple[str, str], tuple[str, str]]:
 class _Cell(QTableWidgetItem):
     """A text cell that sorts on a key rather than by raw code point.
 
-    The name sorts naturally and then by side; the side by side and then
-    name; anything else naturally on its text.
+    The name sorts on its row's key; anything else naturally on its text.
     """
 
     def __init__(self, text: str, key=None) -> None:
@@ -150,7 +151,13 @@ class _Value(QLabel):
 
 
 class AtlasTab(QWidget):
-    """The table of one mesh: an atlas's glomeruli, or a neuropil set."""
+    """The table of one mesh: an atlas's glomeruli, or a neuropil set.
+
+    A row is one compartment with all its sides (`rows.Row`), so its Show,
+    Label and Fill boxes act on every side, and a box is half ticked when
+    only some sides are: never by the panel's own controls, which act on
+    whole rows, but by a selection set in code (`select`).
+    """
 
     def __init__(self, surface, compartments=None, contour=None,
                  annotation=None, is_atlas: bool = True, lines=None,
@@ -165,8 +172,12 @@ class AtlasTab(QWidget):
         names = surface.meshset.names
         built = (R.glomerulus_rows(names, self.compartments, annotation or {})
                  if is_atlas else R.neuropil_rows(names, neuropil_names or {}))
-        #: Compartment index -> what its row shows.
-        self.rows: dict[int, R.Row] = {row.index: row for row in built}
+        #: Row key -> what the row shows.
+        self.rows: dict[int, R.Row] = {row.key: row for row in built}
+        #: Compartment index -> the row holding it.
+        self._row_by_index: dict[int, R.Row] = {
+            i: row for row in built for i in row.indices
+        }
         self.columns = GLOMERULUS_COLUMNS if is_atlas else NEUROPIL_COLUMNS
         self.detail_fields = R.GLOMERULUS_DETAILS if is_atlas else R.NEUROPIL_DETAILS
         self._updating = False
@@ -252,8 +263,7 @@ class AtlasTab(QWidget):
         return grid
 
     def _make_table(self) -> QTableWidget:
-        n = self.surface.meshset.n_compartments
-        self.table = table = QTableWidget(n, len(self.columns))
+        self.table = table = QTableWidget(len(self.rows), len(self.columns))
         table.setHorizontalHeaderLabels(list(self.columns))
         for col, tip in ((VISIBLE_COL, SHOW_TIP), (LABEL_COL, LABEL_TIP),
                          (FILL_COL, FILL_TIP)):
@@ -265,9 +275,9 @@ class AtlasTab(QWidget):
         table.setTextElideMode(Qt.ElideRight)
 
         # Fits the dock without scrolling sideways: fixed checkbox columns,
-        # the name and side as wide as they need, and the last text column
-        # takes what is left, shortening a long receptor list rather than
-        # widening the table. The tooltip has it in full.
+        # the name as wide as it needs, and the last text column takes what
+        # is left, shortening a long receptor list rather than widening the
+        # table. The tooltip has it in full.
         header = table.horizontalHeader()
         header.setMinimumSectionSize(24)
         header.setStretchLastSection(False)
@@ -275,7 +285,6 @@ class AtlasTab(QWidget):
         for col in CHECK_COLUMNS:
             header.setSectionResizeMode(col, QHeaderView.Fixed)
             table.setColumnWidth(col, CHECK_WIDTH)
-        header.setSectionResizeMode(SIDE_COL, QHeaderView.ResizeToContents)
         stretch = RECEPTOR_COL if self.is_atlas else NAME_COL
         header.setSectionResizeMode(NAME_COL, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(stretch, QHeaderView.Stretch)
@@ -285,24 +294,20 @@ class AtlasTab(QWidget):
         table.setSortingEnabled(False)
         selection = self.surface.selection
         for r, row in enumerate(self.rows.values()):
-            table.setItem(r, VISIBLE_COL, self._box(row.index, row.index in selection))
+            table.setItem(r, VISIBLE_COL, self._box(row, selection))
             table.setItem(r, NAME_COL, self._name_cell(row))
-            side = _Cell(row.side, key=(row.sort_key()[1], R.natural_key(row.name)))
-            side.setData(INDEX_ROLE, row.index)
-            table.setItem(r, SIDE_COL, side)
-            table.setItem(r, LABEL_COL, self._box(row.index, False, LABEL_TIP))
-            table.setItem(r, FILL_COL, self._box(row.index, False, FILL_TIP))
+            table.setItem(r, LABEL_COL, self._box(row, (), LABEL_TIP))
+            table.setItem(r, FILL_COL, self._box(row, (), FILL_TIP))
             if self.is_atlas:
                 receptor = row.details[R.RECEPTOR]
                 cell = _Cell(receptor)
                 if receptor != R.MISSING:
                     cell.setToolTip(receptor)
-                cell.setData(INDEX_ROLE, row.index)
+                cell.setData(INDEX_ROLE, row.key)
                 table.setItem(r, RECEPTOR_COL, cell)
 
-        # Natural order on the name, then side, and clickable headers from
-        # here on: the table is long enough that scanning it unsorted is the
-        # wrong default.
+        # Natural order on the name, and clickable headers from here on: the
+        # table is long enough that scanning it unsorted is the wrong default.
         table.setSortingEnabled(True)
         table.sortItems(NAME_COL, Qt.AscendingOrder)
         table.itemChanged.connect(self._on_item_changed)
@@ -310,25 +315,32 @@ class AtlasTab(QWidget):
         return table
 
     @staticmethod
-    def _box(index: int, checked: bool, tip: str = "") -> QTableWidgetItem:
+    def _state(row: R.Row, held) -> Qt.CheckState:
+        """Ticked if every side is in `held`, half if some are, else not."""
+        n = sum(i in held for i in row.indices)
+        if n == len(row.indices):
+            return Qt.Checked
+        return Qt.PartiallyChecked if n else Qt.Unchecked
+
+    def _box(self, row: R.Row, held, tip: str = "") -> QTableWidgetItem:
         box = QTableWidgetItem()
         box.setFlags(box.flags() | Qt.ItemIsUserCheckable)
-        box.setCheckState(Qt.Checked if checked else Qt.Unchecked)
-        box.setData(INDEX_ROLE, index)
+        box.setCheckState(self._state(row, held))
+        box.setData(INDEX_ROLE, row.key)
         if tip:
             box.setToolTip(tip)
         return box
 
     def _name_cell(self, row: R.Row) -> _Cell:
         """The name in its draw color, marked if it is not the standard one."""
-        cell = _Cell(row.shown_name, key=row.sort_key())
-        rgba = self.surface.colors[row.index]
+        cell = _Cell(row.shown_name, key=(row.sort_key(),))
+        rgba = self.surface.colors[row.indices[0]]
         cell.setForeground(
             QColor.fromRgbF(float(rgba[0]), float(rgba[1]), float(rgba[2]))
         )
         if row.name_tip:
             cell.setToolTip(row.name_tip)
-        cell.setData(INDEX_ROLE, row.index)
+        cell.setData(INDEX_ROLE, row.key)
         return cell
 
     def _make_details(self, one: str) -> QWidget:
@@ -366,24 +378,32 @@ class AtlasTab(QWidget):
         form.addRow(self.vfb)
         return box
 
-    # -- helpers ---------------------------------------------------------
+    # -- rows ------------------------------------------------------------
     #
-    # The visual row and the compartment index are different numbers once
-    # the table can be sorted. Every row carries its index in INDEX_ROLE;
-    # nothing below may use a row number as a compartment id.
+    # The visual row, the row's key and a compartment index are three
+    # different numbers once the table can be sorted. Every cell carries its
+    # row's key in INDEX_ROLE; nothing below may use a row number as either.
 
-    def _index_of(self, row: int) -> int | None:
-        item = self.table.item(row, VISIBLE_COL)
-        if item is None:
+    def row_at(self, table_row: int) -> R.Row | None:
+        """The row shown at `table_row` of the table, as it is sorted now."""
+        item = self.table.item(table_row, VISIBLE_COL)
+        key = item.data(INDEX_ROLE) if item is not None else None
+        return None if key is None else self.rows.get(int(key))
+
+    def table_row(self, index: int) -> int | None:
+        """Where in the table the row of compartment `index` is now."""
+        row = self._row_by_index.get(index)
+        if row is None:
             return None
-        value = item.data(INDEX_ROLE)
-        return None if value is None else int(value)
-
-    def _row_of(self, index: int) -> int | None:
-        for row in range(self.table.rowCount()):
-            if self._index_of(row) == index:
-                return row
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, VISIBLE_COL)
+            if item is not None and item.data(INDEX_ROLE) == row.key:
+                return r
         return None
+
+    def row_of(self, index: int) -> R.Row | None:
+        """The row holding compartment `index`, with its other sides."""
+        return self._row_by_index.get(index)
 
     def _push(self, selection: set[int]) -> None:
         """Show exactly these compartments, in whichever layer the mode draws.
@@ -393,6 +413,7 @@ class AtlasTab(QWidget):
         checkbox reach the same code and cannot disagree about the mode.
         """
         self.surface.set_selection(selection)
+        self._set_checks(VISIBLE_COL, self.surface.selection)
         self._selection_changed()
 
     def _selection_changed(self) -> None:
@@ -410,20 +431,21 @@ class AtlasTab(QWidget):
         self._selection_changed()
 
     def _update_count(self, event=None) -> None:
-        """How many are drawn, which is the checked ones or none.
+        """How many rows are drawn: those with any side drawn, or none.
 
         None only while napari's eye has the drawing layer off in a way the
         surface did not take as a selection change -- the wrong mode's layer
         switched on, say -- so the count never claims what is not drawn.
         """
-        n = self.table.rowCount()
-        shown = len(self.surface.selection)
+        selection = self.surface.selection
+        shown = sum(any(i in selection for i in row.indices)
+                    for row in self.rows.values())
         if shown and not self.surface.mode_layer().visible:
             self.count.setText(
                 f"None shown: the layer is off in the layer list ({shown} checked)"
             )
         else:
-            self.count.setText(f"{shown} of {n} shown")
+            self.count.setText(f"{shown} of {len(self.rows)} shown")
 
     def set_mode(self, three_d: bool) -> None:
         """Disable the slice-only controls in 3D, where they draw nothing."""
@@ -449,14 +471,18 @@ class AtlasTab(QWidget):
     # -- driver lines, details and VFB -----------------------------------
 
     def _fill_lines(self, lines) -> None:
-        """One entry per driver line labelling any glomerulus of this atlas."""
+        """One entry per driver line labelling any glomerulus of this atlas,
+        with how many glomeruli it labels; it shows every side of each."""
         for line, names in lines.items():
+            rows = [row for row in self.rows.values()
+                    if any(s.reference_name and s.reference_name in names
+                           for s in row.sides)]
             members = tuple(sorted(
-                i for i, row in self.rows.items()
-                if row.reference_name and row.reference_name in names
+                s.index for row in rows for s in row.sides
+                if s.reference_name and s.reference_name in names
             ))
             if members:
-                self.lines.addItem(f"{line} ({len(members)})", members)
+                self.lines.addItem(f"{line} ({len(rows)})", members)
 
     def _apply_line(self, index: int) -> None:
         if index <= 0:
@@ -467,16 +493,11 @@ class AtlasTab(QWidget):
         """The row the details describe: the first selected, if any."""
         model = self.table.selectionModel()
         picked = model.selectedRows() if model else []
-        index = self._index_of(picked[0].row()) if picked else None
-        return self.rows.get(index) if index is not None else None
+        return self.row_at(picked[0].row()) if picked else None
 
     def _on_row_selected(self) -> None:
         row = self.selected()
-        if row is None:
-            self.detail_title.setText(self._no_selection)
-        else:
-            known = row.side not in (R.MISSING, "")
-            self.detail_title.setText(f"{row.name}, {row.side}" if known else row.name)
+        self.detail_title.setText(self._no_selection if row is None else row.name)
         for name, label in self.details.items():
             value = row.details[name] if row is not None else ""
             label.setText(value)
@@ -497,36 +518,41 @@ class AtlasTab(QWidget):
     # -- handlers --------------------------------------------------------
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
-        if self._updating:
+        """A box ticked or cleared by hand: every side of its row follows."""
+        if self._updating or item.column() not in CHECK_COLUMNS:
             return
-        if item.column() in (LABEL_COL, FILL_COL):
-            if self.contour is not None:
-                index = int(item.data(INDEX_ROLE))
-                on = item.checkState() == Qt.Checked
-                if item.column() == LABEL_COL:
-                    self.contour.set_label(index, on)
-                else:
-                    self.contour.set_fill(index, on)
+        row = self.rows.get(int(item.data(INDEX_ROLE)))
+        if row is None:
             return
-        if item.column() != VISIBLE_COL:
+        on = item.checkState() == Qt.Checked
+        if item.column() == VISIBLE_COL:
+            held = set(self.surface.selection)
+        elif self.contour is None:
             return
-        index = int(item.data(INDEX_ROLE))
-        visible = item.checkState() == Qt.Checked
-        self.surface.set_visible(index, visible)
-        self._selection_changed()
+        else:
+            held = set(self.contour.labels if item.column() == LABEL_COL
+                       else self.contour.filled)
+        held = held | set(row.indices) if on else held - set(row.indices)
+        if item.column() == VISIBLE_COL:
+            self._push(held)
+        elif item.column() == LABEL_COL:
+            self._set_labels(held)
+        else:
+            self._set_fills(held)
 
     def _set_checks(self, column: int, indices) -> set[int]:
-        """Tick exactly these compartments in `column`, whatever the order."""
+        """Tick exactly the rows of these compartments in `column`, half
+        where only some of a row's sides are among them."""
         wanted = set(indices)
         self._updating = True
         try:
-            for row in range(self.table.rowCount()):
-                item = self.table.item(row, column)
-                index = self._index_of(row)
-                if item is not None and index is not None:
-                    item.setCheckState(
-                        Qt.Checked if index in wanted else Qt.Unchecked
-                    )
+            for r in range(self.table.rowCount()):
+                item = self.table.item(r, column)
+                row = self.row_at(r)
+                if item is not None and row is not None:
+                    state = self._state(row, wanted)
+                    if item.checkState() != state:
+                        item.setCheckState(state)
         finally:
             self._updating = False
         return wanted
@@ -557,67 +583,54 @@ class AtlasTab(QWidget):
 
     def _set_indices(self, indices) -> None:
         """Show exactly these COMPARTMENTS, whatever order the rows are in."""
-        wanted = set(indices)
-        self._updating = True
-        selection = set()
-        for row in range(self.table.rowCount()):
-            index = self._index_of(row)
-            if index is None:
-                continue
-            on = index in wanted
-            self.table.item(row, VISIBLE_COL).setCheckState(
-                Qt.Checked if on else Qt.Unchecked
-            )
-            if on:
-                selection.add(index)
-        self._updating = False
-        self._push(selection)
+        n = self.surface.meshset.n_compartments
+        self._push({int(i) for i in indices if 0 <= int(i) < n})
 
     def select(self, indices) -> None:
-        """Check exactly these compartments, and draw them."""
+        """Show exactly these compartments, by mesh index, and tick their rows."""
         self._set_indices(indices)
 
     def _all(self) -> None:
-        self._set_indices(set(self.rows))
+        self._set_indices(self._row_by_index)
 
     def _none(self) -> None:
         self._set_indices(set())
 
     def _filtered_only(self) -> None:
-        """Check exactly the compartments whose rows the search keeps."""
-        self._set_indices({
-            self._index_of(r) for r in range(self.table.rowCount())
-            if not self.table.isRowHidden(r) and self._index_of(r) is not None
-        })
+        """Show every side of exactly the rows the search keeps."""
+        kept = (self.row_at(r) for r in range(self.table.rowCount())
+                if not self.table.isRowHidden(r))
+        self._set_indices({i for row in kept if row is not None for i in row.indices})
 
     def _invert(self) -> None:
-        self._set_indices(set(self.rows) - set(self.surface.selection))
+        self._set_indices(set(self._row_by_index) - set(self.surface.selection))
 
     def _apply_filter(self, text: str) -> None:
         """Keep the rows the search matches, by `Row.matches` alone: the
         same fields in every tab of a kind, and nothing a column hides."""
         for r in range(self.table.rowCount()):
-            row = self.rows.get(self._index_of(r))
+            row = self.row_at(r)
             self.table.setRowHidden(r, row is None or not row.matches(text))
 
     # -- picking ---------------------------------------------------------
 
     def describe(self, index: int) -> str:
-        """The status bar's words for a compartment under the cursor."""
-        row = self.rows.get(index)
-        return R.hover_line(row, self.surface.name) if row is not None else ""
+        """The status bar's words for a compartment under the cursor: its
+        own side, not its row's every side."""
+        row = self._row_by_index.get(index)
+        return R.hover_line(row.side(index), self.surface.name) if row is not None else ""
 
     def highlight(self, index: int) -> None:
-        """Select and scroll to the row for a compartment picked in the canvas.
+        """Select and scroll to the row of a compartment picked in the canvas.
 
-        Found by index rather than assumed to BE the index: after a sort
-        the two differ, and picking used to jump to whatever glomerulus
-        happened to occupy that row.
+        Found by the compartment's row rather than assumed to BE its index:
+        after a sort the two differ, and picking used to jump to whatever
+        glomerulus happened to occupy that row.
         """
-        row = self._row_of(index)
-        if row is not None:
-            self.table.selectRow(row)
-            self.table.scrollToItem(self.table.item(row, NAME_COL))
+        r = self.table_row(index)
+        if r is not None:
+            self.table.selectRow(r)
+            self.table.scrollToItem(self.table.item(r, NAME_COL))
 
 
 __all__ = [
@@ -631,7 +644,6 @@ __all__ = [
     "NAME_COL",
     "NEUROPIL_COLUMNS",
     "RECEPTOR_COL",
-    "SIDE_COL",
     "VISIBLE_COL",
     "AtlasTab",
 ]

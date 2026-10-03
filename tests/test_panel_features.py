@@ -50,7 +50,7 @@ def _members(tab, line: str) -> set[int]:
 
 @pytest.mark.parametrize(("space", "atlas"), [
     ("FAFB14", "benton2025"),
-    ("GRABE", "grabe2015"),               # both lobes: two rows per glomerulus
+    ("GRABE", "grabe2015"),               # both lobes: two sides per row
     ("JRCFIB2018F", "neuprint_hemibrain"),
 ])
 @pytest.mark.parametrize("line", ["Orco-GAL4 & GH146-GAL4", "Ir25a-T2A-QF2"])
@@ -62,16 +62,20 @@ def test_a_driver_line_shows_the_glomeruli_it_labels(monkeypatch, space, atlas,
     ):
         sess = session(viewer)
         tab = sess.panel.tabs[atlas]
+        from lobemap.core.names import parse_roi
+
         members = _members(tab, line)
         assert members, f"{line} labels nothing in {atlas}"
+        # The menu counts glomeruli, and shows every side of each.
+        glomeruli = {parse_roi(tab.surface.meshset.names[i])[0] for i in members}
         menu = tab.lines
         index = next(i for i in range(menu.count())
                      if menu.itemText(i).startswith(line + " ("))
-        assert menu.itemText(index) == f"{line} ({len(members)})"
+        assert menu.itemText(index) == f"{line} ({len(glomeruli)})"
         menu.setCurrentIndex(index)
         pump(300)
         assert checked(tab) == members
-        assert tab.count.text() == f"{len(members)} of {tab.table.rowCount()} shown"
+        assert tab.count.text() == f"{len(glomeruli)} of {tab.table.rowCount()} shown"
         if ndisplay == "3":
             assert drawn(tab.surface) == members
         assert_rows_match_drawing(sess)
@@ -81,7 +85,7 @@ def test_a_driver_line_shows_the_glomeruli_it_labels(monkeypatch, space, atlas,
 
         from lobemap.viewer.panel import VISIBLE_COL
 
-        row = tab._row_of(next(iter(members)))
+        row = tab.table_row(next(iter(members)))
         tab.table.item(row, VISIBLE_COL).setCheckState(Qt.Unchecked)
         assert menu.currentIndex() == 0
 
@@ -114,7 +118,7 @@ def test_the_vfb_button_opens_the_selected_glomerulus(monkeypatch):
             "Select a glomerulus with a Virtual Fly Brain term to open it"
         )
         index = tab.surface.meshset.names.index("DA1(R)")
-        tab.table.selectRow(tab._row_of(index))
+        tab.table.selectRow(tab.table_row(index))
         assert vfb.isEnabled()
         assert vfb.toolTip() == "Open the Virtual Fly Brain page for DA1"
         vfb.click()
@@ -133,10 +137,11 @@ def test_clicking_a_glomerulus_points_the_vfb_button_at_it(monkeypatch):
         tab = session(viewer).panel.tabs["benton2025"]
         index = tab.surface.meshset.names.index("DA1")
         _buttons(tab)["None"].click()
-        tab.table.item(tab._row_of(index), VISIBLE_COL).setCheckState(Qt.Checked)
+        tab.table.item(tab.table_row(index), VISIBLE_COL).setCheckState(Qt.Checked)
         pump(300)
         assert click(viewer, tab.surface.meshset.centroid(index)) == "DA1 (left) — Benton 2025"
         vfb = _buttons(tab)["Open in Virtual Fly Brain"]
         assert vfb.isEnabled()
         assert vfb.toolTip() == "Open the Virtual Fly Brain page for DA1"
-        assert tab.detail_title.text() == "DA1, Left"
+        assert tab.detail_title.text() == "DA1"
+        assert tab.details["Sides"].text() == "Left"
