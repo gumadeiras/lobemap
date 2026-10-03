@@ -74,7 +74,10 @@ def test_hover_over_nothing_says_nothing(monkeypatch):
 
 
 def test_the_3d_pick_agrees_with_napari_and_keeps_moves_cheap(monkeypatch):
-    """napari's own pick tests all 298k Benton triangles, ~40 ms a move."""
+    """napari's own pick tests all 298k Benton triangles, ~40 ms a move; a
+    whole move here, napari's handling and ours, costs a fraction of that.
+    Measured against napari's pick in the same run, so a slower machine
+    moves both."""
     import statistics
     import time
 
@@ -84,7 +87,7 @@ def test_the_3d_pick_agrees_with_napari_and_keeps_moves_cheap(monkeypatch):
         surface = session(viewer).surfaces["benton2025"]
         canvas = viewer.window._qt_viewer.canvas
         x, y = canvas_position(viewer, surface.meshset.centroid(10))
-        times, hits = [], 0
+        times, theirs_times, hits = [], [], 0
         for dx in range(-40, 41, 8):
             for dy in (-20, 0, 20):
                 event = MouseEvent(type="mouse_move", pos=(x + dx, y + dy),
@@ -94,14 +97,17 @@ def test_the_3d_pick_agrees_with_napari_and_keeps_moves_cheap(monkeypatch):
                 times.append((time.perf_counter() - start) * 1000)
                 position = viewer.cursor.position
                 direction = viewer.cursor._view_direction
+                start = time.perf_counter()
                 theirs = surface.layer.get_value(position, view_direction=direction,
                                                  dims_displayed=[0, 1, 2], world=True)
+                theirs_times.append((time.perf_counter() - start) * 1000)
                 theirs = theirs[0] if isinstance(theirs, tuple) else theirs
                 theirs = None if theirs is None else round(float(theirs))
                 assert surface.pick(position, direction, [0, 1, 2]) == theirs
                 hits += theirs is not None
         assert hits > 10, "the grid missed the atlas"
-        assert statistics.median(times) < 10.0, sorted(times)
+        assert statistics.median(times) < statistics.median(theirs_times) / 2, (
+            sorted(times), sorted(theirs_times))
 
 
 def test_a_drag_does_not_pick(monkeypatch):
