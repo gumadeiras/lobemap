@@ -31,9 +31,6 @@ from .panel_tab import (
 )
 from .rows import natural_key
 
-#: What the panel's dock is called. `app.load_space` names the dock.
-TITLE = "Glomeruli and neuropils"
-
 #: The width the panel asks for, which sets the right-hand column's. Every
 #: tab's table fits it without scrolling sideways.
 WIDTH = 440
@@ -249,7 +246,6 @@ __all__ = [
     "NEUROPIL_COLUMNS",
     "RECEPTOR_COL",
     "SIDE_COL",
-    "TITLE",
     "VISIBLE_COL",
     "WIDTH",
     "AtlasTab",
