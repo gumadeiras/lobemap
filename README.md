@@ -171,12 +171,14 @@ CC BY and CC BY-NC require attribution, so cite the paper behind each atlas you 
 
 ## In the viewer
 
-The window has three columns. On the left, the **View** dock, tabbed with napari's **Layer settings**, sits above napari's **Layers** list. The canvas is in the middle. On the right, **Glomeruli and neuropils** holds one table per atlas and per neuropil set. The docks have no close button; the Window menu shows a hidden one again.
+The window has three columns. On the left, the **View** dock, tabbed with napari's **Layer settings**, sits above napari's **Layers** list, with napari's two rows of buttons above and below the list. The canvas is in the middle. On the right, **Glomeruli and neuropils** holds one table per atlas and per neuropil set. The docks have no close button; the Window menu shows a hidden one again.
 
 ### The View dock
 
 - **Brain** opens another brain without restarting: FAFB (female, EM), Hemibrain (female, EM), Male CNS (EM) or Grabe 2015 (live, light microscopy). Its tooltip spells out the abbreviations and names the template the brain is shown in. Only brains with data on disk are listed.
 - **Show** switches between **3D**, which draws the meshes, and **Slice**, which draws one section at a time: the image, and exact mesh–plane outlines that stay sharp at any zoom. **Fit to window** fits the brain to the window; in 3D it also turns back to the front view, dorsal side up, with the rotation applied. It never moves the slice or the angles.
+- **Zoom** is how large the brain is drawn, in screen pixels per micrometer of the brain: napari's own zoom factor, the number its camera popup shows. Scrolling, Fit to window and the popup change it, and typing a number zooms to it, in 3D and in Slice view.
+- **Perspective** is the 3D camera's field of view, from `0° (flat)`, the default, with no perspective, to 90°, the strongest. It works in 3D only; in Slice view it is disabled and says so. Hovering, the corner arrows, Fit to window, the rotation and the flip are the same under perspective.
 - **Sections** chooses which sections the slider steps through. Each choice is named by the brain's plane nearest the image grid and the angle between them, for example `Frontal (17.5° off true)` in FAFB: unaligned, a section follows the image's own grid. **Align to the brain's true planes**, off by default, cuts the sections along the brain's own frontal, horizontal and sagittal planes instead, and the menu then reads `Frontal (true plane)`. Both work in Slice view only; in 3D they are disabled and say so.
 - **Mirror the brain left to right** shows the brain as its mirror image about its mid-plane, to compare a left lobe with a right one. It is for display only: the data do not change, and the corner arrows follow it.
 - **Flip the picture upside down** turns the picture over on screen, top to bottom about the middle of the view, after the rotation and the mirror, in 3D and in Slice view. It is for display only: no slider, plane or layer moves, the corner arrows follow, names on the slice stay readable, the surfaces stay lit from outside, and turning it off gives back the view exactly. With the mirror, a front view is turned 180°. Its only cost is the click: about 35 ms in Slice view and 4 ms in 3D. A slice step and a change between 3D and Slice view take as long upside down as upright.
@@ -199,9 +201,19 @@ The window has three columns. On the left, the **View** dock, tabbed with napari
 | Mirror vertical | **Flip the picture upside down** |
 | both mirrors, Benton's 0.1 default | both, which is a 180° turn: the same as **Line of sight** 180° |
 
+### napari's buttons
+
+napari's buttons are where napari puts them, and each one either works in step with the View dock or is off and says why in its tooltip.
+
+- Under the layer list: **console**; **2D/3D**, the same as **Show**; **roll**, which steps to the next **Sections** choice and is off in 3D, as Sections is; **transpose** and **grid**, both off; and **home**, the same as **Fit to window**, rotation and flip kept. Each pair follows the viewer, so using one updates the other.
+- A right-click on **2D/3D** opens napari's camera popup. Its up/down menu is **Flip the picture upside down**, its zoom is **Zoom**, and in 3D its perspective is **Perspective**; each shows the other's change. Its angle sliders turn the camera as dragging does: the **Rotate around** boxes keep their values, and Fit to window goes back to them. Its left/right menu, and in 3D its depth menu, are off, because either would show the brain mirrored with no control to say so: use **Mirror the brain left to right**, or flip the picture and turn it 180° about the line of sight.
+- A right-click on **roll** lists the axes in the order the slice uses. Dragging an axis to the top slices along it, as **Sections** does; a drag that swaps the two axes on screen is undone, and a message says why.
+- **Transpose** would show the brain mirrored across the picture's diagonal and **grid** would draw the outlines apart from their image, with nothing in the View dock to show either, so both are off, with their right-click settings. So are their keys: ⌘T, ⌘⌥T (napari's turn of every layer by 90°, also Option-click on transpose) and ⌘G show a message and do nothing.
+- Over the layer list: **new points**, **new shapes** and **new labels** layers, which are yours to draw in, and **delete**. lobemap's own layers carry napari's lock: delete, ⌘⌫ and ⌘⌦ on the canvas, and ⌫ and ⌦ in the layer list pass them by and say they are locked, and they stay locked if unlocked from the layer menu. Layers you add delete as usual.
+
 ### Switching brains
 
-A switch that succeeds keeps the mode, the angles and the alignment, which mean the same on screen in every brain, and the section plane by its anatomy: frontal stays frontal, whichever image axis that is in the new brain. It clears the mirror and the flip, so a brain never opens reflected or upside down. Each brain opens its own tables, with its primary atlas checked.
+A switch that succeeds keeps the mode, the angles, the alignment and the perspective, which mean the same on screen in every brain, and the section plane by its anatomy: frontal stays frontal, whichever image axis that is in the new brain. It clears the mirror and the flip, so a brain never opens reflected or upside down. Each brain opens its own tables, with its primary atlas checked.
 
 A switch that fails says why under the controls and leaves the brain you had exactly as it was: its checked rows, names, fills, searches, driver lines and open tab, its slice and plane, the mode, the mirror, the flip, the angles, the alignment and the camera.
 
@@ -217,7 +229,7 @@ A switch that fails says why under the controls and leaves the brain you had exa
 
 ### Layers
 
-Each layer is named by its atlas and what it draws: `Benton 2025 · 3D` for the meshes and `Benton 2025 · outlines` for the sections. A neuropil set also says where its data come from, as in `Neuropils (FlyWire) · 3D` and `Neuropils (neuPrint) · 3D`. The images are `Neuropil stain (from synapses)`, `Confocal image (Grabe 2015)` and, off by default, `Glomerulus label volume (Grabe 2015)`. The meshes use the colormaps `Glomerulus colors` and `Neuropil colors`. Both the mesh and the outline layer stay in the list in either mode; the one the mode cannot draw is switched off. lobemap's layers are locked against napari's drawing and transform tools, which would move a mesh off its image; a layer you add yourself is not.
+Each layer is named by its atlas and what it draws: `Benton 2025 · 3D` for the meshes and `Benton 2025 · outlines` for the sections. A neuropil set also says where its data come from, as in `Neuropils (FlyWire) · 3D` and `Neuropils (neuPrint) · 3D`. The images are `Neuropil stain (from synapses)`, `Confocal image (Grabe 2015)` and, off by default, `Glomerulus label volume (Grabe 2015)`. The meshes use the colormaps `Glomerulus colors` and `Neuropil colors`. Both the mesh and the outline layer stay in the list in either mode; the one the mode cannot draw is switched off. lobemap's layers are locked against napari's drawing and transform tools, which would move a mesh off its image, and against deletion; a layer you add yourself is not.
 
 Each glomerulus keeps one color across the atlases of its brain, in 3D, on the slice and on its name.
 
