@@ -1,12 +1,15 @@
-"""No tab's table scrolls sideways in the right-hand column at 1440x900.
+"""No table scrolls sideways in the right-hand column at 1440x900, and each
+tab's title sits in the middle of its tab.
 
 The tables used to need 1,041-1,132 px in a 364-484 px dock. Each brain is
 opened in a real window laid out at 1440x900, never put on screen, with
-every tab built; then again with the column at the 440 px the panel asks
-for.
+every source's table built; then again with the column at the 440 px the
+panel asks for. The titles are measured on the tab bar as drawn.
 """
 
 from __future__ import annotations
+
+import contextlib
 
 import pytest
 from viewer_harness import launched, pump, session, switch_to
@@ -113,32 +116,95 @@ def _drawn_text(bar, index: int):
     return rect, (min(xs) / ratio, min(ys) / ratio, (max(xs) + 1) / ratio, (max(ys) + 1) / ratio)
 
 
-def test_every_tab_title_has_room_inside_its_tab(monkeypatch):
-    """Measured on the drawn tab bar, in every brain: each title in full,
-    clear of its tab's edges, and every tab in view without scrolling."""
-    from qtpy.QtWidgets import QToolButton
+#: How much the room above a title's ink may differ from the room below it,
+#: and the room left of it from the room right of it, in screen pixels.
+OFF_CENTRE = 1.0
 
-    with launched(monkeypatch, "view", SPACES[0]) as (code, viewer):
+
+@contextlib.contextmanager
+def _style(name: str | None):
+    """The whole application drawn in another style, `None` its own, and
+    given back after."""
+    from qtpy.QtWidgets import QApplication
+
+    own = QApplication.style().name()
+    if name is not None:
+        QApplication.setStyle(name)
+        pump(100)
+    try:
+        yield
+    finally:
+        if name is not None:
+            QApplication.setStyle(own)
+            pump(100)
+
+
+@pytest.mark.parametrize("style", [None, "Fusion"], ids=["native", "fusion"])
+def test_every_tab_title_is_centred_with_room_inside_its_tab(monkeypatch, style):
+    """Measured on the drawn tab bar, in every brain, under the platform's
+    own style and under Fusion: each title in full, clear of its tab's
+    edges and in the middle of it by its ink -- as much room above it as
+    below, and on its left as on its right -- and every tab in view without
+    scrolling."""
+    from qtpy.QtWidgets import QApplication, QToolButton
+
+    with launched(monkeypatch, "view", SPACES[0]) as (code, viewer), _style(style):
         assert code == 0
+        if style is None:
+            assert QApplication.style().name() == "macos"
         _lay_out(viewer)
         for space in SPACES:
             if space != SPACES[0]:
                 switch_to(viewer, space)
                 pump(100)
             bar = session(viewer).panel.tabBar()
-            assert bar.count() >= 1, space
+            assert [bar.tabText(i) for i in range(bar.count())] == (
+                ["Glomeruli"] if space == "GRABE" else ["Glomeruli", "Neuropils"])
             # No scroll arrows: the tabs fit the column.
             assert not [b for b in bar.findChildren(QToolButton) if b.isVisible()], space
             assert bar.tabRect(bar.count() - 1).right() < bar.width(), space
-            for i in range(bar.count()):
-                rect, box = _drawn_text(bar, i)
-                title = bar.tabText(i)
-                assert box is not None, (space, title)
-                left, top, right, bottom = box
-                margins = (left - rect.left(), rect.right() + 1 - right,
-                           top - rect.top(), rect.bottom() + 1 - bottom)
-                assert min(margins[:2]) >= TAB_MARGIN_X, (space, title, margins)
-                assert min(margins[2:]) >= TAB_MARGIN_Y, (space, title, margins)
-                # In full: as wide as the font draws the whole title.
-                full = bar.fontMetrics().horizontalAdvance(title)
-                assert right - left >= full - 3, (space, title, right - left, full)
+            for current in range(bar.count()):
+                bar.setCurrentIndex(current)
+                pump(50)
+                for i in range(bar.count()):
+                    rect, box = _drawn_text(bar, i)
+                    title = bar.tabText(i)
+                    assert box is not None, (space, title)
+                    left, top, right, bottom = box
+                    margins = (left - rect.left(), rect.right() + 1 - right,
+                               top - rect.top(), rect.bottom() + 1 - bottom)
+                    assert min(margins[:2]) >= TAB_MARGIN_X, (space, title, margins)
+                    assert min(margins[2:]) >= TAB_MARGIN_Y, (space, title, margins)
+                    assert abs(margins[0] - margins[1]) <= OFF_CENTRE, (space, title, margins)
+                    assert abs(margins[2] - margins[3]) <= OFF_CENTRE, (space, title, margins)
+                    # In full: as wide as the font draws the whole title.
+                    full = bar.fontMetrics().horizontalAdvance(title)
+                    assert right - left >= full - 3, (space, title, right - left, full)
+            bar.setCurrentIndex(0)
+
+
+def test_the_tab_bar_draws_what_qt_draws_but_for_where_each_title_sits(monkeypatch):
+    """With the titles left where Qt puts them, the panel's tab bar and a
+    plain one draw the same pixels, in the window's style: the tabs, their
+    frame and the base under them are the style's, and only the titles move."""
+    from qtpy.QtCore import QPointF
+    from qtpy.QtWidgets import QTabBar, QTabWidget, QWidget
+
+    from lobemap.viewer.panel import TAB_PADDING, TabBar
+
+    with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
+        assert code == 0
+        _lay_out(viewer)
+        monkeypatch.setattr(TabBar, "ink_offset", lambda self, text: QPointF(0.0, 0.0))
+        images = []
+        for kind in (QTabBar, TabBar):
+            tabs = QTabWidget()
+            tabs.setTabBar(kind())
+            tabs.tabBar().setStyleSheet(TAB_PADDING)
+            for title in ("Glomeruli", "Neuropils"):
+                tabs.addTab(QWidget(), title)
+            viewer.window.add_dock_widget(tabs, area="right")
+            pump(100)
+            images.append(tabs.tabBar().grab().toImage())
+        assert images[0].size() == images[1].size()
+        assert images[0] == images[1]

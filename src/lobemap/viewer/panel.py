@@ -19,12 +19,18 @@ citation is the asset's `about` line. Each is written there and nowhere else.
 
 from __future__ import annotations
 
-from qtpy.QtCore import QSize, Qt
+from qtpy.QtCore import QPointF, QRect, QSize, Qt
+from qtpy.QtGui import QFontMetricsF
 from qtpy.QtWidgets import (
     QComboBox,
     QFormLayout,
     QLabel,
     QStackedWidget,
+    QStyle,
+    QStyleOptionTab,
+    QStyleOptionTabBarBase,
+    QStylePainter,
+    QTabBar,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -74,6 +80,59 @@ def plain_reason(exc: BaseException) -> str:
     if isinstance(exc, MemoryError):
         return "there was not enough memory"
     return "it could not be built"
+
+
+class TabBar(QTabBar):
+    """Tabs whose titles sit in the middle of their tabs, by their ink.
+
+    Qt centres a title's line, the font's ascent over its descent, so a
+    title with a descender -- the p of Neuropils -- sat low by half of it,
+    and one without sat level: the eye goes by the ink. Each title is moved
+    by the difference between the middle of its ink and the middle of its
+    line, taken from the font and rounded to a device pixel. Everything
+    else is drawn as `QTabBar.paintEvent` draws it, through the style: the
+    base, then each tab and its title, the current one last.
+    """
+
+    def paintEvent(self, event) -> None:
+        painter = QStylePainter(self)
+        current = self.currentIndex()
+        if self.drawBase():
+            painter.drawPrimitive(QStyle.PrimitiveElement.PE_FrameTabBarBase,
+                                  self._base_option(current))
+        order = [i for i in range(self.count()) if i != current]
+        for index in order + ([current] if current >= 0 else []):
+            option = QStyleOptionTab()
+            self.initStyleOption(option, index)
+            painter.drawControl(QStyle.ControlElement.CE_TabBarTabShape, option)
+            painter.save()
+            painter.translate(self.ink_offset(option.text))
+            painter.drawControl(QStyle.ControlElement.CE_TabBarTabLabel, option)
+            painter.restore()
+
+    def _base_option(self, current: int) -> QStyleOptionTabBarBase:
+        """The line under the tabs, as Qt's own tab bar describes it."""
+        option = QStyleOptionTabBarBase()
+        option.initFrom(self)
+        option.shape = self.shape()
+        option.documentMode = self.documentMode()
+        overlap = self.style().pixelMetric(QStyle.PixelMetric.PM_TabBarBaseOverlap,
+                                           None, self)
+        if overlap > 0:
+            option.rect = QRect(0, self.height() - overlap, self.width(), overlap)
+        for index in range(self.count()):
+            option.tabBarRect = option.tabBarRect.united(self.tabRect(index))
+        option.selectedTabRect = self.tabRect(current)
+        return option
+
+    def ink_offset(self, text: str) -> QPointF:
+        """How far to move `text` so its ink, not its line, is centred."""
+        metrics = QFontMetricsF(self.font())
+        ink = metrics.tightBoundingRect(text)
+        dx = metrics.horizontalAdvance(text) / 2 - ink.center().x()
+        dy = (metrics.descent() - metrics.ascent()) / 2 - ink.center().y()
+        ratio = self.devicePixelRatioF()
+        return QPointF(round(dx * ratio) / ratio, round(dy * ratio) / ratio)
 
 
 class _Tabs(dict):
@@ -174,6 +233,7 @@ class CompartmentPanel(QTabWidget):
     def __init__(self, viewer, surfaces: dict, registry=None, contours=None,
                  space: str | None = None, names=None, realize=None) -> None:
         super().__init__()
+        self.setTabBar(TabBar())
         self.tabBar().setStyleSheet(TAB_PADDING)
         self.viewer = viewer
         self.registry = registry
@@ -363,6 +423,7 @@ __all__ = [
     "AtlasTab",
     "CompartmentPanel",
     "SourcePage",
+    "TabBar",
     "natural_key",
     "plain_reason",
 ]
