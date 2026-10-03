@@ -13,6 +13,7 @@ import weakref
 import numpy as np
 
 from ..core.registry import Registry
+from . import buttons
 from .axes import apply_axis_mode
 from .chrome import add_dock, lock_layers, tidy
 from .images import (
@@ -46,6 +47,7 @@ from .view import (
     fit_view,
     install_home_orientation,
     install_initial_fit,
+    keep_orientation,
     maximize,
     orient_anterior,
 )
@@ -374,6 +376,7 @@ def load_space(
             session.show(show)
         install_home_orientation(viewer, registry.spaces[space],
                                  reflect_axis=session.reflect_axis)
+        keep_orientation(viewer)
         lock_layers(viewer)
         show_main_layer(viewer, registry, session)
     except BaseException:
@@ -430,6 +433,7 @@ def run(
         # right column is the compartment panel's alone; see `chrome.tidy`.
         view_dock = add_dock(viewer, switcher, VIEW_TITLE, "left")
         tidy(viewer, view_dock, session.dock)
+        buttons.install(viewer)
     except BaseException:
         viewer.close()
         raise

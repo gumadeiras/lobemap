@@ -3,16 +3,16 @@
 napari opens with controls for making and editing data: new and delete
 layer buttons, a console, grid, roll and transpose buttons, sixteen
 drawing tools for the outline layers, and a transform tool on every layer.
-None of them changes what a lobemap scene shows, and three -- 2D/3D, roll and transpose -- do what the View
-dock does without its bookkeeping. So the buttons are hidden, lobemap's
-layers are made non-editable, and the window is arranged as lobemap's: the
-View dock tabbed with napari's layer settings above the layer list on the
-left, and the compartment tables alone on the right.
+lobemap's layers are made non-editable and locked against deletion, and
+the window is arranged as lobemap's: the View dock tabbed with napari's
+layer settings above the layer list on the left, and the compartment
+tables alone on the right. The buttons stay where napari puts them, around
+the layer list; `buttons` keeps them in step with the View dock.
 
-napari has no public API for its buttons, its own docks, or a dock with no
-close button. These go through `Window._qt_viewer`, `Window._qt_window`
-and napari's dock widget class, and `tests/test_napari_private.py` checks
-each. lobemap's layers are locked by napari's public `editable` and `locked`.
+napari has no public API for its own docks, or a dock with no close
+button. These go through `Window._qt_viewer`, `Window._qt_window` and
+napari's dock widget class, and `tests/test_napari_private.py` checks each.
+lobemap's layers are locked by napari's public `editable` and `locked`.
 """
 
 from __future__ import annotations
@@ -62,23 +62,17 @@ def add_dock(viewer, widget, name: str, area: str):
 
 
 def tidy(viewer, view_dock, panel_dock) -> None:
-    """Hide napari's buttons and arrange the docks as lobemap's.
+    """Arrange the docks as lobemap's.
 
     Left: the View dock, tabbed with napari's layer settings, above the
-    layer list. Right: the compartment panel, at full height.
-
-    Hidden: the viewer buttons (console, 2D/3D, roll, transpose, grid,
-    Home) and the layer buttons (new points, shapes and labels, delete).
-    The View dock does 2D/3D, Home and the slice axis; nothing in a scene
-    needs the others. Their keyboard shortcuts stay napari's.
+    layer list with napari's buttons. Right: the compartment panel, at
+    full height.
     """
     from qtpy.QtCore import Qt, QTimer
     from qtpy.QtWidgets import QTabWidget, QWidget
 
     qt_viewer = viewer.window._qt_viewer
     window = viewer.window._qt_window
-    qt_viewer.viewerButtons.hide()
-    qt_viewer.layerButtons.hide()
     controls, layers = qt_viewer.dockLayerControls, qt_viewer.dockLayerList
     _retitle(controls, LAYER_SETTINGS)
     _retitle(layers, LAYERS)

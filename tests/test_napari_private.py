@@ -37,6 +37,11 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from napari_chrome_checks import (  # noqa: F401 - collected here, with this module's fixtures
+    test_the_buttons_popups_and_keys_lobemap_keeps_in_step,
+    test_the_napari_chrome_lobemap_tidies,
+    test_the_window_and_canvas_lobemap_reaches,
+)
 
 napari = pytest.importorskip("napari")
 
@@ -602,77 +607,6 @@ def test_the_axis_indicator_is_recolored_and_gets_a_second_triad(opened):
     need(labels == list(anatomical_triad(opened.space)[1])[::-1]
          and drawn_colors(second) == table(axes.ANATOMY_COLORS),
          "Axes.set_data and Axes.text on a second Axes", used)
-
-
-def test_the_window_and_canvas_lobemap_reaches(opened):
-    from qtpy.QtWidgets import QMainWindow
-
-    used = "viewer.chrome docking and viewer.view.maximize"
-    with reaching("napari Window._qt_window", used):
-        window = opened.viewer.window._qt_window
-    need(isinstance(window, QMainWindow)
-         and all(callable(getattr(window, name, None))
-                 for name in ("addDockWidget", "splitDockWidget", "tabifyDockWidget",
-                              "setTabPosition", "resizeDocks", "showNormal",
-                              "showMaximized")),
-         "Window._qt_window, a QMainWindow", used)
-    used = "viewer.view.install_initial_fit"
-    with reaching("viewer.window._qt_viewer.canvas.events", used):
-        events = opened.viewer.window._qt_viewer.canvas.events
-    need(all(hasattr(events, name) for name in
-             ("resize", "draw", "mouse_press", "mouse_wheel", "key_press")),
-         "QtViewer.canvas.events resize, draw, mouse_press, mouse_wheel and key_press", used)
-
-
-def test_the_napari_chrome_lobemap_tidies(viewer):
-    """What `viewer.chrome` reaches in napari's window: its dock class, which
-    takes `close_btn` and keeps it when the dock floats; its buttons, which
-    `tidy` hides; and its two layer docks, which `tidy` renames."""
-    from qtpy.QtCore import Qt
-    from qtpy.QtWidgets import QDockWidget, QLabel, QMenu, QWidget
-
-    from lobemap.viewer import chrome
-
-    used = "viewer.chrome.add_dock"
-    where = "napari._qt.widgets.qt_viewer_dock_widget.QtViewerDockWidget(close_btn=False)"
-    with reaching(where, used):
-        dock = chrome.add_dock(viewer, QWidget(), "Lobemap dock", "left")
-    need(isinstance(dock, QDockWidget) and not hasattr(dock.title, "close_button"),
-         where, used)
-    need(isinstance(viewer.window.window_menu, QMenu)
-         and dock.toggleViewAction() in viewer.window.window_menu.actions(),
-         "Window.window_menu, a QMenu", used)
-    with reaching("QtViewerDockWidget rebuilding its title bar as it floats", used):
-        dock.setFloating(True)
-        dock.setFloating(False)
-        title = dock.title
-    need(not hasattr(title, "close_button") and title.title.text() == "Lobemap dock",
-         "QtViewerDockWidget._update_title_bar, from its name and close_btn", used)
-
-    used = "viewer.chrome.tidy"
-    qt_viewer = viewer.window._qt_viewer
-    buttons = {
-        "viewerButtons": ("consoleButton", "ndisplayButton", "rollDimsButton",
-                          "transposeDimsButton", "gridViewButton", "resetViewButton"),
-        "layerButtons": ("newPointsButton", "newShapesButton", "newLabelsButton",
-                         "deleteButton"),
-    }
-    for row, names in buttons.items():
-        with reaching(f"QtViewer.{row}", used):
-            frame = getattr(qt_viewer, row)
-        # Hidden whole, so a button napari adds to the row is hidden too;
-        # this says which ones that hides.
-        held = frame.findChildren(QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly)
-        need({id(widget) for widget in held}
-             == {id(getattr(frame, name, None)) for name in names},
-             f"QtViewer.{row} holding {', '.join(names)} and no other widget", used)
-    for name in ("dockLayerControls", "dockLayerList"):
-        with reaching(f"QtViewer.{name}.name and .title.title", used):
-            layer_dock = getattr(qt_viewer, name)
-            label = layer_dock.title.title
-        need(isinstance(layer_dock, QDockWidget) and isinstance(label, QLabel)
-             and isinstance(layer_dock.name, str),
-             f"QtViewer.{name}, a dock with a name and a title label", used)
 
 
 def test_the_prefetch_finds_the_planes_a_step_lands_on(viewer):

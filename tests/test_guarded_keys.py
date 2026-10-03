@@ -1,14 +1,18 @@
-"""Delete passes lobemap's layers by, which napari's lock keeps.
+"""napari's keys that would leave the window in a state no control of
+lobemap's shows do nothing, and say why; delete passes lobemap's layers by.
 
 Every key goes through Qt to the canvas, or to the layer list, as a key
-pressed there does. What is checked is which layers exist.
+pressed there does. What is checked is the viewer: the axis order, every
+layer's place, grid mode, which layers exist, and the sign of the
+specimen's map to the screen (`chrome_harness.assert_no_hidden_mirror`).
 """
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
-from chrome_harness import press, told
-from viewer_harness import launched, pump, session
+from chrome_harness import assert_no_hidden_mirror, baseline, press, told
+from viewer_harness import launched, pump, session, switcher
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
@@ -21,6 +25,62 @@ def opened(monkeypatch):
     with launched(monkeypatch, "view", SPACE) as (code, viewer):
         assert code == 0
         yield viewer
+
+
+def _placed(viewer) -> dict:
+    """Every layer's transform from its data to the world."""
+    return {layer.name: np.asarray(layer.affine.affine_matrix).copy() for layer in viewer.layers}
+
+
+def test_transpose_rotate_and_grid_keys_do_nothing_and_say_why(opened, monkeypatch):
+    from qtpy.QtCore import QEvent, QPointF, Qt
+    from qtpy.QtGui import QMouseEvent
+    from qtpy.QtWidgets import QApplication
+
+    from lobemap.viewer.buttons import GRID_OFF, ROTATE_OFF, TRANSPOSE_OFF
+
+    viewer = opened
+    sw, sess = switcher(viewer), session(viewer)
+    signs = baseline(viewer, sess, sw)
+    canvas = viewer.window._qt_viewer.canvas.native
+    for ndisplay in (2, 3):
+        viewer.dims.ndisplay = ndisplay
+        pump()
+        order, placed = tuple(viewer.dims.order), _placed(viewer)
+        for keys, why in ((("T", "Control"), TRANSPOSE_OFF),
+                          (("T", "Control", "Alt"), ROTATE_OFF),
+                          (("G", "Control"), GRID_OFF)):
+            with told() as said:
+                press(canvas, *keys)
+            assert said == [why], (keys, said)
+            assert tuple(viewer.dims.order) == order, keys
+            for name, matrix in _placed(viewer).items():
+                assert np.array_equal(matrix, placed[name]), (keys, name)
+            assert not viewer.canvas.grid.enabled
+            assert_no_hidden_mirror(viewer, sess, sw, signs)
+        # Option-click on transpose turned every layer 90°: no more.
+        button = viewer.window._qt_viewer.viewerButtons.transposeDimsButton
+        monkeypatch.setattr(QApplication, "keyboardModifiers",
+                            staticmethod(lambda: Qt.KeyboardModifier.AltModifier))
+        for kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+            QApplication.sendEvent(button, QMouseEvent(
+                kind, QPointF(4, 4), QPointF(4, 4), Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton, Qt.KeyboardModifier.AltModifier))
+        pump()
+        monkeypatch.undo()
+        for name, matrix in _placed(viewer).items():
+            assert np.array_equal(matrix, placed[name]), name
+        assert tuple(viewer.dims.order) == order
+    # The model refuses a swap however it is asked for.
+    viewer.dims.ndisplay = 2
+    pump()
+    order = tuple(viewer.dims.order)
+    with told() as said:
+        viewer.dims.transpose()
+        pump()
+    assert tuple(viewer.dims.order) == order
+    assert any("keep their order" in s for s in said), said
+    assert_no_hidden_mirror(viewer, sess, sw, signs)
 
 
 def test_delete_passes_lobemaps_layers_by_and_takes_the_users(opened):

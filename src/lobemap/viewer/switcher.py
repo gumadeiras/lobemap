@@ -9,6 +9,10 @@ mirror and the flip stand alone, with no row label to repeat their words, and
 are worded apart: the mirror reflects the brain, and the flip turns the picture
 upside down.
 
+napari's own buttons do some of the same (`buttons`). Each control here follows
+the viewer's state rather than its own clicks -- the display mode, the axis
+order, the camera -- so it stays in step whichever of the two is used.
+
 Picking another brain rebuilds the scene in place rather than relaunching:
 the process, the Qt window and the GPU context survive, so a switch costs
 only the data. Tearing the window down and putting a new one up would also
@@ -45,8 +49,8 @@ from qtpy.QtWidgets import (
 from .camera_rows import PERSPECTIVE, ZOOM, CameraRows
 from .request import MissingAssets, loadable_spaces
 from .rotation_rows import RotationRows
-from .slicing import AXIS_LETTERS, slice_axes
-from .view import capture_view, restore_view
+from .slicing import AXIS_LETTERS, order_for, slice_axes
+from .view import capture_view, restore_view, upside_down
 
 #: The plane a section lies in, by the anatomical axis the slider steps along.
 PLANES = {"Anterior-Posterior": "Frontal", "Dorsal-Ventral": "Horizontal",
@@ -87,6 +91,13 @@ SLICE_ONLY = "Slice view only"
 ARROWS = (
     "Arrows: A anterior, P posterior, D dorsal, V ventral, L left, R right. "
     "x, y, z are the image's own axes."
+)
+
+#: Said when a swap of the two shown axes is undone (`_on_order`).
+SWAPPED = (
+    "The two axes on screen keep their order: swapping them would show the "
+    "brain mirrored, with no control to say so. To mirror the brain, use "
+    "Mirror the brain left to right; to slice along another axis, use Sections."
 )
 
 OPENING = "Opening {title}…"
@@ -205,9 +216,11 @@ class SpaceSwitcher(QWidget):
         self.mirror = QCheckBox(MIRROR)
         self.mirror.setToolTip(MIRROR_TIP)
         self.mirror.toggled.connect(self._on_mirror)
-        #: The picture upside down, after the turn and the mirror.
+        #: The picture upside down, after the turn and the mirror. The
+        #: camera's, which napari's camera popup can turn over too.
         self.flip = QCheckBox(FLIP)
         self.flip.setToolTip(FLIP_TIP)
+        self.flip.setChecked(upside_down(viewer))
         self.flip.toggled.connect(self._on_flip)
         #: How the picture is shown: the anatomical mirror, and the screen
         #: flip under it.
@@ -260,6 +273,7 @@ class SpaceSwitcher(QWidget):
         # The dock outlives every scene, so it is connected once.
         viewer.dims.events.ndisplay.connect(self._on_mode)
         viewer.dims.events.order.connect(self._on_order)
+        viewer.scene.camera.events.orientation.connect(self._on_orientation)
         self._on_mode()
 
     @staticmethod
@@ -351,13 +365,18 @@ class SpaceSwitcher(QWidget):
         self.legend.setVisible(three_d)
 
     def _on_order(self, event=None) -> None:
-        """Keep napari's roll-dims shortcut in step with the Sections menu.
+        """Keep napari's roll button, its key and its axis-order popup in
+        step with the Sections menu.
 
-        Its button is hidden, but its key still rolls the axes. In 2D a roll
-        picks another slice axis behind the menu's back: the menu kept its
-        old name and the contours showed an empty plane. It is taken as a
-        choice made in the menu. In 3D the order must stay the identity (see
-        `app.install_display_mode`), so a roll there is undone.
+        In 2D a roll picks another slice axis behind the menu's back: the
+        menu kept its old name and the contours showed an empty plane. It is
+        taken as a choice made in the menu, whose sections then show the
+        axes in its own order (`slicing.order_for`). An order that keeps the
+        slice axis but swaps the two axes on screen -- napari's transpose, or
+        a drag in its popup -- shows the brain mirrored, with no control to
+        say so: it is undone, and the user told why. In 3D the order must
+        stay the identity (see `app.install_display_mode`), so a roll there
+        is undone.
         """
         if self._busy:
             return
@@ -366,6 +385,14 @@ class SpaceSwitcher(QWidget):
             identity = tuple(range(len(order)))
             if order != identity:
                 self.viewer.dims.order = identity
+            return
+        if order[0] == self.session.slice_axis:
+            want = order_for(order[0], len(order))
+            if order != want:
+                from napari.utils.notifications import show_info
+
+                self.viewer.dims.order = want
+                show_info(SWAPPED)
             return
         index = self.slice.findData(order[0])
         if index >= 0 and order[0] != self.session.slice_axis:
@@ -377,6 +404,14 @@ class SpaceSwitcher(QWidget):
             return
         with contextlib.suppress(Exception):
             self.session.set_mirror(on)
+
+    def _on_orientation(self, event=None) -> None:
+        """Show the flip as the camera has it, whoever turned it over."""
+        flipped = upside_down(self.viewer)
+        if self.flip.isChecked() != flipped:
+            self.flip.blockSignals(True)
+            self.flip.setChecked(flipped)
+            self.flip.blockSignals(False)
 
     def _on_flip(self, on: bool) -> None:
         """Show the picture upside down, or upright."""

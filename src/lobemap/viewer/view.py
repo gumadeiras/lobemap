@@ -13,6 +13,7 @@ space switch gives the view back through `capture_view` and `restore_view`.
 from __future__ import annotations
 
 import contextlib
+import weakref
 
 import numpy as np
 
@@ -20,6 +21,13 @@ import numpy as np
 #: way napari draws array rows and `rotation.grid_frame` reads them, or
 #: "up", which shows the picture upside down (`show_upside_down`).
 UPRIGHT, UPSIDE_DOWN = "down", "up"
+
+#: napari's camera orientation along the screen's depth and horizontal,
+#: the only ones lobemap shows (`keep_orientation`).
+TOWARD, RIGHT = "towards", "right"
+
+#: The viewers whose camera `keep_orientation` watches.
+_KEPT: weakref.WeakSet = weakref.WeakSet()
 
 #: The array axis a mirror reflects along.
 #:
@@ -103,24 +111,62 @@ def show_upside_down(viewer, on: bool) -> None:
     failed switch put back the same picture, flipped. Off, the picture is
     exactly what it was.
 
-    Two things napari does not do are done here. It hands its 3D camera
-    the new handedness but not the turn its angles mean under it, and its
-    next draw read the angles back from the stale turn, which lost the view:
-    so the angles are announced again. And a reversed handedness winds every
-    face the other way on screen, which vispy's shading takes for the
-    inside: so each surface takes its clockwise faces for its front ones
-    (`napari_private.front_face`), and is lit from outside. The light turns
-    over with the picture, so in 3D too the picture is the upright one
-    upside down.
+    What napari does not do itself, `keep_orientation` does, whoever turns
+    the picture over: this, or the up/down menu of napari's camera popup.
     """
+    keep_orientation(viewer)
     camera = viewer.scene.camera
     depth, vertical, horizontal = (str(o) for o in camera.orientation)
     want = UPSIDE_DOWN if on else UPRIGHT
     if vertical == want:
         return
     camera.orientation = (depth, want, horizontal)
-    camera.events.angles(value=camera.angles)
-    face_front(viewer)
+
+
+def keep_orientation(viewer) -> None:
+    """Follow every change of the camera's orientation with what napari
+    leaves undone, and refuse the ones no control of lobemap's shows.
+
+    napari's camera popup sets the orientation of each screen axis. Up or
+    down is the flip (`show_upside_down`), which the View dock shows. Left
+    along the horizontal, or away along the depth, would mirror the picture
+    with no control to say so -- napari's preferences can ask for either
+    too -- so each is put back to napari's default, right and toward.
+
+    After a flip, two things napari does not do are done here. It hands its
+    3D camera the new handedness but not the turn its angles mean under it,
+    and its next draw read the angles back from the stale turn, which lost
+    the view: so the angles are announced again. And a reversed handedness
+    winds every face the other way on screen, which vispy's shading takes
+    for the inside: so each surface takes its clockwise faces for its front
+    ones (`face_front`), and is lit from outside. The light turns over with
+    the picture, so in 3D too the picture is the upright one upside down.
+
+    Connected after napari's own handlers, so they have turned the camera
+    first. Installed once per viewer; later calls do nothing.
+    """
+    if viewer in _KEPT:
+        return
+    _KEPT.add(viewer)
+    camera = viewer.scene.camera
+    ref = weakref.ref(viewer)
+
+    def _settle(event=None) -> None:
+        live = ref()
+        if live is None:
+            return
+        depth, vertical, horizontal = (str(o) for o in camera.orientation)
+        if (depth, horizontal) != (TOWARD, RIGHT):
+            # Its own change of orientation does the rest.
+            camera.orientation = (TOWARD, vertical, RIGHT)
+            return
+        camera.events.angles(value=camera.angles)
+        face_front(live)
+
+    camera.events.orientation.connect(_settle, position="last")
+    depth, vertical, horizontal = (str(o) for o in camera.orientation)
+    if (depth, horizontal) != (TOWARD, RIGHT):
+        camera.orientation = (TOWARD, vertical, RIGHT)
 
 
 def face_front(viewer, layers=None) -> None:
@@ -447,6 +493,8 @@ def apply_mirror(layers, on: bool, center: float,
 
 __all__ = [
     "MIRROR_AXIS",
+    "RIGHT",
+    "TOWARD",
     "UPRIGHT",
     "UPSIDE_DOWN",
     "apply_mirror",
@@ -456,6 +504,7 @@ __all__ = [
     "fit_view",
     "install_home_orientation",
     "install_initial_fit",
+    "keep_orientation",
     "maximize",
     "mirror_center",
     "mirror_matrix",

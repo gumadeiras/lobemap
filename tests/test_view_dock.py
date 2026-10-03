@@ -150,7 +150,7 @@ def test_a_switch_keeps_the_layout_and_a_hidden_dock_comes_back(monkeypatch):
 
 
 def test_the_view_controls_drive_the_viewer(monkeypatch):
-    """3D and Slice, Fit to window and Sections do what napari's buttons did."""
+    """3D and Slice, Fit to window and Sections do what napari's buttons do."""
     from qtpy.QtCore import Qt
 
     with launched(monkeypatch, "view", "JRCFIB2018F") as (code, viewer):
@@ -201,12 +201,12 @@ def test_the_view_controls_drive_the_viewer(monkeypatch):
             assert center == pytest.approx(center2) and zoom == pytest.approx(zoom2)
             assert angles == pytest.approx(angles2), homes
 
-        # napari's viewer and layer buttons are gone from the window.
+        # napari's viewer and layer buttons are back, around the layer list;
+        # `test_napari_buttons` drives them.
         qt_viewer = viewer.window._qt_viewer
+        layers = _dock(window, "Layers")
         for row in (qt_viewer.viewerButtons, qt_viewer.layerButtons):
-            assert not row.isVisible()
-            assert not any(button.isVisibleTo(window) for button in row.children()
-                           if hasattr(button, "isVisibleTo"))
+            assert row.isVisible() and layers.isAncestorOf(row)
 
 
 def test_the_mirror_reflects_and_another_brain_clears_it(monkeypatch):

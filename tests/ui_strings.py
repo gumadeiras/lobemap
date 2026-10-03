@@ -1,15 +1,17 @@
 """Every string lobemap's window shows, and which of them read as code.
 
 `collect` walks the window as it is: its title, every dock, tab, label,
-button, menu, table cell and tooltip, napari's layer list, layer settings
-and sliders, and the status bar. `hover_all` moves the cursor over what is
+button, menu, table cell and tooltip, napari's layer list, layer settings,
+button rows, the popups they have opened, and sliders, and the status bar.
+`open_popups` opens the popups napari's buttons have, as a right-click does. `hover_all` moves the cursor over what is
 drawn, through napari's own mouse-move path, and collects what the status
 bar says. `problems` names each string that holds an identifier, given the
 `Allowed` vocabulary of the registry and what napari itself shows.
 
-Strings napari shows on its own -- its menus, its layer-settings labels --
-are napari's wording, not lobemap's, and `napari_baseline` collects them
-from a bare viewer holding a layer of each kind lobemap adds.
+Strings napari shows on its own -- its menus, its layer-settings labels,
+its buttons and popups -- are napari's wording, not lobemap's, and
+`napari_baseline` collects them from a bare viewer holding a layer of each
+kind lobemap adds, its popups opened in 2D and in 3D.
 """
 
 from __future__ import annotations
@@ -194,6 +196,7 @@ def _widget_strings(root, where: str) -> list[Shown]:
                         add("cell tooltip", cell.toolTip())
         if isinstance(w, (QSpinBox, QDoubleSpinBox)):
             add("suffix", w.suffix().strip(), tip)
+            add("box", w.specialValueText(), tip)
         elif isinstance(w, QAbstractSpinBox):
             add("box", w.text(), tip)
     return out
@@ -270,9 +273,22 @@ def hover_all(viewer, sess, per_part: int = 6) -> list[Shown]:
     return out
 
 
+def open_popups(viewer) -> None:
+    """Open the popups of napari's buttons that take a right-click now: the
+    camera's, and in 2D the axis order's. Each is collected with the Layers
+    dock it opens from (`collect`), and closed after."""
+    from chrome_harness import popups_offscreen, right_click
+
+    row = viewer.window._qt_viewer.viewerButtons
+    with popups_offscreen():
+        for button in (row.ndisplayButton, row.rollDimsButton):
+            right_click(button)
+
+
 def napari_baseline(viewer) -> set[str]:
     """What a bare napari window shows with a layer of each kind lobemap
-    adds: its own menus, layer settings and sliders."""
+    adds: its own menus, layer settings, buttons, popups and sliders."""
+    from chrome_harness import close_popups
     from napari.utils.colormaps import AVAILABLE_COLORMAPS
     from viewer_harness import pump
 
@@ -287,7 +303,9 @@ def napari_baseline(viewer) -> set[str]:
     for ndisplay in (2, 3):
         viewer.dims.ndisplay = ndisplay
         pump()
+        open_popups(viewer)
         texts |= {s.text for s in collect(viewer)}
+        close_popups(viewer)
     # Never a colormap lobemap registered earlier in this process.
     return {t for t in texts if t in BUILTIN_COLORMAPS or t not in AVAILABLE_COLORMAPS}
 
@@ -314,7 +332,9 @@ TURNED = (20.0, 30.0, -15.0)
 def walk(viewer, spaces):
     """Yield (space, state, strings shown) for each brain, through the
     controls a user has: the Dataset menu, the tabs, 3D and Slice, the
-    angle boxes and the flip. The viewer opened on `spaces[0]`."""
+    angle boxes and the flip, with napari's popups open. The viewer opened
+    on `spaces[0]`."""
+    from chrome_harness import close_popups
     from viewer_harness import pump, session, switch_to, switcher
 
     sw = switcher(viewer)
@@ -341,6 +361,9 @@ def walk(viewer, spaces):
             shown = collect(viewer)
             if state.endswith(("all", "oblique", "turned")):
                 shown += hover_all(viewer, sess)
+            open_popups(viewer)
+            shown += collect(viewer)
+            close_popups(viewer)
             yield space, state, shown
         sw.rotation.reset.click()
         pump(300)

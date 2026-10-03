@@ -4,7 +4,8 @@ Each of the four brains is read as it opens, then with every tab built and
 every row shown, in 3D and in 2D, and turned across the image grid by the
 View dock's angle boxes -- window title, docks, tabs, menus, buttons,
 headers, cells, details, tooltips, napari's layer names, colormaps and
-sliders, the status bar and what hovering says (`ui_strings`). A string
+sliders, napari's button rows and the popups they open, the status bar and
+what hovering says (`ui_strings`). A string
 fails if it holds snake_case, an asset or atlas id, a bracketed tag or an
 abbreviation nothing spells out. Biology names from the registry, a quoted
 source label and the template names the Dataset menu gives are allowed,
@@ -77,6 +78,28 @@ def test_no_string_in_any_brain_or_mode_reads_as_code(monkeypatch, allowed, regi
                  "layer name", "colormap", "slider label", "hover"):
         assert kind in kinds, kind
     assert any(item.text == "depth" for item in seen), "no oblique slider read"
+    # The restored buttons, their popups and the new controls were read, in
+    # every brain, in each mode they show in.
+    from lobemap.viewer import buttons, camera_rows
+
+    shown_in: dict[str, set] = {}
+    for item, where in seen.items():
+        shown_in.setdefault(item.text, set()).update(where)
+    both = ("2d_default", "3d_default")
+    expected = {
+        buttons.TRANSPOSE_OFF: both, buttons.GRID_OFF: both, buttons.DELETE_TIP: both,
+        buttons.ROLL_TIP: ("2d_default",), buttons.ROLL_3D: ("3d_default",),
+        buttons.ROLL_POPUP_TIP: ("2d_default",), buttons.VERTICAL_TIP: both,
+        buttons.HORIZONTAL_OFF: both, buttons.DEPTH_OFF: ("3d_default",),
+        camera_rows.ZOOM_TIP: both, camera_rows.PERSPECTIVE_TIP: both,
+        camera_rows.ZOOM_UNIT.strip(): both, camera_rows.FLAT: both,
+        camera_rows.THREE_D_ONLY: ("2d_default",), camera_rows.ZOOM: both,
+        camera_rows.PERSPECTIVE: both,
+    }
+    for text, states in expected.items():
+        for space in SPACES:
+            for state in states:
+                assert (space, state) in shown_in.get(text, set()), (text, space, state)
     bad = [(item.where, item.text, why, min(seen[item]))
            for item, why in U.problems(seen, allowed)]
     assert not bad, "\n".join(map(repr, bad[:40]))
@@ -106,9 +129,11 @@ def test_a_planted_identifier_is_caught(monkeypatch, allowed):
 def test_every_message_reads_as_words(allowed, registry):
     """The status lines a switch or a tab can show, for every brain and tab,
     and every reason they give, which the walk above never meets."""
-    from lobemap.viewer import panel
+    from lobemap.viewer import buttons, chrome, panel
     from lobemap.viewer import switcher as dock
 
+    for text in (dock.SWAPPED, chrome.STAYS_LOCKED, *buttons.OFF_KEYS.values()):
+        assert U.why_code(text, allowed) == "", text
     reasons = [dock.plain_reason(exc) for exc in (
         FileNotFoundError(), MemoryError(), PermissionError(), ValueError())]
     for space in registry.spaces.values():
