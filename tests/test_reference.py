@@ -42,8 +42,10 @@ def test_receptor_cells(raw, want):
     # The comma belongs to the name here, so it must not split.
     ("Sacculus, Chamber III; sacIII", "Sacculus, Chamber III; sacIII"),
     ("Sacculus, Chamber I; sacI", "Sacculus, Chamber I; sacI"),
-    # A bare sensillum is a prefix of its neuron class.
-    ("Ab9A; ab9", "Ab9A"),
+    # A prefix names a different sensillum here, not a less exact one:
+    # sacI is not part of sacII. Only the gene lists drop prefixes.
+    ("sacI; sacII", "sacI; sacII"),
+    ("ac3I; ac3II", "ac3I; ac3II"),
     # A parenthetical that is not a co-receptor is a synonym: keep it.
     ("Ai1A (Ab6A); ab6", "ab6; Ai1A (Ab6A)"),
 ])

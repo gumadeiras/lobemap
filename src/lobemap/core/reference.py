@@ -24,10 +24,12 @@ The rules, in the order they apply:
    of the term before it, so those are three and two receptors. `Rh50/Amt`
    and `Gr21a/Gr63a` are not shorthand -- both sides name a gene -- so the
    separator reading wins.
-6. A term that is a prefix of another is dropped: `Or69a` says less than
-   `Or69aA`, and `ab9` less than `Ab9A`. The `(subset)` form from rule 2 is
-   the exception, in reverse: `Ir75c (subset)` says less than `Ir75c`, so
-   `Ir75c; Ir75a/b (subset Ir75c)` keeps `Ir75c`.
+6. In the gene-list columns, a term that is a prefix of another is
+   dropped: `Or69a` says less than `Or69aA`. The `(subset)` form from rule 2
+   is the exception, in reverse: `Ir75c (subset)` says less than `Ir75c`, so
+   `Ir75c; Ir75a/b (subset Ir75c)` keeps `Ir75c`. In the name columns a
+   prefix is a different structure -- `sacI` is not part of `sacII`, nor
+   `ac3I` of `ac3II` -- so both stay.
 7. `?` is dropped, and what remains is deduplicated case-insensitively and
    sorted.
 """
@@ -41,15 +43,20 @@ from pathlib import Path
 #: Column in the reference table holding the glomerulus name.
 KEY = "canonical_glomerulus"
 
-#: Panel column -> (source column, whether `,` separates terms).
-#: Comma splitting is right for gene lists and wrong for `Sacculus,
+#: What a reader sees -> (source columns, whether `,` separates terms), in
+#: the order the panel lists them. The first source column with a value
+#: wins. Comma splitting is right for gene lists and wrong for `Sacculus,
 #: Chamber III`, which is one sensillum with a comma in its name.
-FIELDS: dict[str, tuple[str, bool]] = {
-    "receptor(s)": ("receptor_consensus", True),
-    "sensillum": ("sensillum_consensus", False),
-    "ALRN": ("neuron_name_benton_2025", True),
-    "organ": ("sensory_organ_consensus", False),
-    "co-receptor(s)": ("essential_coreceptor_benton_2025", True),
+#:
+#: The sensillum is Benton 2025's, then DoOR's: `sensillum_consensus` pools
+#: them with the neuron columns of other sources, so it said `Ab9A` -- a
+#: neuron -- where the sensillum is `ab9`. Neurons have their own field.
+FIELDS: dict[str, tuple[tuple[str, ...], bool]] = {
+    "Receptor": (("receptor_consensus",), True),
+    "Co-receptor": (("essential_coreceptor_benton_2025",), True),
+    "Sensory neuron": (("neuron_name_benton_2025",), True),
+    "Sensillum": (("sensillum_benton_2025", "sensillum_door"), False),
+    "Organ": (("sensory_organ_consensus",), False),
 }
 
 #: Cells that mean "nothing recorded" rather than a value.
@@ -108,7 +115,7 @@ _SUBSET = " (subset)"
 
 
 def _redundant(term: str, others) -> bool:
-    """Whether another term in the cell already says this one (rule 6).
+    """Whether another term in a gene list already says this one (rule 6).
 
     All lowercase. A prefix says less than what extends it, except that a
     term is never dropped for its own `(subset)` form: the subset is the
@@ -147,7 +154,8 @@ def terms(value: str, *, split_commas: bool = True) -> list[str]:
     seen: dict[str, str] = {}
     for f in found:
         seen.setdefault(f.lower(), f)
-    kept = [v for k, v in seen.items() if not _redundant(k, seen)]
+    kept = [v for k, v in seen.items()
+            if not (split_commas and _redundant(k, seen))]
     return sorted(kept, key=str.lower)
 
 
@@ -190,7 +198,7 @@ def _rows(registry_root):
 
 
 def load(registry_root) -> dict[str, dict[str, str]]:
-    """Glomerulus name -> {panel column: normalized value}.
+    """Glomerulus name -> {field: normalized value}, keyed as `FIELDS`.
 
     Keyed on the name as the table spells it AND on a lowercase form, so an
     atlas naming a glomerulus `DL3` or `dl3` finds the same row. Missing
@@ -204,8 +212,10 @@ def load(registry_root) -> dict[str, dict[str, str]]:
     for row in _rows(registry_root):
         name = row[KEY].strip()
         props = {
-            label: normalize(row.get(src, ""), split_commas=commas)
-            for label, (src, commas) in FIELDS.items()
+            label: next(filter(None, (
+                normalize(row.get(src, ""), split_commas=commas) for src in sources
+            )), "")
+            for label, (sources, commas) in FIELDS.items()
         }
         props[KEY] = name
         props[VFB] = vfb_url(row.get("vfb_name"), row.get("fbbt_id"))

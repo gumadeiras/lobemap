@@ -177,7 +177,7 @@ def test_fill_and_label_are_independent(tab):
 def test_annotation_columns_are_populated(tab):
     from lobemap.viewer.panel import NAME_COL
 
-    rec = _col(tab, "receptor(s)")
+    rec = _col(tab, "Receptor")
     got = {}
     for r in range(tab.table.rowCount()):
         name = tab.table.item(r, NAME_COL).text()
@@ -235,7 +235,7 @@ def test_an_atlas_layer_keeps_its_columns(fafb_tabs):
     assert tab.is_atlas is True
     headers = _visible_headers(tab)
     assert headers[1] == "glomerulus"
-    for expected in ("side", "label", "fill", "receptor(s)", "co-receptor(s)"):
+    for expected in ("side", "label", "fill", "Receptor", "Co-receptor"):
         assert expected in headers
     # `canonical` is the one conditional column: Benton agrees with FAFB's
     # vocabulary everywhere, so it would repeat the name on all 58 rows.
@@ -274,7 +274,7 @@ def test_columns_are_sized_to_their_contents(fafb_tabs):
         for c in range(len(COLUMNS))
     }
     # A column holding long strings must be wider than one holding "L"/"R".
-    assert widths["receptor(s)"] > widths["side"], widths
+    assert widths["Receptor"] > widths["side"], widths
     assert len(set(widths.values())) > 3, "columns look uniformly sized"
 
 
