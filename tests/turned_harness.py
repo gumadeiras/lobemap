@@ -105,17 +105,26 @@ def build(viewer, registry, space: str = "GRABE", multiscale: bool = False):
 
 
 def through_middle(viewer, axis: int = 2) -> None:
-    """Slice along `axis` through the middle of the bodies, and fit."""
+    """Fit, then slice along `axis` through the largest body's center and
+    center the view on it: the pivot a turn keeps where it is."""
     from lobemap.viewer.view import fit_view
 
     middle = np.mean([c for _n, c, _a in BODIES], axis=0)
     viewer.dims.set_point(axis, float(middle[axis]))
     fit_view(viewer)
+    # The largest body's center: every plane through it cuts it.
+    pivot = np.asarray(BODIES[0][1], float)
+    viewer.dims.set_point(axis, float(pivot[axis]))
+    center = list(viewer.scene.camera.center)
+    center[-2:] = pivot[list(viewer.dims.displayed)]
+    viewer.scene.camera.center = tuple(center)
 
 
 def image_index_at(image, world) -> float | None:
     """The value -- the ramp's index -- an image shows at a world point."""
     value = image.get_value(world, world=True)
+    if isinstance(value, tuple):            # a pyramid: (level, value)
+        value = value[1]
     return None if value is None else float(value)
 
 
@@ -227,3 +236,87 @@ def state(viewer) -> dict:
                     np.asarray(getattr(layer, "corner_pixels", [])).tolist())
                    for layer in viewer.layers],
     }
+
+
+def to_mesh(contour):
+    """Contour-layer data to mesh coordinates: through its cutting frame, if any."""
+    frame = contour.frame
+    return None if frame is None else frame.inverse
+
+
+def mesh_to_world(contour, m) -> np.ndarray:
+    """World point at which a mesh point is drawn in 2D, through the contours."""
+    frame = contour.frame
+    q = np.asarray(m, float) if frame is None else frame.apply(np.asarray(m, float))
+    return np.asarray(contour.layer.data_to_world(q), float)
+
+
+def plane_in_mesh(viewer, contour) -> tuple[np.ndarray, np.ndarray]:
+    """(origin, normal) of the plane on screen, in mesh coordinates.
+
+    Three world points of the slider's plane, taken to the contour layer's
+    data by its own transform and to the meshes by its frame.
+    """
+    axis = int(viewer.dims.order[0])
+    shown = list(viewer.dims.displayed)
+    world = np.zeros((3, 3))
+    world[:, axis] = float(viewer.dims.point[axis])
+    world[1, shown[0]] += 10.0
+    world[2, shown[1]] += 10.0
+    plane = np.array([contour.layer.world_to_data(w) for w in world], float)
+    back = to_mesh(contour)
+    if back is not None:
+        plane = back(plane)
+    return plane[0], np.cross(plane[1] - plane[0], plane[2] - plane[0])
+
+
+def texel_reach(viewer, contour) -> np.ndarray:
+    """How far, in image index along each array axis, napari's nearest texel
+    can be from a point of the plane: half a texel along each texel axis.
+
+    Texels lie along the displayed axes of the turned world, one image voxel
+    apart; along the slider they are on its positions. Unturned or spun,
+    the slider's step need not be the image's, and the nearest plane is up
+    to half a voxel off, as at rest.
+    """
+    shown = list(viewer.dims.displayed)
+    frame = contour.frame
+    if frame is None:
+        return np.full(3, 0.5)
+    rotation = frame.matrix[:3, :3]
+    # Mesh displacement per turned-world unit along each displayed axis.
+    reach = 0.5 * np.abs(rotation.T[:, shown]) @ SCALE[shown]
+    return reach / SCALE
+
+
+def texels(viewer, image, contour, axis_of_ramp: int):
+    """(value, expected) for every texel of an image's current 2D slice.
+
+    Each texel's world position through napari's own transforms -- the
+    tile it was read in and the layer's data-to-world -- taken to the
+    specimen point through the contour layer (`plane_in_mesh`), whose ramp
+    index is the value the texel must hold. Texels whose specimen point is
+    outside the image are left out.
+    """
+    raw = np.asarray(image._slice.image.raw, float)
+    tile = image._transforms["tile2data"]
+    dims = viewer.dims
+    axis = int(dims.order[0])
+    shown = list(dims.displayed)
+    index = np.asarray(image.world_to_data(dims.point), float)
+    plane = np.round(index[axis])
+    rows, cols = np.indices(raw.shape)
+    full = np.zeros((raw.size, 3))
+    full[:, shown[0]] = rows.ravel()
+    full[:, shown[1]] = cols.ravel()
+    data = np.asarray(tile(full), float)
+    data[:, axis] = plane
+    world = np.array([image.data_to_world(d) for d in data], float)
+    q = np.array([contour.layer.world_to_data(w) for w in world], float)
+    back = to_mesh(contour)
+    m = q if back is None else back(q)
+    want = (m - TRANSLATE) / SCALE
+    # Not within a voxel of the edge, where a coarser level ends sooner and a
+    # sample a hair outside is zero.
+    inside = np.all((want >= 1.01) & (want <= np.asarray(SHAPE) - 2.01), axis=1)
+    return raw.ravel()[inside], want[inside, axis_of_ramp]

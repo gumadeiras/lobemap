@@ -46,6 +46,8 @@ from collections import deque
 
 import numpy as np
 
+from .sections import plane_key
+
 #: How long after the UI thread last worked on a slice the worker waits
 #: before its next stage.
 QUIET_S = 0.03
@@ -95,12 +97,15 @@ class Plan:
     `build(cut, axis, position, pause, fills)` makes a plane's geometry,
     with the fills of the compartments in `fills`; a geometry already in the
     cache gets the fills it lacks from its own `add_fills(fills, pause)`.
+    `frame` is a turned view's `sections.PlaneFrame`, or None: the planes are
+    cut in it, and kept under its key.
     """
 
     def __init__(self, sections, geometry, build, axis: int, to_data, point,
                  grid: tuple[float, float, int], bounds: tuple[float, float],
-                 current: float, fills=frozenset()) -> None:
+                 current: float, fills=frozenset(), frame=None) -> None:
         self.sections, self.geometry, self.build = sections, geometry, build
+        self.frame = frame
         self.fills = frozenset(fills)
         self.axis = int(axis)
         self.to_data = to_data
@@ -151,7 +156,7 @@ class Plan:
         self.started = time.perf_counter()
         try:
             positions = self.positions(self._pause)
-            mine = {(self.axis, p) for p in positions}
+            mine = {plane_key(self.axis, p, self.frame) for p in positions}
             for position in positions:
                 self._pause()
                 try:
@@ -175,8 +180,9 @@ class Plan:
 
     def _cut(self, position: float, mine: set) -> bool:
         """Cut one plane into the caches; False if they have no room for it."""
-        key = (self.axis, position)
-        cut = self.sections.at(self.axis, position, keep=mine, pause=self._pause)
+        key = plane_key(self.axis, position, self.frame)
+        cut = self.sections.at(self.axis, position, keep=mine, pause=self._pause,
+                               frame=self.frame)
         if cut is None:
             return False
         self._pause()

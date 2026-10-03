@@ -111,6 +111,13 @@ def before_slicing(viewer, callback) -> None:
         hooks.append(callback)
 
 
+def stop_before_slicing(viewer, callback) -> None:
+    """Stop calling `callback` before slicing (`before_slicing`)."""
+    hooks = getattr(viewer._layer_slicer, "_lobemap_before", None)
+    if hooks is not None and callback in hooks:
+        hooks.remove(callback)
+
+
 def no_scene_update(viewer, layer):
     """A context in which hiding or showing `layer` does not redraw napari's scene.
 
@@ -361,6 +368,7 @@ __all__ = [
     "refresh_extent",
     "shown_unsliced",
     "slice_now",
+    "stop_before_slicing",
     "text_visual",
     "triangulate_edge",
     "triangulate_face",

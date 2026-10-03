@@ -178,7 +178,15 @@ class FineLevel:
         views, while dask hashed all of it for a name and then copied it
         twice, 0.5 s of the UI thread for the male CNS level. Unlike a store
         read eagerly, an array already in memory costs nothing to slice.
+
+        While a turned 2D view shows the layer resampled, its own levels are
+        held aside (`hold`): the level goes there, where the resampling
+        reads it, and back into the layer with them.
         """
+        held = _HELD.get(layer)
+        if held is not None:
+            held[level] = array
+            return
         levels = list(layer.data)
         levels[level] = array
         layer.data = levels
@@ -246,6 +254,19 @@ class FineLevel:
 
 #: Each multiscale image layer's `FineLevel`, if its 3D level is read late.
 _FINE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+#: An image's own levels, while a turned 2D view hands the layer others.
+_HELD: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def hold(layer, levels: list) -> None:
+    """`levels` are `layer`'s own while it shows others (`viewer.turned`)."""
+    _HELD[layer] = levels
+
+
+def release(layer) -> None:
+    """`layer` shows its own levels again."""
+    _HELD.pop(layer, None)
 
 
 def pin_level(layer, three_d: bool) -> None:
@@ -389,8 +410,10 @@ __all__ = [
     "coarse_level_for_3d",
     "default_colormap",
     "display_for",
+    "hold",
     "level_for_3d",
     "pin_level",
+    "release",
     "show_images",
     "stop_levels",
 ]

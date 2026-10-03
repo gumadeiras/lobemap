@@ -45,37 +45,40 @@ def _scene(viewer, registry, axis=2, mirrored=False, multiscale=False):
 
 def _check_plane(viewer, session, tol_um=2e-4):
     """The drawn loops are trimesh's section of the meshes by the plane on
-    screen, taken into mesh coordinates through the contour layer's own
-    transform; the images under every loop point show that mesh point."""
+    screen, and the images under every loop point show that mesh point.
+
+    The plane is taken into mesh coordinates through the contour layer's
+    own transform, and its cutting frame when the view is turned across the
+    grid (`th.plane_in_mesh`). Under a loop point, napari's nearest texel
+    is within half a texel of it, on each texel axis (`th.texel_reach`).
+    """
     contour = session.contours["synthetic"]
-    axis = int(viewer.dims.order[0])
-    d = float(viewer.dims.point[axis])
-    world = np.zeros((3, 3))
-    world[:, axis] = d
-    shown = list(viewer.dims.displayed)
-    world[1, shown[0]] += 10.0
-    world[2, shown[1]] += 10.0
-    world[:, shown] += np.asarray(viewer.scene.camera.center)[-2:]
-    plane = np.array([contour.layer.world_to_data(w) for w in world], float)
-    normal = np.cross(plane[1] - plane[0], plane[2] - plane[0])
-    loops = th.loops_in_mesh(contour)
+    origin, normal = th.plane_in_mesh(viewer, contour)
+    loops = th.loops_in_mesh(contour, th.to_mesh(contour))
     assert loops, "nothing drawn"
     by_owner: dict[int, list] = {}
     for owner, loop in loops:
         by_owner.setdefault(owner, []).append(loop)
     for owner, drawn in by_owner.items():
-        want = th.trimesh_loops(contour.meshset, owner, plane[0], normal)
+        want = th.trimesh_loops(contour.meshset, owner, origin, normal)
         assert th.hausdorff(drawn, want) <= tol_um, owner
-    worst = 0.0
+    reach = th.texel_reach(viewer, contour)
+    top = np.asarray(th.SHAPE) - 2.01
     for _owner, loop in loops:
         for m in loop[:: max(1, len(loop) // 12)]:
-            w = contour.layer.data_to_world(m)
+            index = (m - th.TRANSLATE) / th.SCALE
+            if np.any(index < 1.01) or np.any(index > top):
+                continue                    # outside the image, or at its edge
+            w = th.mesh_to_world(contour, m)
             for k, image in enumerate(session.images):
                 got = th.image_index_at(image, w)
                 assert got is not None
-                worst = max(worst, abs(got - (m[k] - th.TRANSLATE[k]) / th.SCALE[k]))
-    # The nearest voxel: within half a voxel, on every axis.
-    assert worst <= 0.5 + 1e-6, worst
+                want = (m[k] - th.TRANSLATE[k]) / th.SCALE[k]
+                # float32 ramps: a millionth of a voxel of rounding.
+                assert abs(got - want) <= reach[k] + 1e-4, (k, got, want)
+
+
+_check_plane_oblique = _check_plane
 
 
 def _screen_angle(viewer, a, b) -> float:
@@ -249,6 +252,9 @@ def _label_directions(node) -> dict[str, np.ndarray]:
 
 
 def test_the_turn_survives_trips_between_2d_and_3d(viewer, registry):
+    """3D faces Home turned and moves no layer; 2D comes back to the same
+    turned plane, framed as napari frames it unturned after a trip: napari
+    fits the view on every change of mode."""
     from lobemap.viewer.rotation import turned_view
     from lobemap.viewer.view import orient_anterior
 
@@ -258,30 +264,34 @@ def test_the_turn_survives_trips_between_2d_and_3d(viewer, registry):
     viewer.dims.ndisplay = 2
     th.settle_canvas(viewer)
     zoom_unturned = viewer.scene.camera.zoom
-    session.set_rotation(37, 20, -35)
-    th.settle_canvas(viewer)
-    turned = th.state(viewer)
-    for _ in range(3):
-        viewer.dims.ndisplay = 3
+    for angles in ((37, 0, 0), (37, 20, -35)):
+        session.set_rotation(*angles)
         th.settle_canvas(viewer)
-        camera = viewer.scene.camera
-        saved = tuple(camera.angles)
-        orient_anterior(viewer, registry.spaces["GRABE"], angles=(0, 0, 0))
-        v0, u0 = np.asarray(camera.view_direction), np.asarray(camera.up_direction)
-        camera.angles = saved
-        want_v, want_u = turned_view(v0, u0, (37, 20, -35))
-        assert np.allclose(camera.view_direction, want_v, atol=1e-6)
-        assert np.allclose(camera.up_direction, want_u, atol=1e-6)
-        for layer in session.affine_layers():
-            assert np.allclose(layer.affine.affine_matrix, np.eye(4))
-        viewer.dims.ndisplay = 2
-        th.settle_canvas(viewer)
-        again = th.state(viewer)
-        assert again["order"] == turned["order"] and again["layers"] == turned["layers"]
-        assert np.allclose(again["point"], turned["point"], atol=1e-9)
-        assert np.allclose(again["center"], turned["center"], atol=1e-9)
-        assert viewer.scene.camera.zoom >= zoom_unturned * (1 - 1e-9)
-    assert session.rotation == (37.0, 20.0, -35.0)
+        plane = viewer.dims.point[int(viewer.dims.order[0])]
+        states = []
+        for _ in range(3):
+            viewer.dims.ndisplay = 3
+            th.settle_canvas(viewer)
+            camera = viewer.scene.camera
+            saved = tuple(camera.angles)
+            orient_anterior(viewer, registry.spaces["GRABE"], angles=(0, 0, 0))
+            v0, u0 = np.asarray(camera.view_direction), np.asarray(camera.up_direction)
+            camera.angles = saved
+            want_v, want_u = turned_view(v0, u0, angles)
+            assert np.allclose(camera.view_direction, want_v, atol=1e-6)
+            assert np.allclose(camera.up_direction, want_u, atol=1e-6)
+            for layer in session.affine_layers():
+                assert np.allclose(layer.affine.affine_matrix, np.eye(4))
+            for image in session.images:
+                assert isinstance(image.data, np.ndarray)
+            viewer.dims.ndisplay = 2
+            th.settle_canvas(viewer)
+            assert viewer.dims.point[int(viewer.dims.order[0])] == plane
+            assert viewer.scene.camera.zoom == pytest.approx(zoom_unturned, rel=1e-9)
+            _check_plane_oblique(viewer, session)
+            states.append(th.state(viewer))
+        assert states[0] == states[1] == states[2]
+        assert session.rotation == tuple(float(a) for a in angles)
 
 
 def test_hover_names_the_compartment_under_the_cursor_while_turned(viewer, registry):

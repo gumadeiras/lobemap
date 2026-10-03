@@ -1,9 +1,13 @@
-"""Exact sections of meshes by axis-aligned planes: the loops 2D draws.
+"""Exact sections of meshes by planes: the loops 2D draws.
 
 `MeshSections` cuts every compartment of a MeshSet at once and hands back
 closed polylines, the same ones `trimesh.Trimesh.section` gives; see its
 docstring and `tests/test_contour_sections.py` for what "the same" means.
 `viewer.contours` draws them.
+
+A plane is axis-aligned in the coordinates it is asked in: `x[axis] =
+position`, in the meshes' own, or in a `PlaneFrame` -- the meshes moved
+rigidly, which is how a turned 2D view cuts them across the grid.
 """
 
 from __future__ import annotations
@@ -96,6 +100,12 @@ class PlaneCache:
                 self.nbytes -= size
             return value
 
+    def drop(self, gone) -> None:
+        """Forget every entry whose key `gone(key)` is true."""
+        with self._lock:
+            for key in [k for k in self._items if gone(k)]:
+                self.nbytes -= self._items.pop(key)[1]
+
     def grew(self, key, nbytes: int, keep=None) -> bool:
         """A kept value now holds `nbytes` more: fills built on it later.
 
@@ -116,6 +126,37 @@ class PlaneCache:
                 if self.nbytes <= self.max_bytes:
                     return True
             return False
+
+
+class PlaneFrame:
+    """Rigid coordinates for cutting: `q = G m` for a mesh point `m`.
+
+    A plane asked for in it, `q[axis] = position`, is an oblique plane of
+    the meshes, and its loops come back in `q`. `key` identifies it in the
+    caches, to the bit.
+    """
+
+    def __init__(self, matrix) -> None:
+        self.matrix = np.array(matrix, dtype=np.float64)
+        self.key = self.matrix.tobytes()
+
+    def depth(self, axis: int) -> tuple[np.ndarray, float]:
+        """(direction, offset): `q[axis] = direction . m + offset`."""
+        return self.matrix[axis, :3].copy(), float(self.matrix[axis, 3])
+
+    def apply(self, points) -> np.ndarray:
+        return np.asarray(points, np.float64) @ self.matrix[:3, :3].T + self.matrix[:3, 3]
+
+    def inverse(self, points) -> np.ndarray:
+        """Mesh coordinates of points in this frame."""
+        return (np.asarray(points, np.float64) - self.matrix[:3, 3]) @ self.matrix[:3, :3]
+
+
+def plane_key(axis: int, position: float, frame: PlaneFrame | None = None) -> tuple:
+    """The cache key of one plane: the axis-aligned one's, or with its frame."""
+    if frame is None:
+        return (int(axis), float(position))
+    return (int(axis), float(position), frame.key)
 
 
 class MeshSections:
@@ -168,11 +209,19 @@ class MeshSections:
         self.meshset = meshset
         self._offsets = np.asarray(meshset.face_offsets)
         self._per_axis: dict[int, tuple] = {}
+        #: The heights and face extents along one frame's axes: the frame's
+        #: key, and (axis -> (heights, fmin, fmax, lo, hi)). One frame at a
+        #: time, since a turn makes a new one; see `_frame_extent`.
+        self._frame = (None, {})
+        self._frame_lock = threading.Lock()
         self.planes = PlaneCache(max_bytes)
 
     def at(self, axis: int, position: float, keep=None,
-           pause=None) -> dict[int, list[np.ndarray]] | None:
+           pause=None, frame: PlaneFrame | None = None) -> dict[int, list[np.ndarray]] | None:
         """Compartment index -> closed polylines, for the plane x[axis] = position.
+
+        In `frame`, if given: the plane `q[axis] = position` with `q = G m`,
+        and the loops in `q`.
 
         Safe from any thread: the meshes are never written, and the cache is
         locked. With `keep` -- the prefetch's own planes -- a plane that
@@ -181,12 +230,21 @@ class MeshSections:
         between the stages of the cut, where the prefetch gives way to the
         UI thread.
         """
-        key = (int(axis), float(position))
+        key = plane_key(axis, position, frame)
         hit = self.planes.get(key)
         if hit is not None:
             return hit
-        out = self._compute(*key, pause=pause or _go_on)
+        if frame is None:
+            out = self._compute(int(axis), float(position), pause=pause or _go_on)
+        else:
+            out = self._compute(int(axis), float(position), pause=pause or _go_on, frame=frame)
         return self.planes.put(key, out, _nbytes(out), keep=keep)
+
+    def drop_frames(self) -> None:
+        """Forget every plane cut in a frame, and the frame's heights."""
+        with self._frame_lock:
+            self._frame = (None, {})
+        self.planes.drop(lambda key: len(key) > 2)
 
     # -- geometry --------------------------------------------------------
 
@@ -194,22 +252,54 @@ class MeshSections:
         """Per-face and per-compartment (min, max) along one axis."""
         if axis not in self._per_axis:
             coord = self.meshset.vertices[:, axis][self.meshset.faces]
-            fmin, fmax = coord.min(axis=1), coord.max(axis=1)
-            offsets = self._offsets
-            k = self.meshset.n_compartments
-            lo = np.full(k, np.inf)
-            hi = np.full(k, -np.inf)
-            filled = np.flatnonzero(np.diff(offsets) > 0)
-            if len(filled):
-                starts = offsets[filled]
-                lo[filled] = np.minimum.reduceat(fmin, starts)
-                hi[filled] = np.maximum.reduceat(fmax, starts)
-            self._per_axis[axis] = (fmin, fmax, lo, hi)
+            self._per_axis[axis] = self._face_extent(coord)
         return self._per_axis[axis]
 
-    def _compute(self, axis: int, p: float, pause=None) -> dict[int, list[np.ndarray]]:
+    def _frame_extent(self, frame: PlaneFrame, axis: int):
+        """`_extent` along a frame's axis, with each vertex's height on it.
+
+        Heights in float64, as trimesh measures the distance to a plane.
+        """
+        with self._frame_lock:
+            key, per_axis = self._frame
+            if key != frame.key:
+                per_axis = {}
+                self._frame = (frame.key, per_axis)
+            hit = per_axis.get(axis)
+        if hit is not None:
+            return hit
+        direction, _offset = frame.depth(axis)
+        heights = self.meshset.vertices.astype(np.float64) @ direction
+        made = (heights, *self._face_extent(heights[self.meshset.faces]))
+        with self._frame_lock:
+            if self._frame[0] == frame.key:
+                self._frame[1][axis] = made
+        return made
+
+    def _face_extent(self, coord) -> tuple:
+        """Per-face and per-compartment (min, max) of a per-face-vertex coordinate."""
+        fmin, fmax = coord.min(axis=1), coord.max(axis=1)
+        offsets = self._offsets
+        k = self.meshset.n_compartments
+        lo = np.full(k, np.inf)
+        hi = np.full(k, -np.inf)
+        filled = np.flatnonzero(np.diff(offsets) > 0)
+        if len(filled):
+            starts = offsets[filled]
+            lo[filled] = np.minimum.reduceat(fmin, starts)
+            hi[filled] = np.maximum.reduceat(fmax, starts)
+        return fmin, fmax, lo, hi
+
+    def _compute(self, axis: int, p: float, pause=None,
+                 frame: PlaneFrame | None = None) -> dict[int, list[np.ndarray]]:
         pause = pause or _go_on
-        fmin, fmax, lo, hi = self._extent(axis)
+        position = p
+        if frame is None:
+            fmin, fmax, lo, hi = self._extent(axis)
+        else:
+            # The plane in the meshes' own coordinates: height = p.
+            heights, fmin, fmax, lo, hi = self._frame_extent(frame, axis)
+            p = position - frame.depth(axis)[1]
         # A compartment is sectioned only when the plane is inside its
         # bounds, as `contours_at` always required, so only its faces are
         # looked at: a plane crosses a fraction of an atlas.
@@ -232,7 +322,10 @@ class MeshSections:
         vertices = self.meshset.vertices
         # int64: an edge key is a product of two vertex ids.
         faces = self.meshset.faces[near].astype(np.int64)
-        dist = vertices[:, axis][faces].astype(np.float64) - p
+        if frame is None:
+            dist = vertices[:, axis][faces].astype(np.float64) - p
+        else:
+            dist = heights[faces] - p
         sign = np.zeros(dist.shape, dtype=np.int8)
         sign[dist < -ON_PLANE_TOL] = -1
         sign[dist > ON_PLANE_TOL] = 1
@@ -274,7 +367,10 @@ class MeshSections:
         pause()
         rows = np.concatenate(rows)
         keys, nodes = np.unique(np.concatenate(ends).ravel(), return_inverse=True)
-        points = _node_points(vertices, keys, axis, p, n)
+        if frame is None:
+            points = _node_points(vertices, keys, axis, p, n)
+        else:
+            points = _frame_points(vertices, heights, keys, axis, p, position, n, frame)
         pause()
         walk, lengths, loop_owners, handed_back = _loops(
             nodes.reshape(-1, 2), owner[rows], len(keys), pause)
@@ -284,7 +380,9 @@ class MeshSections:
             # Their loops join the others, so the whole plane is cleaned at
             # once and each compartment keeps its place in the order.
             extra = [(index, loop) for index in handed_back.tolist()
-                     for loop in self._trimesh_section(index, axis, p)]
+                     for loop in (self._trimesh_section(index, axis, p) if frame is None
+                                  else self._trimesh_frame_section(index, frame, axis,
+                                                                   position))]
             shut = np.array([len(loop) > 1 and np.array_equal(loop[0], loop[-1])
                              for _index, loop in extra], dtype=bool)
             # Integer arrays even when trimesh finds no loop: an empty list
@@ -330,6 +428,52 @@ class MeshSections:
             pts[:, axis] = p
             out.append(pts)
         return out
+
+    def _trimesh_frame_section(self, index: int, frame: PlaneFrame, axis: int,
+                               position: float) -> list[np.ndarray]:
+        """`_trimesh_section` for a plane in a frame, its loops in the frame."""
+        import trimesh
+
+        v, f = self.meshset.compartment(index)
+        direction, offset = frame.depth(axis)
+        try:
+            mesh = trimesh.Trimesh(vertices=v, faces=f, process=False)
+            section = mesh.section(plane_origin=direction * (position - offset),
+                                   plane_normal=direction)
+        except Exception:  # noqa: BLE001 - a tangent plane degenerates
+            return []
+        if section is None:
+            return []
+        out = []
+        for poly in section.discrete:
+            if len(poly) < 2:
+                continue
+            pts = frame.apply(poly)
+            pts[:, axis] = position
+            out.append(pts)
+        return out
+
+
+def _frame_points(vertices, heights, keys, axis: int, p: float, position: float,
+                  n: int, frame: PlaneFrame) -> np.ndarray:
+    """`_node_points` for a plane in a frame: `height = p` in the meshes.
+
+    Each crossing is found along its edge in the meshes' coordinates, in
+    float64, and moved into the frame, where it lies on `q[axis] =
+    position` to rounding and is put exactly on it.
+    """
+    points = np.empty((len(keys), 3))
+    is_vertex = keys < n
+    points[is_vertex] = vertices[keys[is_vertex]]
+    edge = keys[~is_vertex] - n
+    a, b = edge // n, edge % n
+    u = vertices[a].astype(np.float64)
+    w = vertices[b].astype(np.float64)
+    t = (p - heights[a]) / (heights[b] - heights[a])
+    points[~is_vertex] = u + t[:, None] * (w - u)
+    points = frame.apply(points)
+    points[:, axis] = position
+    return points
 
 
 def _go_on() -> None:
@@ -515,4 +659,5 @@ def _without(segments: np.ndarray, owners: np.ndarray, dropped: np.ndarray):
     return ids[walk], lengths, loop_owners, np.union1d(dropped, more)
 
 
-__all__ = ["MIN_EDGE_UM", "ON_PLANE_TOL", "SECTION_CACHE_BYTES", "MeshSections", "PlaneCache"]
+__all__ = ["MIN_EDGE_UM", "ON_PLANE_TOL", "SECTION_CACHE_BYTES", "MeshSections", "PlaneCache",
+           "PlaneFrame", "plane_key"]

@@ -417,7 +417,7 @@ class SceneSession:
                 apply_mirror([contour.layer], True, self.mirror_center)
             if contour is not None:
                 # Placed on the turned plane, as the parts already built are.
-                self.turned.adopt(contour.layer)
+                self.turned.adopt(contour)
         except BaseException:
             for layer in added:
                 with contextlib.suppress(Exception):

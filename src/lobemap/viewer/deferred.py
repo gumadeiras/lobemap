@@ -176,6 +176,19 @@ class Deferred:
         it could not be read. After `hold`."""
         return self._bounds.get(name)
 
+    def vertices(self, name: str):
+        """A part's mesh vertices if the thread has read its mesh, else None.
+
+        Without waiting: `bounds` stands in for a mesh not read yet.
+        """
+        done, part = self._read.get(name), self.parts.get(name)
+        if done is None or part is None or not done.is_set():
+            return None
+        try:
+            return self.registry.mesh(part.asset.id).vertices
+        except Exception:                   # noqa: BLE001 - its tab says why
+            return None
+
     def wait(self, name: str) -> None:
         """Wait until the thread is done with the mesh of `name`.
 
