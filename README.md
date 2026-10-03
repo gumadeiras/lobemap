@@ -171,31 +171,60 @@ CC BY and CC BY-NC require attribution, so cite the paper behind each atlas you 
 
 ## In the viewer
 
-- **3D** draws the meshes. **2D** draws exact mesh–plane contours, computed
-  by intersection rather than rasterized, so they stay sharp at any zoom.
-- Each glomerulus keeps one color across the atlases of its space, in 3D,
-  in 2D and on its slice label.
-- The right-hand panel has a tab per atlas and per neuropil set. A checked row is a drawn glomerulus, in 3D and in 2D. A space opens with its primary atlas checked and every other atlas and reference shell unchecked, and hiding a layer with napari's eye unchecks its rows. Only the primary atlas is built at open: the others are read in the background while the space opens, and are built and join napari's layer list when their tab first opens. A neuropil set that reaches past the rest of its space waits in the layer list as a hidden `<name> (not opened)` layer, so the sliders and the view are the same before and after its tab opens.
-- Two more checkboxes per row write the glomerulus's name on the slice and fill its contour. They and their buttons work in 2D only, so they are disabled in 3D. Each bulk button's tooltip says which rows it acts on. A fill covers exactly the inside of its outline, unless the outline crosses or touches itself, as a few neuropil sections do.
-- The **Driver line** menu of an atlas tab checks the glomeruli that a GAL4 or QF2 line labels, from the `sensory_neuron_lines` and `projection_neuron_lines` columns of `registry/reference/glomerulus_ground_truth.csv`. `Orco-GAL4 & GH146-GAL4` checks the glomeruli that both lines label.
-- The **VFB** button opens the Virtual Fly Brain term page of the selected glomerulus. Selecting its row, or hovering it in the canvas, selects it.
-- Hovering names the glomerulus under the cursor in the status bar: on its mesh in 3D, and inside its outline in 2D.
-- The controls at the top right switch between spaces without restarting, mirror the space for display, and choose the axis a 2D slice steps along. A switch that fails says why under the space menu and leaves the space you had as it was: its checked rows, labels, fills, filters, driver lines, open tab, slice axis and plane, mode, mirror and camera. A switch that succeeds opens the new space unmirrored. Each slice choice is named by the anatomical axis nearest to it, with the angle between them, for example `Anterior-Posterior (z, 17.5° off)` in FAFB14: a slice is cut along the voxel grid, not along the anatomy.
-- 2D opens on a plane that cuts the shown atlas. A plane you chose is kept when you go to 3D and back.
-- A space with several atlases opens on one of them — `primary_atlas` in `registry/spaces.toml` — with the rest unchecked. The panel's tabs turn the others on. Only the primary atlas is built when a space opens: every other atlas and neuropil set is built the first time its tab opens, and its mesh and contour layers join napari's layer list then.
-- A space's reference image — the virtual stain, or the Grabe confocal channel — is shown in grayscale whenever it has been fetched. In 3D a virtual stain first shows a coarser level of its pyramid and sharpens, usually within a second, once the finest level that fits one GPU texture has been read in the background; later visits to 3D show that level at once. `--show` turns on something that starts off, in the first scene only: an asset id (`lobemap view FAFB14 --show fafb_neuropil`), an atlas id (`lobemap view JRCFIB2018F --show schlegel2021_s12`) or a role (`--show neuropil`). A name the space does not have, or an unknown space, is refused with one line before any window opens. `--ndisplay 2` opens in 2D.
-- In 3D the corner carries two axis indicators: one for the array axes,
-  labeled `x`, `y`, `z`, and one for the anatomical axes. Each
-  anatomical arrow is labeled with the pole it points at, one from each
-  of `A`/`P`, `D`/`V` and `R`/`L`. The labels differ between spaces:
-  which pole of each axis is picked so that no anatomical arrow overlaps
-  an `x`/`y`/`z` one.
-- In 2D only the array indicator is shown, since a slice is cut along
-  array axes rather than anatomical ones.
-- Under the mirror both indicators follow the reflection, in 2D and 3D, and the home button faces the reflected anatomy.
+The window has three columns. On the left, the **View** dock, tabbed with napari's **Layer settings**, sits above napari's **Layers** list. The canvas is in the middle. On the right, **Glomeruli and neuropils** holds one table per atlas and per neuropil set. The docks have no close button; the Window menu shows a hidden one again.
 
-Both the mesh and contour layers stay in the layer list in either mode; the
-one the current mode cannot draw is simply switched off.
+### The View dock
+
+- **Brain** opens another brain without restarting: FAFB (female brain, EM), Hemibrain (female, EM), Male CNS (EM) or Grabe 2015 (live brain, light microscopy). Its tooltip spells out the abbreviations and names the template the brain is shown in. Only brains with data on disk are listed.
+- **Show** switches between **3D**, which draws the meshes, and **Slice**, which draws one section at a time: the image, and exact mesh–plane outlines that stay sharp at any zoom. **Fit to window** fits the brain to the window; in 3D it also turns back to the front view, dorsal side up, with the rotation applied. It never moves the slice or the angles.
+- **Sections** chooses which sections the slider steps through. Each choice is named by the brain's plane nearest the image grid and the angle between them, for example `Frontal (17.5° off true)` in FAFB: unaligned, a section follows the image's own grid. **Align to the brain's true planes**, off by default, cuts the sections along the brain's own frontal, horizontal and sagittal planes instead, and the menu then reads `Frontal (true plane)`. Both work in Slice view only; in 3D they are disabled and say so.
+- **Mirror the brain left to right** shows the brain as its mirror image about its mid-plane, to compare a left lobe with a right one. It is for display only: the data do not change, and the corner arrows follow it.
+- **Rotate around** turns the view by three angles, from −180° to 180°, about the axes of the screen:
+  - **Line of sight**: positive turns the picture counterclockwise.
+  - **Vertical axis**: positive moves the near side to your right.
+  - **Horizontal axis**: positive brings the top toward you.
+
+  The rows are named by the screen's axes, not by x, y and z, which are the image's own axes and differ from the screen's once the slice axis changes. In 3D the camera turns from the front view, and no layer moves. Dragging still turns the camera freely and leaves the angles as they are; a new angle, or Fit to window, puts the camera back at the front view turned by the angles. In Slice view, a turn about the line of sight turns the section in the screen plane. A turn about the vertical or horizontal axis cuts a true oblique section: the image is resampled on the turned plane and the outlines are exact sections of the meshes on it, the slider steps along your line of sight and reads `depth`, and napari's x/y/z arrows are hidden, since no image axis is on screen. **Reset rotation** gives back exactly the unturned view.
+- In 3D the corner shows two sets of arrows: napari's, for the image's own axes `x`, `y` and `z`, and the anatomy's, each labeled with the pole it points at, one of `A`/`P`, `D`/`V` and `L`/`R`. The legend under the controls says what the letters mean. In Slice view only napari's arrows are shown.
+
+0.1's controls map onto these as follows, for a frontal view:
+
+| 0.1 | now |
+|---|---|
+| Z/slice | Rotate around **Line of sight** |
+| Y/vertical | Rotate around **Vertical axis** |
+| X/horizontal | Rotate around **Horizontal axis** |
+| Mirror horizontal | **Mirror the brain left to right** |
+| Mirror vertical | **Mirror the brain left to right**, and **Line of sight** 180° |
+| both mirrors, Benton's 0.1 default | **Line of sight** 180° |
+
+### Switching brains
+
+A switch that succeeds keeps the mode, the angles and the alignment, which mean the same on screen in every brain, and the section plane by its anatomy: frontal stays frontal, whichever image axis that is in the new brain. It clears the mirror, so a brain never opens reflected. Each brain opens its own tables, with its primary atlas checked.
+
+A switch that fails says why under the controls and leaves the brain you had exactly as it was: its checked rows, names, fills, searches, driver lines and open tab, its slice and plane, the mode, the mirror, the angles, the alignment and the camera.
+
+### The tables
+
+- Each tab is named by its atlas, and its tooltip cites the paper. Glomerulus tabs have the columns `Show`, `Glomerulus`, `Side`, `Label`, `Fill` and `Receptor`; neuropil tabs have `Show`, `Neuropil`, `Side`, `Label` and `Fill`. A missing value shows `—` everywhere.
+- A checked row is a drawn compartment, in 3D and in Slice view. A brain opens with its primary atlas checked and everything else unchecked, and hiding a layer with napari's eye unchecks its rows. `Label` writes the name on the slice and `Fill` fills its outline; they and the **On slice** buttons work in Slice view only, so they are disabled in 3D.
+- The **Show** buttons `All`, `None`, `Matches` and `Invert` act on a tab's rows; `Matches` keeps the rows the search leaves. The **On slice** buttons are `Names`, `No names`, `Fill` and `No fill`. The search looks in the name, receptor, sensillum, organ and the other details of the tab's kind, and clicking a column header sorts by it.
+- **Driver line** checks the glomeruli that a GAL4 or QF2 line labels, from the `sensory_neuron_lines` and `projection_neuron_lines` columns of `registry/reference/glomerulus_ground_truth.csv`. `Orco-GAL4 & GH146-GAL4` checks the glomeruli that both lines label.
+- Selecting a row fills the details under the table: for a glomerulus its standard name, receptor, co-receptor, sensory neuron, sensillum and organ, with **Open in Virtual Fly Brain**; for a neuropil its full name and the source of that name. The details area keeps its size, with room for the longest value in the tab, so selecting another row changes only the text.
+- Hovering in the canvas names what is under the cursor in the status bar, for example `VA3 (left) — Benton 2025` or `AL, antennal lobe (right) — Neuropils (FlyWire)`, on its mesh in 3D and inside its outline in Slice view. Hovering moves nothing in the panel. A click that does not drag selects the row, opens its tab and fills the details; a drag turns or pans the view.
+- Only the primary atlas is built when a brain opens. The others are read in the background and are built, and join napari's layer list, the first time their tab opens. A neuropil set that reaches past the rest of its brain waits in the layer list as a hidden `Neuropils (FlyWire) · not loaded yet` layer, so the sliders and the view are the same before and after its tab opens.
+
+### Layers
+
+Each layer is named by its atlas and what it draws: `Benton 2025 · 3D` for the meshes and `Benton 2025 · outlines` for the sections. A neuropil set also says where its data come from, as in `Neuropils (FlyWire) · 3D` and `Neuropils (neuPrint) · 3D`. The images are `Neuropil stain (from synapses)`, `Confocal image (Grabe 2015)` and, off by default, `Glomerulus label volume (Grabe 2015)`. The meshes use the colormaps `Glomerulus colors` and `Neuropil colors`. Both the mesh and the outline layer stay in the list in either mode; the one the mode cannot draw is switched off. lobemap's layers are locked against napari's drawing and transform tools, which would move a mesh off its image; a layer you add yourself is not.
+
+Each glomerulus keeps one color across the atlases of its brain, in 3D, on the slice and on its name.
+
+A brain's reference image, the virtual stain or the Grabe confocal image, is shown in grayscale whenever it has been fetched. In 3D a virtual stain first shows a coarser level of its pyramid and sharpens, usually within a second, once the finest level that fits one GPU texture has been read in the background; later visits to 3D show that level at once. `--show` turns on something that starts off, in the first brain only: an asset id (`lobemap view FAFB14 --show fafb_neuropil`), an atlas id (`lobemap view JRCFIB2018F --show schlegel2021_s12`) or a role (`--show neuropil`). A name the brain does not have, or an unknown space, is refused with one line before any window opens. `--ndisplay 2` opens in Slice view.
+
+### Speed while turned
+
+At 0° nothing of the rotation runs. Once turned, a repeat step of the slider in Slice view takes 2–4 ms in every brain. The first visit to an oblique plane takes 5–24 ms, and about 40 ms in the hemibrain at a compound angle. Setting an oblique angle takes 55–215 ms. While turned, the hemibrain peaks at about 2.3 GB of memory, against 1.15 GB unturned.
 
 ## Documentation
 
@@ -205,7 +234,7 @@ one the current mode cannot draw is simply switched off.
 - [registry/reference/README.md](registry/reference/README.md) — the reference table and how it was built
 - [CHANGELOG.md](CHANGELOG.md) — what changed since 0.1.4, including what was removed
 
-lobemap 0.1, with its atlas selector, rotation controls, DoOR and Potter maps, and BANC and Virtual Fly Brain browsers, remains at tag [`v0.1.4`](https://github.com/gumadeiras/lobemap/tree/v0.1.4).
+lobemap 0.1, with its atlas selector, DoOR and Potter maps, and BANC and Virtual Fly Brain browsers, remains at tag [`v0.1.4`](https://github.com/gumadeiras/lobemap/tree/v0.1.4).
 
 ## Authors
 
