@@ -10,17 +10,42 @@ from pathlib import Path
 
 from . import __version__
 
-DEFAULT_REGISTRY = Path(__file__).resolve().parents[2] / "registry"
-
 #: The space `lobemap` and `lobemap view` open when none is named. FAFB is
 #: the whole adult brain at synaptic resolution and the space the
 #: nomenclature is anchored in, so it is the least surprising thing to see
 #: first. `lobemap spaces` lists the others.
 DEFAULT_SPACE = "FAFB14"
 
+#: Import names of the `ingest` extra in pyproject.toml. A viewer-only
+#: install lacks them, and a command that needs one says how to get it.
+INGEST_MODULES = frozenset({
+    "navis", "flybrains", "fafbseg", "neuprint", "pyvista", "h5py", "requests",
+    "pytz", "skimage", "pyarrow", "cloudvolume",
+})
+
+
+class UsageError(Exception):
+    """Wrong input. `main` prints it as one line and exits 2, with no traceback."""
+
+
+def _require_known(kind: str, names, known) -> None:
+    """Refuse names that are not in `known`, before any work starts.
+
+    An unknown name used to be dropped (`fetch --asset <typo>` said there
+    was nothing to fetch and exited 0) or to surface as a KeyError
+    traceback from wherever it was first looked up.
+    """
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        raise UsageError(f"unknown {kind} {', '.join(unknown)}; "
+                         f"known: {', '.join(sorted(known))}")
+
 
 def _registry_root(args) -> Path:
-    return Path(args.registry or os.environ.get("LOBEMAP_REGISTRY") or DEFAULT_REGISTRY)
+    from .core.registry import default_registry_root
+
+    named = args.registry or os.environ.get("LOBEMAP_REGISTRY")
+    return Path(named) if named else default_registry_root()
 
 
 def _data_root(args, root: Path) -> Path:
@@ -49,7 +74,7 @@ def _optional_assets(root: Path) -> set[str]:
     return {name for name, r in recipes.items() if r.expensive}
 
 
-def _autofetch(root: Path, data_root: Path) -> None:
+def _autofetch(root: Path, data_root: Path) -> bool:
     """Fetch the required artifacts before opening a scene.
 
     Nothing runs on `uv sync`, so a fresh clone reaches the viewer with no
@@ -57,37 +82,45 @@ def _autofetch(root: Path, data_root: Path) -> None:
     what a scene cannot open without -- the meshes and the Grabe stack, 76
     MB -- and leave the stains to be asked for. Silent when there is
     nothing to do, and never fatal: a failure here should still let the
-    viewer start and report what it is missing in its own terms.
+    viewer start and report what it is missing in its own terms. Each
+    failure is printed with its reason, so a dead proxy or a missing
+    release reads as that rather than as missing data. True if anything
+    arrived, so the caller knows a registry it loaded before is stale.
     """
     from .core import manifest as mf
 
     path = root / "manifest.toml"
     if not path.exists():
-        return
+        return False
     try:
         arts, base_url = mf.load(path)
     except Exception:                               # noqa: BLE001 - advisory
-        return
+        return False
     if not base_url:
-        return
+        return False
     optional = _optional_assets(root)
     absent = [a for a in arts
               if a.asset not in optional and not (data_root / a.path).exists()]
     if not absent:
-        return
+        return False
     total = sum(a.size for a in absent) / 1e6
     print(f"fetching {len(absent)} missing artifact(s), {total:.0f} MB")
 
     def progress(i, n, status):
         mark = {"ok": "OK  ", "missing": "MISS", "corrupt": "BAD "}[status.state]
-        print(f"  [{i}/{n}] {mark} {status.artifact.asset}", flush=True)
+        why = f": {status.detail}" if status.state != "ok" and status.detail else ""
+        print(f"  [{i}/{n}] {mark} {status.artifact.asset}{why}", flush=True)
 
-    with contextlib.suppress(Exception):
+    try:
         results = mf.fetch(absent, data_root, base_url, progress=progress)
-        failed = [s for s in results if s.state != "ok"]
-        if failed:
-            print(f"  {len(failed)} could not be fetched; the viewer will "
-                  f"say what is missing", file=sys.stderr)
+    except Exception as exc:                        # noqa: BLE001 - advisory
+        print(f"  fetch failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return False
+    failed = [s for s in results if s.state != "ok"]
+    if failed:
+        print(f"  {len(failed)} could not be fetched; the viewer will "
+              f"say what is missing", file=sys.stderr)
+    return len(failed) < len(results)
 
 
 def cmd_manifest(args) -> int:
@@ -96,14 +129,18 @@ def cmd_manifest(args) -> int:
     from .core.registry import Registry
 
     root = _registry_root(args)
-    reg = Registry.load(root, validate=False)
     data_root = _data_root(args, root)
+    reg = Registry.load(root, validate=False, data_root=data_root)
     assets = [a for a in reg.assets.values() if a.path.exists()]
 
     def progress(i, n, asset_id, size):
         print(f"  [{i}/{len(assets)}] {asset_id:26s} {size / 1e6:9.1f} MB", flush=True)
 
-    arts = mf.build(data_root, assets, progress=progress)
+    # The previous records go to `build` too: a store whose content is
+    # unchanged keeps its published transfer hash instead of this machine's.
+    out = Path(args.output) if args.output else root / "manifest.toml"
+    previous, prev_base = mf.load(out) if out.exists() else ([], None)
+    arts = mf.build(data_root, assets, progress=progress, previous=previous)
 
     # Artifacts that are not on disk KEEP their existing record unless the
     # caller asks otherwise. `build` only describes files it can see, so a
@@ -112,10 +149,13 @@ def cmd_manifest(args) -> int:
     # later download. With the three stains absent this would have discarded
     # exactly the records that cannot be recomputed without ~19 GB and hours
     # of work.
-    out = Path(args.output) if args.output else root / "manifest.toml"
+    # Where the artifacts are published is not a record of what is on
+    # disk, so `--prune` keeps it too. It used to be read only on the path
+    # that kept records, and pruning wrote a manifest with no base_url.
+    if args.base_url is None:
+        args.base_url = prev_base
     dropped = []
-    if out.exists() and not args.prune:
-        previous, prev_base = mf.load(out)
+    if previous and not args.prune:
         fresh = {a.path for a in arts}
         # Only for paths the registry STILL declares. Keeping every
         # unregenerated record instead would preserve orphans: renaming
@@ -138,8 +178,6 @@ def cmd_manifest(args) -> int:
                 print(f"    {a.path}")
         arts = arts + kept
         arts.sort(key=lambda a: a.path)
-        if args.base_url is None:
-            args.base_url = prev_base
     elif args.prune:
         dropped = ["(pruned records for absent artifacts)"]
     out.write_text(mf.dump(arts, args.base_url), encoding="utf-8")
@@ -156,11 +194,16 @@ def cmd_manifest(args) -> int:
 def cmd_fetch(args) -> int:
     """Download missing data artifacts, or verify what is already here."""
     from .core import manifest as mf
+    from .core.registry import require_registry
 
     root = _registry_root(args)
     data_root = _data_root(args, root)
     path = Path(args.manifest) if args.manifest else root / "manifest.toml"
     if not path.exists():
+        # Only the manifest is needed, but with no registry either the advice
+        # below is wrong: `manifest` refuses a directory that is not one.
+        if not args.manifest:
+            require_registry(root)
         print(f"no manifest at {path}; run `lobemap manifest` first",
               file=sys.stderr)
         return 2
@@ -174,6 +217,7 @@ def cmd_fetch(args) -> int:
     # Asking for less is the rarer case, so it is the one that needs a flag.
     optional = _optional_assets(root)
     if args.asset:
+        _require_known("asset", args.asset, {a.asset for a in arts})
         wanted = [a for a in arts if a.asset in set(args.asset)]
     elif args.nostains:
         wanted = [a for a in arts if a.asset not in optional]
@@ -188,7 +232,8 @@ def cmd_fetch(args) -> int:
     print(f"data root: {data_root}")
 
     def progress(i, n, status):
-        mark = {"ok": "OK  ", "missing": "MISS", "corrupt": "BAD "}[status.state]
+        mark = {"ok": "OK  ", "missing": "MISS", "corrupt": "BAD ",
+                "unverified": "UNVR"}[status.state]
         detail = f"  {status.detail}" if status.detail else ""
         print(f"  [{i}/{n}] {mark} {status.artifact.asset:28.28s} "
               f"{status.artifact.path:34.34s}{detail}", flush=True)
@@ -217,11 +262,10 @@ def cmd_fetch(args) -> int:
 def cmd_pack(args) -> int:
     """Write the transfer files to a directory, ready to upload.
 
-    `manifest` and `fetch --check` both zip a Zarr store in order to hash
-    it and then delete the archive. That is right for checking and useless
-    for publishing: the exact bytes a downloader will receive get produced
-    and thrown away, leaving nothing to upload. This writes the same
-    archives and keeps them, under the exact names `fetch` will ask for --
+    A Zarr store is checked by its content digest, and `manifest` zips one
+    only to hash it, so nothing else produces the exact bytes a downloader
+    will receive. This writes those archives and keeps them, under the
+    exact names `fetch` will ask for --
     `<asset>.zarr.zip` for a store, the file itself otherwise -- so the
     output directory maps one-to-one onto a set of release assets.
 
@@ -233,11 +277,16 @@ def cmd_pack(args) -> int:
     import shutil
 
     from .core import manifest as mf
+    from .core.registry import require_registry
 
     root = _registry_root(args)
     data_root = _data_root(args, root)
     path = Path(args.manifest) if args.manifest else root / "manifest.toml"
     if not path.exists():
+        # Only the manifest is needed, but with no registry either the advice
+        # below is wrong: `manifest` refuses a directory that is not one.
+        if not args.manifest:
+            require_registry(root)
         print(f"no manifest at {path}; run `lobemap manifest` first",
               file=sys.stderr)
         return 2
@@ -247,11 +296,7 @@ def cmd_pack(args) -> int:
     if args.all:
         wanted = list(arts)
     elif args.asset:
-        unknown = [a for a in args.asset if a not in by_asset]
-        if unknown:
-            print(f"not in the manifest: {', '.join(unknown)}", file=sys.stderr)
-            print(f"known: {', '.join(sorted(by_asset))}", file=sys.stderr)
-            return 2
+        _require_known("asset", args.asset, by_asset)
         wanted = [by_asset[a] for a in args.asset]
     else:
         print(f"name the assets to pack, or --all. In {path.name}:")
@@ -332,6 +377,10 @@ def cmd_ingest_neuprint(args) -> int:
         )
         return 2
 
+    # Before the neuPrint work: a wrong --registry used to be found only
+    # afterwards, and the new asset's names were written into it.
+    root = _registry_root(args)
+    Registry.load(root, validate=False, data_root=_data_root(args, root))
     result = neuprint_rois.ingest(
         server=args.server,
         dataset=args.dataset,
@@ -340,8 +389,7 @@ def cmd_ingest_neuprint(args) -> int:
         repair=not args.no_repair,
     )
     ms = result.meshset
-    root = _registry_root(args)
-    out = root / "data" / f"{args.asset_id}.npz"
+    out = _data_root(args, root) / f"{args.asset_id}.npz"
     ms.save(out)
 
     print(f"{args.dataset}  role={args.role}")
@@ -384,13 +432,13 @@ def cmd_ingest_neuprint(args) -> int:
 def cmd_stain(args) -> int:
     """Build a virtual neuropil stain from predicted presynapse locations."""
     import shutil
+    import tempfile
     import time
 
     import numpy as np
 
     from .core.registry import Registry
     from .ingest.synapse_sources import neuprint_client, neuprint_presynapses
-    from .ingest.virtual_stain import build_stain, effective_sigma_um
     from .validate import images as gi
 
     token = args.token or os.environ.get("NEUPRINT_APPLICATION_CREDENTIALS")
@@ -399,7 +447,11 @@ def cmd_stain(args) -> int:
         return 2
 
     root = _registry_root(args)
-    reg = Registry.load(root, validate=False)
+    data_root = _data_root(args, root)
+    reg = Registry.load(root, validate=False, data_root=data_root)
+    _require_known("space", [args.space], reg.spaces)
+    if args.bounds_from:
+        _require_known("asset", [args.bounds_from], reg.assets)
 
     # Bounds come from geometry we hold, never from an aggregate query: an
     # unfiltered min/max over the synapse table times out server-side.
@@ -426,7 +478,7 @@ def cmd_stain(args) -> int:
     # Progress also goes to a file. stdout can be block-buffered through a
     # wrapper shell, which on a multi-hour job is indistinguishable from a
     # hang -- and cost one needlessly killed run.
-    log_path = root / "data" / f"{args.asset_id}.progress.log"
+    log_path = data_root / f"{args.asset_id}.progress.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     seen = {"n": 0}
 
@@ -449,7 +501,9 @@ def cmd_stain(args) -> int:
         }[args.bucket]
         batches = loader(args.path, progress=progress)
         source = f"{args.bucket} bulk release: {Path(args.path).name}"
-        confidence = args.confidence if args.bucket != "hemibrain" else None
+        # hemibrain and FAFB are read unfiltered: the hemibrain shards are
+        # taken whole, and the Princeton FAFB table has no score column.
+        confidence = None if args.bucket in ("hemibrain", "fafb") else args.confidence
     else:
         client = neuprint_client(args.server, args.dataset, token)
         batches = neuprint_presynapses(
@@ -470,13 +524,41 @@ def cmd_stain(args) -> int:
         with log_path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
-    workdir = Path(args.workdir) if args.workdir else root / "data" / ".stainwork"
+    # Scratch goes in a directory of its own inside the chosen one, and only
+    # that directory is removed: `--workdir` may name a directory that holds
+    # other files, and removing it whole deleted them.
+    base = Path(args.workdir) if args.workdir else data_root / ".stainwork"
+    base.mkdir(parents=True, exist_ok=True)
+    workdir = Path(tempfile.mkdtemp(prefix=f"{args.asset_id}-", dir=base))
+    try:
+        return _finish_stain(args, reg, gi, data_root, batches, lo, hi, source,
+                             confidence, workdir, on_stage, start)
+    finally:
+        if args.keep_workdir:
+            print(f"  scratch      : kept in {workdir}")
+        else:
+            shutil.rmtree(workdir, ignore_errors=True)
+            if workdir.exists():
+                print(f"  note         : {workdir} still holds scratch files")
+            if not args.workdir and base.exists() and not any(base.iterdir()):
+                base.rmdir()
+
+
+def _finish_stain(args, reg, gi, data_root, batches, lo, hi, source, confidence,
+                  workdir, on_stage, start) -> int:
+    """Build, save and check one stain; `cmd_stain` owns the scratch directory."""
+    import time
+
+    import numpy as np
+
+    from .ingest.virtual_stain import build_stain, effective_sigma_um
+
     volume, stats = build_stain(
         batches, lo, hi, space=args.space, source=source,
         voxel_um=args.voxel, sigma_um=args.sigma, confidence=confidence,
         dtype=np.dtype(args.dtype), workdir=workdir, on_stage=on_stage,
     )
-    out = root / "data" / f"{args.asset_id}.npz"
+    out = data_root / f"{args.asset_id}.npz"
     volume.save(out)
 
     print(f"  synapses     : {stats.n_points:,} ({stats.n_outside:,} outside grid)")
@@ -508,13 +590,9 @@ def cmd_stain(args) -> int:
     if shells:
         print(gi.check_image_inside_shell(volume, reg.mesh(shells[0].id), args.asset_id))
 
-    # Tens of GB of scratch: a cache, not a result. Dropped only once nothing
-    # maps it any more.
+    # Tens of GB of scratch: a cache, not a result. `cmd_stain` drops it once
+    # nothing maps it any more.
     del volume
-    if workdir.exists() and not args.keep_workdir:
-        shutil.rmtree(workdir, ignore_errors=True)
-        if workdir.exists():
-            print(f"  note         : {workdir} still holds scratch files")
     return 0
 
 
@@ -588,7 +666,8 @@ def cmd_spaces(args) -> int:
     from .core import spaces as sp
     from .core.registry import Registry
 
-    reg = Registry.load(_registry_root(args), validate=False)
+    root = _registry_root(args)
+    reg = Registry.load(root, validate=False, data_root=_data_root(args, root))
     have = sp.available()
     print(f"flybrains available: {have}")
     # The `ok` column is about the flybrains TEMPLATE, not about data on
@@ -628,87 +707,26 @@ def cmd_spaces(args) -> int:
     if absent_total:
         print()
         print(f"{absent_total} declared asset(s) are not on disk. "
-              f"`lobemap build --list` shows which can be rebuilt.")
+              f"`lobemap fetch` downloads them; `lobemap build --list` shows "
+              f"which can be rebuilt from source.")
     return 0
 
 
 def cmd_check(args) -> int:
     """Run the geometry validation harness."""
     from .core.registry import Registry
-    from .core.resolve import resolve
     from .validate import geometry as g
-    from .validate import images as gi
+    from .validate.harness import compare_atlases, run_checks
 
     root = _registry_root(args)
     reg = Registry.load(root, data_root=_data_root(args, root))
-    checks = []
-
-    for atlas in reg.atlases.values():
-        try:
-            ms = reg.mesh(atlas.asset)
-        except (FileNotFoundError, KeyError):
-            continue
-        checks.append(g.check_scale(ms, label=atlas.id))
-        npl = [
-            a for a in reg.assets_in_space(atlas.native_space, role="neuropil")
-            if a.path.exists()
-        ]
-        if npl:
-            # Sides here only PAIR a glomerulus with its shell, so both must
-            # use the same convention -- and biological is the one assets and
-            # source names record. Converting only the glomerulus side to
-            # apparent, as an earlier version did, pairs Bates with the wrong
-            # lobe in FAFB: its asset says biological L, the FlyWire shells
-            # are named AL_L/AL_R biologically, and flipping one side of the
-            # comparison breaks the match.
-            glom_asset = reg.assets[atlas.asset]
-            checks.append(
-                g.check_containment(
-                    ms,
-                    reg.mesh(npl[0].id),
-                    glom_side=glom_asset.side,
-                    shell_side=npl[0].side,
-                )
-            )
-
-    # Image assets: are they actually where they claim to be?
-    for asset in reg.assets.values():
-        if asset.kind != "image" or not asset.path.exists():
-            continue
-        volume = reg.volume(asset.id)
-        peers = reg.atlases_in_space(asset.space)
-        ms = None
-        label = asset.id
-        if peers:
-            ms = reg.mesh(peers[0].asset)
-        else:
-            # An image in a space with no native atlas would otherwise go
-            # unchecked entirely, so bridge one in and hold it to the same
-            # standard. No shipped asset reaches this today -- it was written
-            # for JRC2018U's nc82 template, which has since been dropped --
-            # but the alternative is that the next such image is silently
-            # never validated.
-            for candidate in reg.atlases.values():
-                src = reg.spaces.get(candidate.native_space)
-                if src is None or src.is_island:
-                    continue
-                try:
-                    ms = resolve(reg, candidate.asset, asset.space)
-                except Exception:  # noqa: BLE001, S112 - try the next atlas
-                    continue
-                label = f"{asset.id} (vs bridged {candidate.id})"
-                break
-        if ms is not None:
-            checks.append(gi.check_image_covers_mesh(volume, ms, label))
-            checks.append(gi.check_image_brightness_at_mesh(volume, ms, label))
-        shells = [
-            a for a in reg.assets_in_space(asset.space, role="neuropil")
-            if a.path.exists()
-        ]
-        if shells:
-            checks.append(
-                gi.check_image_inside_shell(volume, reg.mesh(shells[0].id), asset.id)
-            )
+    if args.compare:
+        # Before the checks, which take minutes: a typo used to be found
+        # only after them, as a KeyError traceback.
+        a_id, b_id, space = args.compare
+        _require_known("atlas", [a_id, b_id], reg.atlases)
+        _require_known("space", [space], reg.spaces)
+    checks = run_checks(reg)
 
     if args.roundtrip:
         src, via = args.roundtrip
@@ -718,28 +736,12 @@ def cmd_check(args) -> int:
             checks.append(g.check_roundtrip(reg.mesh(atlas.asset), src, via))
 
     if args.compare:
-        a_id, b_id, space = args.compare
-        a = reg.mesh(reg.atlases[a_id].asset)
-        b_atlas = reg.atlases[b_id]
-        b = (
-            reg.mesh(b_atlas.asset)
-            if b_atlas.native_space == space
-            else resolve(reg, b_atlas.asset, space)
-        )
-        a_side = reg.assets[reg.atlases[a_id].asset].side
-        b_side = reg.assets[b_atlas.asset].side
-        pairs, chk = g.correspondence_report(
-            a,
-            b,
-            a_id,
-            b_id,
-            a_side=a_side if a_side in ("L", "R") else None,
-            b_side=b_side if b_side in ("L", "R") else None,
-        )
+        pairs, chk = compare_atlases(reg, a_id, b_id, space)
         checks.append(chk)
         worst = sorted(pairs, key=lambda p: -p.distance_um)[:10]
         print()
-        print(f"worst-separated shared compartments ({b_id} -> {space}):")
+        print(f"worst-separated corresponding compartments in {space}, "
+              f"paired by canonical name:")
         for pr in worst:
             print(f"    {pr.canonical:<8} {pr.a_name:<14} vs {pr.b_name:<14} "
                   f"{pr.distance_um:6.1f} um")
@@ -773,9 +775,9 @@ def cmd_nomenclature(args) -> int:
     This used to re-derive the whole table and save it, which was destructive
     in a way nothing reported. A mechanical derivation can only emit identity
     relations, so every curated merge, split and rename was replaced by an
-    identity and the information was gone. Grabe's `VP1(L)` is recorded as a
-    merge onto VP1d;VP1l;VP1m; a regeneration flattened it to an exact match
-    on `VP1`, across eight rows, and printed a cheerful summary.
+    identity and the information was gone. The hemibrain's `VC5(R)` is
+    recorded as a rename onto VM6; a regeneration would flatten it to an
+    exact match on `VC5`, a different glomerulus, and print a cheerful summary.
 
     So: report differences and change nothing unless asked. `--add-missing`
     adds rows for published names that have none, the one case a machine can
@@ -797,7 +799,7 @@ def cmd_nomenclature(args) -> int:
     from .core.registry import Registry
 
     root = _registry_root(args)
-    reg = Registry.load(root, validate=False)
+    reg = Registry.load(root, validate=False, data_root=_data_root(args, root))
     path = root / "nomenclature.csv"
     nom = Nomenclature.load(path)
 
@@ -840,6 +842,12 @@ def cmd_nomenclature(args) -> int:
     if unreadable:
         print(f"not built, so not audited: {', '.join(sorted(unreadable))}")
         print()
+    if not audits:
+        # Like `check`, nothing audited is not a match: it used to exit 0
+        # with "the table matches" over an empty data root.
+        print("NOTHING WAS AUDITED: no atlas mesh is on disk (lobemap fetch)",
+              file=sys.stderr)
+        return 1
 
     if args.add_missing or args.prune_stale:
         changed = 0
@@ -892,19 +900,19 @@ def cmd_nomenclature(args) -> int:
 def cmd_reconcile(args) -> int:
     """Pair two atlases by geometry and report name disagreements."""
     from .core.registry import Registry
-    from .core.resolve import resolve
+    from .validate.harness import atlas_in_space
     from .validate.reconcile import format_report, reconcile
 
     root = _registry_root(args)
     reg = Registry.load(root, data_root=_data_root(args, root))
-    a_atlas, b_atlas = reg.atlases[args.a], reg.atlases[args.b]
-    space = args.space or a_atlas.native_space
-    a = (reg.mesh(a_atlas.asset) if a_atlas.native_space == space
-         else resolve(reg, a_atlas.asset, space))
-    b = (reg.mesh(b_atlas.asset) if b_atlas.native_space == space
-         else resolve(reg, b_atlas.asset, space))
+    _require_known("atlas", [args.a, args.b], reg.atlases)
+    if args.space:
+        _require_known("space", [args.space], reg.spaces)
+    space = args.space or reg.atlases[args.a].native_space
     matches, ua, ub = reconcile(
-        a, b, max_distance_um=args.max_distance,
+        atlas_in_space(reg, args.a, space),
+        atlas_in_space(reg, args.b, space),
+        max_distance_um=args.max_distance,
         ambiguity_ratio=args.ambiguity_ratio,
     )
     print(format_report(matches, ua, ub, args.a, args.b))
@@ -920,6 +928,8 @@ def cmd_bridge(args) -> int:
 
     root = _registry_root(args)
     reg = Registry.load(root, data_root=_data_root(args, root))
+    _require_known("asset", [args.asset], reg.assets)
+    _require_known("space", [args.to], reg.spaces)
     t0 = time.perf_counter()
     out = resolve(
         reg, args.asset, args.to, mirror=args.mirror, use_cache=not args.no_cache
@@ -944,7 +954,9 @@ def cmd_repair(args) -> int:
     from .core.meshrepair import repair_meshset
     from .core.registry import Registry
 
-    reg = Registry.load(_registry_root(args), validate=False)
+    root = _registry_root(args)
+    reg = Registry.load(root, validate=False, data_root=_data_root(args, root))
+    _require_known("asset", args.assets, reg.assets)
     targets = args.assets or [
         a.id for a in reg.assets.values()
         if a.kind == "meshset" and a.path.exists()
@@ -1016,6 +1028,7 @@ def cmd_build(args) -> int:
             print("build them by name when you want them.")
     else:
         wanted = list(args.asset or ())
+        _require_known("asset", wanted, reg.assets)
     if not wanted:
         print("nothing to build; --list shows what has a recipe")
         return 0
@@ -1105,34 +1118,65 @@ def _install_crash_log() -> None:
 
 
 def cmd_view(args) -> int:
-    _install_crash_log()
+    from .core.registry import Registry
+    from .viewer.request import MissingAssets, ViewRequestError, check_request
 
-    # A fresh clone has no data: nothing runs on `uv sync`, so this is the
-    # first opportunity to get it.
     root = _registry_root(args)
-    _autofetch(root, _data_root(args, root))
+    data_root = _data_root(args, root)
+    show = tuple(args.show or ())
+    # A mistyped space or `--show` is a usage error, said in one line before
+    # anything is fetched or any window opens.
+    registry = Registry.load(root, data_root=data_root)
+    try:
+        check_request(registry, args.space, show)
+    except ViewRequestError as exc:
+        print(f"lobemap view: {exc}", file=sys.stderr)
+        return 2
+
+    _install_crash_log()
+    # A fresh clone has no data: nothing runs on `uv sync`, so this is the
+    # first opportunity to get it. Only new data makes the registry above
+    # stale; otherwise loading it again read every atlas mesh twice.
+    if _autofetch(root, data_root):
+        registry = None
 
     from .viewer.app import run
 
-    run(
-        root,
-        args.space,
-        ndisplay=args.ndisplay,
-        # `--show` was parsed and then never forwarded, so it silently did
-        # nothing: layers start hidden, and asking for one by name was the
-        # documented way to see it.
-        show=tuple(args.show or ()),
-    )
+    try:
+        run(
+            root,
+            args.space,
+            ndisplay=args.ndisplay,
+            # `--show` was parsed and then never forwarded, so it silently did
+            # nothing: layers start hidden, and asking for one by name was the
+            # documented way to see it.
+            show=show,
+            # Where `_autofetch` just put the data. `run` read the default
+            # root instead, so `--data-root` fetched into one place and
+            # opened another.
+            data_root=data_root,
+            registry=registry,
+        )
+    except ViewRequestError as exc:
+        print(f"lobemap view: {exc}", file=sys.stderr)
+        return 2
+    except MissingAssets as exc:
+        print(exc, file=sys.stderr)
+        return 1
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="lobemap")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    p.add_argument("--registry", help="registry directory (default: ./registry)")
+    p.add_argument("--registry",
+                   help="registry metadata directory (default: $LOBEMAP_REGISTRY, "
+                        "else the copy installed with lobemap, or registry/ in a "
+                        "source checkout)")
     p.add_argument("--data-root", default=None,
-                   help="where asset files live (default: <registry>/data in a "
-                        "checkout, else the user cache directory)")
+                   help="where asset files live (default: $LOBEMAP_DATA, else "
+                        "<registry>/data if it exists, else the user cache "
+                        "directory)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     mn = sub.add_parser("manifest", help="record checksums for fetchable data")
@@ -1183,9 +1227,9 @@ def main(argv: list[str] | None = None) -> int:
                    help=f"space id; `lobemap spaces` lists them "
                         f"(default: {DEFAULT_SPACE})")
     v.add_argument("--ndisplay", type=int, default=3, choices=(2, 3))
-    v.add_argument("--show", action="append", metavar="LAYER",
-                   help="start this layer visible; an asset id or a role "
-                        "such as virtual_stain. Repeatable.")
+    v.add_argument("--show", action="append", metavar="NAME",
+                   help="start this visible in the first scene: an asset id, "
+                        "an atlas id, or a role such as neuropil. Repeatable.")
     v.set_defaults(func=cmd_view)
 
     val = sub.add_parser("validate", help="load and check the registry")
@@ -1200,7 +1244,9 @@ def main(argv: list[str] | None = None) -> int:
     chk.add_argument("--roundtrip", nargs=2, metavar=("SRC", "VIA"),
                      help="e.g. --roundtrip JRCFIB2018F FAFB14")
     chk.add_argument("--compare", nargs=3, metavar=("A", "B", "SPACE"),
-                     help="bridge atlas B into SPACE and compare against atlas A")
+                     help="compare atlases A and B in SPACE by canonical name and "
+                          "side, bridging either one that is not native to it with "
+                          "biological sides aligned")
     chk.set_defaults(func=cmd_check)
 
     nm = sub.add_parser("nomenclature",
@@ -1266,7 +1312,7 @@ def main(argv: list[str] | None = None) -> int:
                          "stacks this emulates and halves the file")
     st.add_argument("--workdir", default=None,
                     help="scratch space for grids too large for RAM "
-                         "(default: <registry>/data/.stainwork)")
+                         "(default: <data root>/.stainwork)")
     st.add_argument("--keep-workdir", action="store_true",
                     help="do not delete the scratch space afterwards")
     st.add_argument("--slabs", type=int, default=24)
@@ -1303,8 +1349,36 @@ def main(argv: list[str] | None = None) -> int:
     # means it, whereas None means "read sys.argv".
     if argv is None and len(sys.argv) == 1:
         argv = ["view"]
+    # 0.1.x opened one atlas with `lobemap --atlas <name>`. argparse reads
+    # the name as a subcommand and answers "invalid choice", which says
+    # nothing about what replaced it. Only before the subcommand, where the
+    # old flag went: `ingest neuprint` has an `--atlas-id` of its own.
+    for token in sys.argv[1:] if argv is None else argv:
+        if token in sub.choices:
+            break
+        if token == "--atlas" or token.startswith("--atlas="):
+            print("lobemap: --atlas was removed in 0.2.0; open a coordinate "
+                  "space instead, such as `lobemap view GRABE` (`lobemap "
+                  "spaces` lists them)", file=sys.stderr)
+            return 2
     args = p.parse_args(argv)
-    return args.func(args)
+
+    from .core.meshfmt import LegacyContainerError
+    from .core.registry import RegistryError
+    from .core.resolve import CannotBridge
+
+    try:
+        return args.func(args)
+    except (UsageError, RegistryError, LegacyContainerError, CannotBridge) as exc:
+        print(f"lobemap: {exc}", file=sys.stderr)
+        return 2
+    except ModuleNotFoundError as exc:
+        if (exc.name or "").split(".")[0] not in INGEST_MODULES:
+            raise
+        print(f"lobemap: this command needs {exc.name}, one of the ingest "
+              f"dependencies: pip install 'lobemap[ingest]', or `uv sync` in "
+              f"a checkout", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

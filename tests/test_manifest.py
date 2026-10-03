@@ -50,6 +50,17 @@ def test_zipping_a_store_twice_gives_identical_bytes(tmp_path):
     assert mf.sha256_file(a)[0] == mf.sha256_file(b)[0]
 
 
+@pytest.mark.parametrize("platform", ["win32", "darwin", "linux"])
+def test_zipping_a_store_gives_the_same_bytes_on_every_platform(tmp_path, monkeypatch,
+                                                                platform):
+    """A store published from Windows must verify on macOS and Linux."""
+    _tree(tmp_path / "data")
+    src = tmp_path / "data" / "stain.zarr"
+    ref = mf.zip_directory(src, tmp_path / "ref.zip").read_bytes()
+    monkeypatch.setattr("sys.platform", platform)
+    assert mf.zip_directory(src, tmp_path / f"{platform}.zip").read_bytes() == ref
+
+
 def test_manifest_round_trips_through_toml(tmp_path):
     arts = mf.build(tmp_path, _tree(tmp_path / "data"))
     path = tmp_path / "manifest.toml"
@@ -80,7 +91,7 @@ def test_verify_reports_ok_missing_and_corrupt(tmp_path):
 
 
 def test_a_changed_chunk_inside_a_store_is_detected(tmp_path):
-    """The whole point of hashing the zip rather than the directory entry."""
+    """A store is hashed by its content, not by its directory entry."""
     data = tmp_path / "data"
     arts = mf.build(tmp_path, _tree(data))
     (data / "stain.zarr" / "0" / "0.0.0").write_bytes(b"different chunk bytes")
@@ -137,20 +148,39 @@ def test_transfer_name_appends_zip_only_for_directories():
     assert d.transfer_name == "s.zarr.zip"
 
 
-def test_shipped_manifest_matches_what_is_on_disk():
-    """The committed manifest must describe the real registry."""
-    from pathlib import Path
+def test_shipped_manifest_records_every_asset_where_the_registry_reads_it(registry):
+    """Every declared asset, at the path `assets.toml` gives it.
 
-    from lobemap.core.registry import Registry, default_data_root
+    `fetch` writes an artifact to the path its record names and the viewer
+    opens the path the registry declares, so the two must be the same
+    path, not merely the same asset id. Comparing ids alone let a record
+    fetch a file nothing reads, and let an asset go unrecorded, which no
+    fresh clone could then obtain.
+    """
+    arts, _ = mf.load(registry.root / "manifest.toml")
+    recorded = {a.asset: a for a in arts}
+    assert set(recorded) == set(registry.assets), (
+        f"unrecorded: {sorted(set(registry.assets) - set(recorded))}, "
+        f"unknown: {sorted(set(recorded) - set(registry.assets))}"
+    )
+    for aid, asset in registry.assets.items():
+        declared = asset.path.relative_to(registry.data_root).as_posix()
+        assert recorded[aid].path == declared, (aid, recorded[aid].path, declared)
 
-    root = Path(__file__).resolve().parents[1] / "registry"
-    path = root / "manifest.toml"
-    if not path.exists():
-        pytest.skip("no manifest committed")
-    arts, _ = mf.load(path)
-    reg = Registry.load(root, validate=False)
-    present = {a.id for a in reg.assets.values() if a.path.exists()}
-    listed = {a.asset for a in arts}
-    assert listed <= set(reg.assets), f"manifest names unknown assets: {listed - set(reg.assets)}"
-    assert present <= listed, f"present but unlisted: {present - listed}"
-    _ = default_data_root(root)
+
+@pytest.mark.requires_data
+def test_shipped_manifest_matches_what_is_on_disk(registry):
+    """The files on disk are the bytes the manifest promises.
+
+    The stores are only checked for being stores: verifying one re-zips it,
+    minutes of work for the three stains, which `fetch --check` does.
+    """
+    arts, _ = mf.load(registry.root / "manifest.toml")
+    here = [a for a in arts if (registry.data_root / a.path).exists()]
+    for art in here:
+        on_disk = registry.data_root / art.path
+        assert on_disk.is_dir() == (art.kind == "dir"), (art.asset, art.kind)
+    files = [a for a in here if a.kind == "file"]
+    assert files, "no file artifact on disk to verify"
+    for status in mf.verify(files, registry.data_root):
+        assert status.state == "ok", (status.artifact.asset, status.detail)

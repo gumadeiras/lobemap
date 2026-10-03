@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from viewer_harness import assert_renders_loops, contour_loops, rendered_labels
 
 from lobemap.core.meshfmt import MeshSet
 from lobemap.viewer import contours as contours_module
@@ -39,41 +40,49 @@ def overlay():
     # install() is what wires the slider to refresh(); without it moving the
     # plane changes nothing and a slider test would pass vacuously.
     contours_module.install(viewer, {"test": ov})
-    # An empty Shapes layer leaves dims at its default midpoint, nowhere near
-    # the boxes, so the plane has to be put through them explicitly.
+    # The slider on z, x-y on screen, as the viewer slices by default.
+    viewer.dims.order = (2, 0, 1)
+    # A layer that holds no shapes leaves dims at its default midpoint,
+    # nowhere near the boxes, so the plane has to be put through them.
     viewer.dims.set_point(2, 0.0)
     yield ov
     viewer.close()
+
+
+def _shown(overlay) -> set[str]:
+    """The names the text visual writes on the slice."""
+    return {text for text, _pos, _rgba in rendered_labels(overlay)}
 
 
 def test_labels_are_off_by_default(overlay):
     """Several atlases in one scene would write each name once per atlas."""
     assert overlay.labels == set()
     overlay.refresh()
-    assert all(not s for s in np.atleast_1d(overlay.layer.text.values))
+    assert _shown(overlay) == set()
 
 
 def test_ticking_one_glomerulus_labels_only_that_one(overlay):
     overlay.set_labels([0])
-    shown = {str(s) for s in np.atleast_1d(overlay.layer.text.values) if s}
-    assert shown == {"DA1"}
+    assert _shown(overlay) == {"DA1"}
 
 
 def test_set_label_toggles_independently(overlay):
-    assert len(overlay.layer.data) == 2, "the plane must cut both boxes"
+    assert len(contour_loops(overlay)) == 2, "the plane must cut both boxes"
     overlay.set_label(0, True)
     overlay.set_label(1, True)
-    assert {str(s) for s in np.atleast_1d(overlay.layer.text.values) if s} == {
-        "DA1", "DM1"}
+    assert _shown(overlay) == {"DA1", "DM1"}
     overlay.set_label(0, False)
-    assert {str(s) for s in np.atleast_1d(overlay.layer.text.values) if s} == {"DM1"}
+    assert _shown(overlay) == {"DM1"}
 
 
-def test_one_string_per_shape(overlay):
-    """napari requires the counts to agree, so text is set after data."""
+def test_a_label_sits_on_its_own_section(overlay):
+    """Each name is drawn at the center of its box's section, in its color."""
     overlay.set_labels([0, 1])
-    overlay.refresh()
-    assert len(np.atleast_1d(overlay.layer.text.values)) == len(overlay.layer.data)
+    assert_renders_loops(overlay)
+    # vispy x-y are napari's displayed axes reversed: y, then x.
+    at = {text: pos for text, pos, _rgba in rendered_labels(overlay)}
+    np.testing.assert_allclose(at["DA1"], (0.0, 0.0), atol=0.3)
+    np.testing.assert_allclose(at["DM1"], (0.0, 5.0), atol=0.3)
 
 
 def test_a_name_is_written_once_even_across_several_contours():
@@ -106,25 +115,22 @@ def test_labels_survive_moving_the_slider(overlay):
     overlay.set_labels([0, 1])
     for position in (0.0, 0.5, -0.5):
         overlay.viewer.dims.set_point(2, position)
-        shown = {str(s) for s in np.atleast_1d(overlay.layer.text.values) if s}
-        assert shown == {"DA1", "DM1"}, (position, shown)
+        assert _shown(overlay) == {"DA1", "DM1"}, position
+        assert_renders_loops(overlay)
 
 
 # -- the visibility bug -------------------------------------------------
 
 
-def test_entering_2d_makes_the_contours_visible():
+@pytest.mark.requires_data
+def test_entering_2d_makes_the_contours_visible(registry):
     """They are added to the viewer before the mode switch runs.
 
     `_add_contours` puts them in `viewer.layers`, so a guard that only set
     visibility when appending left every contour hidden and nothing drew.
     """
-    from pathlib import Path
-
-    from lobemap.core.registry import Registry
     from lobemap.viewer.app import build_scene, install_display_mode
 
-    registry = Registry.load(Path(__file__).resolve().parents[1] / "registry")
     viewer = napari.Viewer(ndisplay=2, show=False)
     try:
         surfaces, contours = build_scene(viewer, registry, "JRCFIB2018F")
@@ -139,13 +145,10 @@ def test_entering_2d_makes_the_contours_visible():
         viewer.close()
 
 
-def test_a_contour_mirrors_its_surface_across_a_mode_switch():
-    from pathlib import Path
-
-    from lobemap.core.registry import Registry
+@pytest.mark.requires_data
+def test_a_contour_mirrors_its_surface_across_a_mode_switch(registry):
     from lobemap.viewer.app import build_scene, install_display_mode
 
-    registry = Registry.load(Path(__file__).resolve().parents[1] / "registry")
     viewer = napari.Viewer(ndisplay=3, show=False)
     try:
         surfaces, contours = build_scene(viewer, registry, "JRCFIB2018F")

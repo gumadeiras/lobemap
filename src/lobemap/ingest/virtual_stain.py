@@ -8,7 +8,9 @@ That is a **binned 3D Gaussian KDE**. Evaluating a true KDE over 10^7-10^9
 voxels is infeasible, and binning first is the standard approximation: the
 effective kernel becomes Gaussian convolved with a voxel-wide box, so the
 effective bandwidth is sqrt(sigma^2 + h^2/12) = 911 nm for sigma 900 nm and
-h 500 nm -- a 1.3% inflation, negligible.
+h 500 nm -- a 1.3% inflation, negligible. Those are this module's defaults;
+the published stains use sigma 450 nm on a 0.25 um grid (456 nm effective),
+as `registry/recipes.toml` records.
 
 Two deliberate choices:
 

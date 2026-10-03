@@ -1,7 +1,11 @@
 """Derive a built asset from its source, per `registry/recipes.toml`.
 
 Sources are addressed relative to the registry root: `sources/<dataset>/...`
-for what ships, or a URL for what is downloaded. See `registry/sources/`.
+for what ships, or a URL for what is downloaded. See `registry/sources/`. A
+recipe records a digest per downloaded file name, in a `sha256` table or, for a
+file whose publisher serves its own checksum, an `md5` table holding that
+checksum; a download that does not match is discarded, and one with no digest
+recorded is used but reported as not verified.
 
 Every asset under `registry/data/` is derived, which is the justification for
 keeping the large ones out of git. That justification was only half true: the
@@ -18,23 +22,34 @@ differs from the day it was first built. `manifest.toml` therefore verifies
 TRANSFER integrity -- that a download arrived intact -- and not
 reproducibility. What is reproducible is the `content_hash` each container
 computes over its actual content: vertices, faces and names for a MeshSet,
-voxels and geometry for a Volume. That is what `--expect` checks, and what
-the build reports so it can be recorded.
+voxels and geometry for a Volume. The build reports it, so a rebuild can be
+compared with the asset it replaces.
 """
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import shutil
+import tempfile
 import tomllib
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from .core.atomic import replacing
+from .core.manifest import CHUNK, TIMEOUT_S
 
 DEFAULT_RECIPES = "recipes.toml"
 
 #: Downloaded sources are cached here, under the data root, so a second
 #: build of the same asset does not re-fetch.
 CACHE_DIR = ".build"
+
+#: Pipeline scratch -- a stain's spilled points and float32 grid, 10-25 GB --
+#: goes in a per-build directory under this one and is removed when the
+#: build ends. A recipe's `workdir` param moves it, to a disk with room.
+WORK_DIR = ".stainwork"
 
 _PIPELINES: dict[str, object] = {}
 
@@ -60,6 +75,22 @@ class Recipe:
     #: have to be named, so nobody starts one by accident.
     expensive: bool = False
     params: dict = field(default_factory=dict)
+    #: sha256 of each downloaded file, keyed by its file name.
+    sha256: dict[str, str] = field(default_factory=dict)
+    #: md5 of a downloaded file as its publisher serves it -- a Cloud Storage
+    #: object's `x-goog-hash` -- so a multi-gigabyte source gets a recorded
+    #: checksum without being downloaded to compute one. Used when there is no
+    #: sha256 for the file. It detects a changed or damaged file, not one
+    #: forged by whoever controls the bucket.
+    md5: dict[str, str] = field(default_factory=dict)
+
+    def expected(self, name: str) -> tuple[str, str] | None:
+        """The (algorithm, hex digest) a downloaded `name` must match."""
+        if name in self.sha256:
+            return "sha256", self.sha256[name]
+        if name in self.md5:
+            return "md5", self.md5[name]
+        return None
 
 
 @dataclass
@@ -77,6 +108,13 @@ def load_recipes(registry_root) -> dict[str, Recipe]:
     spec = tomllib.loads(path.read_text(encoding="utf-8"))
     out = {}
     for asset, body in spec.items():
+        downloads = {Path(u).name for u in [body.get("url"), *body.get("urls", [])] if u}
+        for table in ("sha256", "md5"):
+            stray = sorted(set(body.get(table, {})) - downloads)
+            if stray:
+                # A misspelled name would otherwise switch its check off quietly.
+                raise ValueError(f"{asset}: {table} names files the recipe does "
+                                 f"not download: {', '.join(stray)}")
         out[asset] = Recipe(
             asset=asset,
             pipeline=body["pipeline"],
@@ -86,6 +124,8 @@ def load_recipes(registry_root) -> dict[str, Recipe]:
             into=body.get("into"),
             expensive=bool(body.get("expensive", False)),
             params=dict(body.get("params", {})),
+            sha256=dict(body.get("sha256", {})),
+            md5=dict(body.get("md5", {})),
         )
     return out
 
@@ -110,35 +150,68 @@ def resolve_source(recipe: Recipe, registry_root: Path, cache: Path,
         return path
     if recipe.urls:
         folder = cache / (recipe.into or recipe.asset)
-        folder.mkdir(parents=True, exist_ok=True)
         for i, url in enumerate(recipe.urls, start=1):
-            target = folder / Path(url).name
-            if target.exists():
-                continue
-            if progress:
-                progress(f"downloading [{i}/{len(recipe.urls)}] "
-                         f"{Path(url).name}")
-            _download(url, target)
+            _fetch_source(recipe, url, folder, progress,
+                          label=f"[{i}/{len(recipe.urls)}] {Path(url).name}")
         return folder
     if not recipe.url:
         return None
-    cache.mkdir(parents=True, exist_ok=True)
-    target = cache / Path(recipe.url).name
-    if target.exists():
-        return target
-    if progress:
-        progress(f"downloading {recipe.url}")
-    _download(recipe.url, target)
+    return _fetch_source(recipe, recipe.url, cache, progress, label=recipe.url)
+
+
+def _fetch_source(recipe: Recipe, url: str, folder: Path, progress,
+                  label: str) -> Path:
+    """The cached copy of `url`, downloaded unless a good one is there.
+
+    A cached copy is checked like a fresh download, and fetched again if
+    it fails: the cache is disposable, and a bad one would otherwise be
+    trusted forever.
+    """
+    name = Path(url).name
+    target = folder / name
+    expected = recipe.expected(name)
+    if target.exists() and expected is not None \
+            and file_digest(target, expected[0]) != expected[1]:
+        target.unlink()
+    if not target.exists():
+        if progress:
+            progress(f"downloading {label}")
+        folder.mkdir(parents=True, exist_ok=True)
+        _download(url, target, expected)
+    if expected is None and progress:
+        progress(f"not verified: no checksum recorded for {name}")
     return target
 
 
-def _download(url: str, target: Path) -> None:
+def file_digest(path: Path, algorithm: str) -> str:
+    """Hex digest of a file, read in chunks."""
+    h = hashlib.new(algorithm)
+    with Path(path).open("rb") as fh:
+        while block := fh.read(CHUNK):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _download(url: str, target: Path,
+              expected: tuple[str, str] | None = None) -> None:
     """Fetch to a .part file and rename, so an interrupted download is not
-    mistaken for a complete one on the next run."""
+    mistaken for a complete one on the next run. With `expected`, an
+    (algorithm, hex digest) pair, a download that does not match is
+    discarded and raises."""
     tmp = target.with_suffix(target.suffix + ".part")
-    with urllib.request.urlopen(url) as resp, tmp.open("wb") as fh:
-        shutil.copyfileobj(resp, fh, 1 << 20)
-    tmp.replace(target)
+    try:
+        with urllib.request.urlopen(url, timeout=TIMEOUT_S) as resp, \
+                tmp.open("wb") as fh:
+            shutil.copyfileobj(resp, fh, 1 << 20)
+        if expected is not None:
+            algorithm, want = expected
+            digest = file_digest(tmp, algorithm)
+            if digest != want:
+                raise ValueError(f"{url}: downloaded {algorithm} {digest[:12]} != "
+                                 f"recorded {want[:12]}")
+        tmp.replace(target)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 # -- pipelines ------------------------------------------------------------
@@ -246,7 +319,7 @@ def _flywire(src, params, progress=None, **_):
 def _virtual_stain(src, params, progress=None, workdir=None, **_):
     """Presynapse density, binned and blurred, straight to a Volume.
 
-    Written directly at the registry's `.zarr` path rather than through the
+    Written straight to the registry's `.zarr` store rather than through the
     documented npz-then-`tozarr` two-step: `save_zarr` fills level 0 in
     slabs and builds each pyramid level from the one below, so nothing
     larger than a slab is ever resident and the intermediate npz buys
@@ -283,7 +356,7 @@ def _virtual_stain(src, params, progress=None, workdir=None, **_):
         sigma_um=params.get("sigma", 0.45),
         confidence=None if confidence is False else confidence,
         dtype=np.dtype(params.get("dtype", "uint8")),
-        workdir=Path(params["workdir"]) if params.get("workdir") else workdir,
+        workdir=workdir,
         on_stage=on_stage,
     )
     if progress:
@@ -352,15 +425,29 @@ def build_asset(registry, asset_id: str, recipes=None, progress=None,
     src = resolve_source(recipe, registry_root, cache, progress=progress)
     if progress:
         progress(f"{asset_id}: {recipe.pipeline}")
-    obj = fn(src, params, progress=progress,
-             workdir=registry.data_root / ".stainwork")
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    # `Volume.save` dispatches on the suffix, so a registry path ending in
-    # .zarr writes an OME-Zarr pyramid and anything else writes npz. The
-    # recipe does not need to say which.
-    obj.save(target)
-    return BuildResult(asset_id, target, obj.content_hash())
+    default_parent = registry.data_root / WORK_DIR
+    parent = Path(params["workdir"]) if params.get("workdir") else default_parent
+    parent.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix=f"{asset_id}-", dir=parent))
+    obj = None
+    try:
+        obj = fn(src, params, progress=progress, workdir=work)
+        # `Volume.save` dispatches on the suffix, so a registry path ending
+        # in .zarr writes an OME-Zarr pyramid and anything else writes npz.
+        # The recipe does not need to say which. Staged and renamed into
+        # place, so a build that stops part-way leaves the asset missing,
+        # not partial.
+        with replacing(target) as scratch:
+            obj.save(scratch)
+        digest = obj.content_hash()
+    finally:
+        obj = None               # a stain's voxels are a memmap inside `work`
+        shutil.rmtree(work, ignore_errors=True)
+        if parent == default_parent:
+            with contextlib.suppress(OSError):
+                parent.rmdir()   # only when no other build is using it
+    return BuildResult(asset_id, target, digest)
 
 
 def buildable(registry, recipes=None, include_expensive: bool = True) -> list[str]:

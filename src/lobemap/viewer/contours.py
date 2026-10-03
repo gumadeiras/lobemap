@@ -1,4 +1,4 @@
-"""Slice contours: exact mesh-plane intersections drawn as napari Shapes.
+"""Slice contours: exact mesh-plane intersections, drawn as vector geometry.
 
 This is the only overlay mode in which two atlases
 are genuinely readable together. Nested semi-transparent surfaces are
@@ -9,24 +9,228 @@ plane, rather than by rasterizing. That keeps them crisp at any zoom and avoids
 committing the pipeline to a voxel grid.
 
 They also restore identification in 2D: napari's Surface._get_value returns
-None in 2D, but Shapes._get_value returns a shape index, so the contour layer
-is what makes a sliced glomerulus clickable.
+None in 2D, so the loops drawn here are what hover picking tests
+(`viewer.app.install_picking`).
+
+Each atlas has a napari layer for its contours, but draws them with vispy
+visuals of its own under that layer (`SliceVisual`): one mesh of outline
+and fill triangles, and one text. napari's Shapes rebuilt every shape on
+every slider step; see `ContourOverlay`.
+
+The sections, outlines and fills of every slider plane inside a shown
+atlas are made ahead of time off the UI thread (`viewer.prefetch`): a step
+to a plane the prefetch has reached only draws, and a step to one it has
+not reached yet cuts, or fills, that plane itself.
 """
 
 from __future__ import annotations
 
-import warnings
+import contextlib
+import threading
 
 import numpy as np
 
 from ..core.meshfmt import MeshSet
+from . import napari_private, prefetch, triangulate
+from .sections import MeshSections, PlaneCache
 
 #: Slice-label point size. Was 7, which read as small against the contours.
 TEXT_SIZE = 10.5
 
+#: Bytes of outline geometry, and of the fills built on it, an overlay keeps.
+#: The outlines and fills of every slider plane inside a shipped atlas, with
+#: every compartment filled, fit along any axis: at most 52 MB, the male CNS
+#: atlas along y (36 MB of outlines, 16 of fills). With
+#: `sections.SECTION_CACHE_BYTES`, at most 96 MB an atlas.
+GEOMETRY_CACHE_BYTES = 64 * 2**20
+
+class _PlaneGeometry:
+    """What one plane draws, for every compartment it cuts, built once.
+
+    Outlines are built for every compartment on the plane, as the sections
+    are, so a change of selection picks triangles out of these arrays rather
+    than building any. Fills are built for the compartments `fills` names,
+    and for any other the first time it is filled on this plane. Points are
+    kept in the plane's own two axes, as float32, which is what vispy is
+    handed.
+
+    The prefetch adds fills from its thread while a step may draw this plane
+    on the UI thread, so a fill is added under a lock, once: whoever adds it
+    first keeps it and is the one told how many bytes it added.
+    """
+
+    def __init__(self, sections: dict[int, list[np.ndarray]], axis: int,
+                 position: float, width: float, pause=None, fills=()) -> None:
+        self.axis, self.position = axis, position
+        #: The two in-plane array axes, in increasing order.
+        self.plane = [d for d in range(3) if d != axis]
+        self._sections = sections
+        self.present = frozenset(sections)
+        verts, faces, owners = [], [], []
+        count = 0
+        small = np.int16 if max(sections, default=0) < 2**15 else np.int32
+        for n, owner in enumerate(sorted(sections)):
+            if pause is not None and n % 8 == 7:
+                pause()
+            for loop in sections[owner]:
+                v, f = triangulate.stroke(loop[:-1][:, self.plane], width)
+                verts.append(v)
+                faces.append(f + count)
+                owners.append(np.full(len(v), owner, small))
+                count += len(v)
+        self.vertices, self.faces = _stack(verts, faces)
+        #: The compartment each outline point belongs to.
+        self.owner = np.concatenate(owners) if owners else np.empty(0, small)
+        self._fills: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+        self._fill_bytes = 0
+        self._lock = threading.Lock()
+        self.add_fills(fills, pause)
+
+    def _make_fill(self, owner: int) -> tuple[np.ndarray, np.ndarray]:
+        verts, faces, count = [], [], 0
+        for loop in self._sections.get(owner, ()):
+            v, f = triangulate.fill(loop[:-1][:, self.plane])
+            verts.append(v)
+            faces.append(f + count)
+            count += len(v)
+        return _stack(verts, faces)
+
+    def _keep_fill(self, owner: int, made) -> tuple[tuple[np.ndarray, np.ndarray], int]:
+        """The fill kept for `owner`, and the bytes keeping `made` added."""
+        with self._lock:
+            hit = self._fills.get(owner)
+            if hit is not None:
+                return hit, 0
+            self._fills[owner] = made
+            size = int(made[0].nbytes + made[1].nbytes)
+            self._fill_bytes += size
+            return made, size
+
+    def fills(self, owners) -> tuple[list[tuple[np.ndarray, np.ndarray]], int]:
+        """Triangles filling every loop of each of `owners` on this plane, and
+        the bytes the ones built just now added."""
+        out, added = [], 0
+        for owner in owners:
+            hit = self._fills.get(owner)
+            if hit is None:
+                hit, size = self._keep_fill(owner, self._make_fill(owner))
+                added += size
+            out.append(hit)
+        return out, added
+
+    def add_fills(self, owners, pause=None) -> int:
+        """Build the fills of `owners` on this plane not built yet; the bytes added."""
+        added = 0
+        missing = sorted(o for o in self.present.intersection(owners) if o not in self._fills)
+        for n, owner in enumerate(missing):
+            if pause is not None and n % 4 == 3:
+                pause()
+            added += self._keep_fill(owner, self._make_fill(owner))[1]
+        return added
+
+    @property
+    def nbytes(self) -> int:
+        """What this plane holds: its outlines, and the fills built so far."""
+        return int(self.vertices.nbytes + self.faces.nbytes + self.owner.nbytes
+                   + self._fill_bytes)
+
+    def on_screen(self, points: np.ndarray, displayed) -> np.ndarray:
+        """In-plane points as vispy's x, y: the last displayed axis, then the other."""
+        xy = list(displayed)[::-1]
+        if sorted(xy) == self.plane:
+            return points if xy == self.plane else np.ascontiguousarray(points[:, ::-1])
+        # The sliced axis on screen: the plane seen edge on.
+        full = np.empty((len(points), 3), np.float32)
+        full[:, self.plane] = points
+        full[:, self.axis] = self.position
+        return full[:, xy]
+
+
+def _stack(verts: list, faces: list) -> tuple[np.ndarray, np.ndarray]:
+    """Points as float32 and triangles, each in one array.
+
+    The triangles are uint16 when they index at most 65,536 points, as a
+    plane's outlines and a compartment's fills nearly always do: half the
+    bytes of uint32, which is what lets the outlines and fills of every
+    slider plane inside a shipped atlas fit `GEOMETRY_CACHE_BYTES`.
+    """
+    points = (np.vstack(verts).astype(np.float32) if verts
+              else np.empty((0, 2), np.float32))
+    index = np.uint16 if len(points) <= 2**16 else np.uint32
+    return points, (np.vstack(faces).astype(index) if faces
+                    else np.empty((0, 3), index))
+
+
+class SliceVisual:
+    """The vispy visuals one overlay draws its slice with.
+
+    Children of the napari layer's own vispy node, so they are drawn where
+    and when the layer is: in its place in the layer order, through its
+    transform -- the mirror included -- and in its viewbox. Nothing here is
+    napari state, so a redraw is two vispy updates and no napari event: no
+    extent is recomputed, no shape is re-meshed, no thumbnail is redrawn.
+
+    - `mesh`: the fills, then every outline over them, in one draw.
+    - `text`: the labels.
+    """
+
+    def __init__(self, viewer, layer) -> None:
+        from vispy.scene.visuals import Mesh
+
+        visual = napari_private.layer_visual(viewer, layer)
+        self.layer = layer
+        self.mesh = Mesh(parent=visual.node)
+        self.mesh.order = 0
+        # The font napari gives the layer's own text.
+        self.text = napari_private.text_visual(visual.node, visual.font_info)
+        self.text.order = 1
+        self.text.anchors = ("center", "center")
+        self.text.font_size = TEXT_SIZE
+        self.text.visible = False
+        self.mesh.visible = False
+        #: Whether each visual has anything to draw.
+        self._has_mesh = self._has_text = False
+        self._on_blending()
+        self._on_opacity()
+        layer.events.blending.connect(self._on_blending)
+        layer.events.opacity.connect(self._on_opacity)
+
+    def _on_blending(self, event=None) -> None:
+        self.mesh.set_gl_state(**napari_private.gl_state(self.layer.blending))
+        self.text.set_gl_state(**napari_private.gl_state("translucent"))
+
+    def _on_opacity(self, event=None) -> None:
+        self.mesh.opacity = self.text.opacity = self.layer.opacity
+
+    def set_visible(self, on: bool) -> None:
+        self.mesh.visible = on and self._has_mesh
+        self.text.visible = on and self._has_text
+
+    def draw(self, vertices, faces, colors, on: bool) -> None:
+        self._has_mesh = bool(len(faces))
+        if self._has_mesh:
+            self.mesh.set_data(vertices=vertices, faces=faces, vertex_colors=colors)
+        self.mesh.visible = on and self._has_mesh
+
+    def label(self, strings, positions, colors, on: bool) -> None:
+        self._has_text = bool(strings)
+        if self._has_text:
+            self.text.text = strings
+            self.text.pos = positions
+            self.text.color = colors
+        self.text.visible = on and self._has_text
+
 
 class ContourOverlay:
-    """One Shapes layer per atlas, recomputed as the slice slider moves."""
+    """One atlas's slice contours, recomputed as the slice slider moves.
+
+    The layer is a napari Shapes layer that holds no shapes: it is what the
+    layer list, the eye, the mirror's affine and the layer order act on.
+    What is on the plane is drawn by `SliceVisual`, under that layer's own
+    vispy node. A step used to rebuild every shape of a Shapes layer --
+    napari meshes each one, redraws the thumbnail, and recomputes every
+    layer's extent twice -- which was most of a step's time.
+    """
 
     def __init__(
         self,
@@ -38,19 +242,21 @@ class ContourOverlay:
         axis: int | None = None,
         width: float = 0.35,
         colors=None,
+        display_names: list[str] | None = None,
     ) -> None:
         self.viewer = viewer
         self.meshset = meshset
         self.name = name
+        #: The text written on the slice for each compartment; see
+        #: `AtlasSurface.display_names`.
+        self.display_names = list(meshset.names if display_names is None
+                                  else display_names)
         #: Compartments whose name is drawn on the slice. Empty by default:
         #: with several atlases loaded every glomerulus would be written two
         #: or three times over, so labels are opt-in per glomerulus.
         self.labels: set[int] = set()
-        #: Compartments drawn as filled polygons rather than open paths.
-        #: A napari `path` cannot be filled at all -- it is an open
-        #: polyline -- so filling means changing the shape type, not just
-        #: the face color. Mesh-plane intersections are closed loops, so
-        #: reading them as polygons is geometrically honest.
+        #: Compartments drawn filled as well as outlined. Mesh-plane
+        #: intersections are closed loops, so filling them is honest.
         self.filled: set[int] = set()
         self.color = color
         #: Per-compartment RGBA, taken from the Surface layer, so a
@@ -63,8 +269,23 @@ class ContourOverlay:
         self.selection = set(
             range(meshset.n_compartments) if selection is None else selection
         )
-        self._cache: dict[int, object] = {}
+        self.sections = MeshSections(meshset)
+        self._geometry = PlaneCache(GEOMETRY_CACHE_BYTES)
+        #: What the prefetch is computing for, and its plan; see `_prefetch`.
+        self._prefetch_key = None
+        self._plan = None
+        #: Changes each time the layer's transform does, the mirror's included.
+        self._moves = 0
+        #: The loops drawn now, in data coordinates, and the compartment
+        #: each came from: what hover picking tests and `name_at_shape` reads.
+        self.paths: list[np.ndarray] = []
         self._shape_index: list[int] = []
+        #: What is drawn now, as `_state` describes it. A refresh that would
+        #: draw the same thing again returns at once: one 2D/3D switch
+        #: reaches `refresh` from three separate hooks.
+        self._drawn = None
+        self._fill_rgba = None
+        self._edge_rgba = None
 
         self.layer = viewer.add_shapes(
             data=[],
@@ -77,6 +298,9 @@ class ContourOverlay:
             visible=False,
         )
         self.layer.metadata["lobemap"] = {"kind": "contours", "atlas": name}
+        self.visual = SliceVisual(viewer, self.layer)
+        # The layer holds no shapes, so no step can change its extent.
+        napari_private.keep_extent_while_slicing(self.layer)
 
         # Redraw when the layer is switched on. `refresh` returns early while
         # hidden -- it would otherwise recompute intersections for every
@@ -86,10 +310,48 @@ class ContourOverlay:
         # contours randomly missing from the slice you were looking at, and
         # only in the hemibrain, the one space with more than one atlas.
         self.layer.events.visible.connect(self._on_visible)
+        for moved in (self.layer.events.affine, self.layer.events.scale,
+                      self.layer.events.translate):
+            moved.connect(self._on_moved)
+        # A scene torn down, or a viewer closed, removes the layer: the
+        # prefetch for it stops there.
+        viewer.layers.events.removed.connect(self._on_removed)
+
+    def _on_moved(self, event=None) -> None:
+        self._moves += 1
+
+    def _on_removed(self, event=None) -> None:
+        if getattr(event, "value", None) is self.layer:
+            self.stop()
+
+    def stop(self) -> None:
+        """Stop the prefetch for good, and stop listening for the layer's removal."""
+        if self._plan is not None:
+            self._plan.cancel()
+        self._plan = None
+        self._prefetch_key = ("stopped",)
+        with contextlib.suppress(Exception):        # already disconnected
+            self.viewer.layers.events.removed.disconnect(self._on_removed)
+
+    def _hold_prefetch(self) -> None:
+        """Hidden, or in 3D: nothing more is cut until the contours show again."""
+        if self._plan is not None:
+            self._plan.cancel()
+        if self._prefetch_key != ("stopped",):
+            self._prefetch_key = None
 
     def _on_visible(self, event=None) -> None:
-        if self.layer.visible:
-            self.refresh()
+        self.refresh()
+
+    def _showing(self) -> bool:
+        """Whether the slice visuals should be on: the layer is, in 2D.
+
+        And the dims are the layer's own: while a scene is torn down napari
+        shrinks them as layers go, and a step can land in between.
+        """
+        dims = self.viewer.dims
+        return (bool(self.layer.visible) and dims.ndisplay == 2
+                and dims.ndim == self.layer.ndim)
 
     # -- geometry --------------------------------------------------------
 
@@ -107,63 +369,78 @@ class ContourOverlay:
         order = tuple(self.viewer.dims.order)
         return int(order[0]) if order else 0
 
-    def _mesh(self, index: int):
-        """Trimesh for one compartment, built once and reused per slice."""
-        if index not in self._cache:
-            import trimesh
-
-            v, f = self.meshset.compartment(index)
-            self._cache[index] = trimesh.Trimesh(
-                vertices=v, faces=f, process=False
-            )
-        return self._cache[index]
-
     def slice_position(self) -> float:
-        """World coordinate of the current slice along the sliced axis."""
+        """Coordinate of the current slice along the sliced axis, in mesh units.
+
+        The slider is in WORLD coordinates and the meshes are cut in their
+        own. The two differ under the mirror, a reflection on `layer.affine`
+        about x: slicing along x, world x is the reflection of mesh x, and a
+        contour computed at the world value lay on a plane napari does not
+        show. Through the layer's own transform, the plane is the one on
+        screen whatever the affine.
+        """
         dims = self.viewer.dims
+        axis = self.axis
         point = getattr(dims, "point", None)
-        if point is not None and len(point) > self.axis:
-            return float(point[self.axis])
+        if point is not None and len(point) > axis:
+            if len(point) == self.layer.ndim:
+                return float(self.layer.world_to_data(point)[axis])
+            return float(point[axis])
         # Older napari: derive from the step index and the axis range.
-        step = dims.current_step[self.axis]
-        lo, _hi, span = dims.range[self.axis]
+        step = dims.current_step[axis]
+        lo, _hi, span = dims.range[axis]
         return float(lo + step * span)
 
     def contours_at(self, position: float) -> tuple[list[np.ndarray], list[int]]:
         """Polylines crossing the plane, plus the compartment each came from."""
-        origin = np.zeros(3)
-        origin[self.axis] = position
-        normal = np.zeros(3)
-        normal[self.axis] = 1.0
-
+        sections = self.sections.at(self.axis, position)
         paths: list[np.ndarray] = []
         owners: list[int] = []
         for index in sorted(self.selection):
-            mesh = self._mesh(index)
-            lo, hi = mesh.bounds[0][self.axis], mesh.bounds[1][self.axis]
-            if not (lo <= position <= hi):
-                continue  # cheap reject before the intersection
-            try:
-                section = mesh.section(plane_origin=origin, plane_normal=normal)
-            except Exception:  # noqa: BLE001, S112 - a tangent plane degenerates
-                continue
-            if section is None:
-                continue
-            for poly in section.discrete:
-                if len(poly) < 2:
-                    continue
-                pts = np.asarray(poly, dtype=float)
-                # Pin exactly to the plane so napari shows it on this slice.
-                pts[:, self.axis] = position
+            for pts in sections.get(index, ()):
                 paths.append(pts)
                 owners.append(index)
         return paths, owners
 
-    def _text_color(self, owners):
-        colors = self._colors_for(owners)
-        if colors is self.color:
-            return self.color
-        return {"array": colors, "default": self.color}
+    def _geometry_at(self, axis: int, position: float) -> _PlaneGeometry:
+        key = (int(axis), float(position))
+        hit = self._geometry.get(key)
+        if hit is not None:
+            return hit
+        made = _PlaneGeometry(self.sections.at(*key), *key, self.width)
+        return self._geometry.put(key, made, made.nbytes)
+
+    def _build(self, sections, axis: int, position: float, pause=None,
+               fills=()) -> _PlaneGeometry:
+        return _PlaneGeometry(sections, axis, position, self.width, pause, fills)
+
+    def _prefetch(self, axis: int, position: float) -> None:
+        """Have every slider plane inside this atlas cut ahead, if not already asked.
+
+        Asked again when the axis, the slider's grid or the layer's
+        transform -- the mirror -- changes, since each moves the planes the
+        slider can land on, and when the filled compartments change, whose
+        fills it builds too. The positions are worked out by the worker from
+        a copy of the transform, the way `slice_position` works them out.
+        """
+        dims = self.viewer.dims
+        start, _stop, step = dims.range[axis]
+        nsteps = int(dims.nsteps[axis])
+        fills = frozenset(self.filled)
+        key = (axis, self._moves, float(start), float(step), nsteps, fills)
+        if key == self._prefetch_key or self._prefetch_key == ("stopped",):
+            return
+        if self._plan is not None:
+            self._plan.cancel()
+        self._prefetch_key = key
+        column = self.meshset.vertices[:, axis]
+        self._plan = prefetch.Plan(
+            self.sections, self._geometry, self._build, axis,
+            napari_private.data_from_world(self.layer), dims.point,
+            (float(start), float(step), nsteps),
+            (float(column.min()), float(column.max())), position, fills,
+        )
+        prefetch.submit(self._plan)
 
     FILL_ALPHA = 0.35
 
@@ -180,82 +457,112 @@ class ContourOverlay:
 
         return tuple(float(v) for v in np.asarray(transform_color(spec))[0])
 
-    def _face_colors(self, owners):
-        """Per-shape face color: the mesh color, faded, or transparent."""
-        out = []
-        for i in owners:
-            if i not in self.filled:
-                out.append((0.0, 0.0, 0.0, 0.0))
-                continue
-            spec = (self.colors[i] if self.colors is not None
-                    and 0 <= i < len(self.colors) else self.color)
-            r, g, b, _ = self._as_rgba(spec)
-            out.append((r, g, b, self.FILL_ALPHA))
-        return out
-
-    def _shape_types(self, owners):
-        return ["polygon" if i in self.filled else "path" for i in owners]
-
-    def _colors_for(self, owners):
-        """One RGBA per shape, from the compartment that shape came from."""
-        if self.colors is None:
-            return self.color
-        return [
-            self.colors[i] if 0 <= i < len(self.colors) else self.color
-            for i in owners
-        ]
+    def _rgba_tables(self) -> tuple[np.ndarray, np.ndarray]:
+        """Outline and fill RGBA per compartment, parsed once."""
+        if self._edge_rgba is None:
+            specs = (list(self.colors) if self.colors is not None
+                     else [self.color] * self.meshset.n_compartments)
+            table = np.array([self._as_rgba(spec) for spec in specs]).reshape(-1, 4)
+            self._edge_rgba = table.astype(np.float32)
+            fill = table.copy()
+            fill[:, 3] = self.FILL_ALPHA
+            self._fill_rgba = fill.astype(np.float32)
+        return self._edge_rgba, self._fill_rgba
 
     # -- updates ---------------------------------------------------------
 
-    def refresh(self) -> None:
-        if not self.layer.visible:
-            return
-        paths, owners = self.contours_at(self.slice_position())
-        self._shape_index = owners
-        # Clear, then add with the shape type given explicitly. Assigning
-        # `data` and then `shape_type` looks equivalent and is not: the
-        # setter re-adds every shape onto a shape list that already holds the
-        # previous ones, and once the layer has been displayed in 2D those
-        # carry 2D mesh vertices. Stacking them against 3D ones raised
-        # "array at index 0 has size 2 and the array at index 1 has size 3"
-        # on the second switch back into 2D.
-        self.layer.data = []
-        if paths:
-            self.layer.add(
-                paths,
-                shape_type=self._shape_types(owners),
-                edge_color=self._colors_for(owners),
-                face_color=self._face_colors(owners),
-                edge_width=self.width,
-            )
-        # Text after data: napari requires one string per shape, so setting it
-        # first would leave the counts disagreeing.
-        self._apply_text(owners, paths)
+    def _state(self, axis: int, position: float) -> tuple:
+        """Everything the drawn slice depends on that can change.
 
-    def _apply_text(self, owners: list[int], paths) -> None:
-        strings = self._label_strings(owners, paths) if paths else []
-        try:
-            self.layer.text = {
-                "string": strings,
-                "size": TEXT_SIZE,
-                # One color per shape, matching that glomerulus's mesh. A
-                # single color for the layer would put every label in the
-                # atlas color while the outline under it was its own.
-                #
-                # Spelled as ManualColorEncoding rather than a bare list:
-                # napari cannot tell a list of N colors from one color
-                # given component-wise, and silently collapsed the list to a
-                # single constant -- `text.color` came back 0-dimensional.
-                "color": self._text_color(owners),
-                "anchor": "center",
-            }
-        except Exception as exc:      # noqa: BLE001 - never worth a crash
-            # Reported once rather than swallowed: if napari changes its text
-            # API this is the only thing that tells us.
-            if not getattr(self, "_text_warned", False):
-                self._text_warned = True
-                warnings.warn(f"slice labels unavailable: {exc!r}",
-                              RuntimeWarning, stacklevel=2)
+        Not `color`, `colors` or `width`, which are the overlay's for its
+        life.
+        """
+        shown = frozenset(self.selection)
+        return (
+            axis, position, tuple(self.viewer.dims.displayed), shown,
+            frozenset(self.filled & shown), frozenset(self.labels & shown),
+        )
+
+    def refresh(self) -> None:
+        # Nothing to cut in 3D, where no axis is sliced: the display-mode hook
+        # hides contours there, but a scene opening in 3D switches the primary
+        # atlas's contour on before that hook runs.
+        showing = self._showing()
+        self.visual.set_visible(showing)
+        if not showing:
+            self._hold_prefetch()
+            return
+        prefetch.poke()
+        axis = self.axis
+        position = self.slice_position()
+        self._prefetch(axis, position)
+        state = self._state(axis, position)
+        if state == self._drawn:
+            return
+        paths, owners = self.contours_at(position)
+        self._draw(self._geometry_at(axis, position), paths, owners)
+        self._drawn = state
+
+    def _draw(self, geometry: _PlaneGeometry, paths, owners) -> None:
+        """Hand the plane's triangles and labels to the visuals.
+
+        Fills first and outlines over them, in one mesh; the outlines are
+        selected out of the plane's prebuilt ones by compartment. Each
+        part's triangles are offset in the type that indexes every point of
+        the mesh, so none wraps: NumPy 1 keeps uint16 + uint32 scalar in 16
+        bits.
+        """
+        self.paths, self._shape_index = list(paths), list(owners)
+        edge_rgba, fill_rgba = self._rgba_tables()
+        displayed = list(self.viewer.dims.displayed)
+        shown = geometry.present & self.selection
+        verts, faces, colors, count = [], [], [], 0
+        filled = sorted(self.filled & shown)
+        made, added = geometry.fills(filled)
+        total = len(geometry.vertices) + sum(len(v) for v, _f in made)
+        index = np.uint16 if total <= 2**16 else np.uint32
+        for owner, (v, f) in zip(filled, made, strict=True):
+            verts.append(v)
+            faces.append(f.astype(index, copy=False) + index(count))
+            colors.append(np.broadcast_to(fill_rgba[owner], (len(v), 4)))
+            count += len(v)
+        stroke = geometry.faces
+        if shown != geometry.present:
+            keep = np.zeros(self.meshset.n_compartments, bool)
+            keep[list(shown)] = True
+            stroke = stroke[keep[geometry.owner[stroke[:, 0]]]]
+        verts.append(geometry.vertices)
+        faces.append(stroke.astype(index, copy=False) + index(count) if count else stroke)
+        colors.append(edge_rgba[geometry.owner])
+        if added:
+            self._geometry.grew((geometry.axis, geometry.position), added)
+        on = self._showing()
+        self.visual.draw(
+            geometry.on_screen(np.vstack(verts) if count else verts[0], displayed),
+            np.vstack(faces) if count else faces[0],
+            np.vstack(colors) if count else colors[0],
+            on,
+        )
+        self._apply_text(owners, paths, displayed, on)
+
+    def _apply_text(self, owners, paths, displayed, on: bool) -> None:
+        """Write each labeled compartment's name at its longest loop's center.
+
+        The center is the mean of that loop's points, the closing one
+        included, which is where napari's `center` anchor put the text of
+        the shape the loop used to be.
+        """
+        strings, positions, colors = [], [], []
+        if self.labels and self.labels.intersection(owners):
+            edge_rgba, _fill = self._rgba_tables()
+            for i, text in enumerate(self._label_strings(owners, paths)):
+                if not text:
+                    continue
+                strings.append(text)
+                positions.append(np.asarray(paths[i])[:, displayed].mean(axis=0)[::-1])
+                colors.append(edge_rgba[owners[i]])
+        self.visual.label(strings, np.asarray(positions, np.float32).reshape(-1, 2),
+                          np.asarray(colors, np.float32).reshape(-1, 4), on)
 
     def set_selection(self, indices) -> None:
         self.selection = set(indices)
@@ -279,7 +586,7 @@ class ContourOverlay:
         self.refresh()
 
     def _label_strings(self, owners: list[int], paths) -> list[str]:
-        """One string per shape; blank except on each compartment's longest.
+        """One string per loop; blank except on each compartment's longest.
 
         A glomerulus can cross the plane as several separate polylines -- a
         concave one, or a compartment made of disconnected bodies -- and
@@ -294,12 +601,12 @@ class ContourOverlay:
                 best[owner] = i
         chosen = set(best.values())
         return [
-            self.meshset.names[owner] if i in chosen else ""
+            self.display_names[owner] if i in chosen else ""
             for i, owner in enumerate(owners)
         ]
 
     def name_at_shape(self, shape_index: int | None) -> str | None:
-        """Map a picked Shapes index back to a compartment name."""
+        """Map a drawn loop's index back to a compartment name."""
         if shape_index is None or not (0 <= shape_index < len(self._shape_index)):
             return None
         return self.meshset.names[self._shape_index[shape_index]]
@@ -317,12 +624,16 @@ def install(viewer, overlays: dict[str, ContourOverlay]) -> list[tuple]:
     contour against its own surface -- two handlers on the same event, each
     with its own idea of what should be visible, is how a layer ends up
     visible in a mode that cannot draw it.
+
+    The display-mode hook also refreshes the contours it reveals, so on a
+    switch into 2D these handlers usually find nothing left to draw; a
+    refresh that would redraw what is already there returns at once.
     """
 
     def _on_display_change(event=None) -> None:
-        if viewer.dims.ndisplay == 2:
-            for overlay in overlays.values():
-                overlay.refresh()
+        # In 3D too: a refresh there puts the slice visuals away.
+        for overlay in overlays.values():
+            overlay.refresh()
 
     def _on_step(event=None) -> None:
         if viewer.dims.ndisplay != 2:
@@ -337,5 +648,8 @@ def install(viewer, overlays: dict[str, ContourOverlay]) -> list[tuple]:
     ]
     for event, handler in pairs:
         event.connect(handler)
+    # Before napari slices anything for a step, the prefetch is told to give
+    # way at its next pause, so the step does not wait for it.
+    napari_private.before_slicing(viewer, prefetch.poke)
     _on_display_change()
     return pairs

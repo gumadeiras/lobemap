@@ -10,20 +10,12 @@ from __future__ import annotations
 
 import pathlib
 
-import pytest
-
 from lobemap.build import buildable, load_recipes, missing
-from lobemap.core.registry import Registry
 
 #: Buildable like everything else, but flagged `expensive`: ~19 GB of
 #: downloads, ~40 GB of scratch and hours of compute, so `--all` skips them
 #: and they have to be named.
 STAINS = {"fafb_stain", "hemibrain_stain", "malecns_stain"}
-
-
-@pytest.fixture(scope="module")
-def registry():
-    return Registry.load("registry", validate=False)
 
 
 def test_every_asset_is_buildable(registry):

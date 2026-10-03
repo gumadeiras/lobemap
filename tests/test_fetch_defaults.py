@@ -12,8 +12,6 @@ Driven over `file://` URLs, so the real download path runs.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from lobemap.cli import _autofetch, _optional_assets, main
@@ -134,16 +132,14 @@ def test_autofetch_survives_an_unreachable_host(published, tmp_path):
     assert not (data / "mesh.npz").exists()
 
 
-def test_the_real_registry_holds_back_exactly_the_stains():
-    root = Path(__file__).resolve().parents[1] / "registry"
-    assert _optional_assets(root) == {
+def test_the_real_registry_holds_back_exactly_the_stains(registry_root):
+    assert _optional_assets(registry_root) == {
         "fafb_stain", "hemibrain_stain", "malecns_stain"}
 
 
-def test_the_shipped_manifest_points_at_the_release():
+def test_the_shipped_manifest_points_at_the_release(registry_root):
     """If this is ever cleared, a fresh clone silently has no data path."""
-    root = Path(__file__).resolve().parents[1] / "registry"
-    arts, base_url = mf.load(root / "manifest.toml")
+    arts, base_url = mf.load(registry_root / "manifest.toml")
     assert base_url, "no base_url: a fresh clone cannot fetch anything"
     assert len(arts) == 14
     # `fetch` builds f"{base}/{transfer_name}", so the URL must be a flat

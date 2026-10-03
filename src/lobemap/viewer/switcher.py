@@ -7,7 +7,9 @@ maximized geometry and put a fresh window wherever the window manager felt
 like, which for a viewer whose default view is carefully fitted is a
 regression, not a neutral implementation detail.
 
-`SceneSession.teardown` does the unloading; this is only the control.
+The next scene is built beside the open one, which is torn down only once
+that build has succeeded, so a failed switch leaves the user's scene as it
+was. `SceneSession.teardown` does the unloading; this is only the control.
 """
 
 from __future__ import annotations
@@ -24,6 +26,18 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from .request import loadable_spaces
+from .slicing import slice_axes
+from .view import capture_view, restore_view
+
+#: What the slice-axis menu is for, and why its angles are shown.
+SLICE_TIP = (
+    "The array axis 2D steps along, named by the anatomical axis nearest it. "
+    "A slice is cut along the voxel grid, and the angle is how far that grid "
+    "is turned from the anatomy -- which is also why no anatomical arrows are "
+    "drawn over a 2D slice. 2D only."
+)
+
 
 class SpaceSwitcher(QWidget):
     """Choose the coordinate space; rebuilds the scene on change.
@@ -31,7 +45,12 @@ class SpaceSwitcher(QWidget):
     Only spaces that actually have something to show are listed. A space with
     no ingested assets raises from `build_scene`, and offering a choice that
     cannot be honoured is worse than not offering it.
+
+    Also holds the two controls that belong to the scene rather than to one
+    atlas: the mirror, and the axis a 2D slice steps along.
     """
+
+    loadable_spaces = staticmethod(loadable_spaces)
 
     def __init__(self, viewer, registry, session, load, parent=None) -> None:
         super().__init__(parent)
@@ -57,9 +76,20 @@ class SpaceSwitcher(QWidget):
         self.mirror.setToolTip(
             "Show this space reflected left-right, for display only. The "
             "data is untouched, and both axis triads follow the mirror, so "
-            "the anatomical one still names the side you are looking at."
+            "the anatomical one still names the side you are looking at. "
+            "Switching space clears it."
         )
         self.mirror.toggled.connect(self._on_mirror)
+
+        #: The slice axis, by the anatomical name of each choice.
+        self.slice = QComboBox()
+        self.slice.setToolTip(SLICE_TIP)
+        self.slice.currentIndexChanged.connect(self._on_slice)
+        self._fill_slices()
+        # The switcher outlives every scene, so it is connected once.
+        viewer.dims.events.ndisplay.connect(self._on_mode)
+        viewer.dims.events.order.connect(self._on_order)
+        self._on_mode()
 
         self.status = QLabel("")
         self.status.setWordWrap(True)
@@ -68,44 +98,25 @@ class SpaceSwitcher(QWidget):
         row.addWidget(QLabel("Space:"))
         row.addWidget(self.combo, 1)
         row.addWidget(self.mirror)
+        slicing = QHBoxLayout()
+        slicing.addWidget(QLabel("Slice along:"))
+        slicing.addWidget(self.slice, 1)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 4, 6, 4)
         outer.addLayout(row)
+        outer.addLayout(slicing)
         outer.addWidget(self.status)
         # No trailing stretch: it made the widget claim any height it was
         # given, which is the opposite of what is wanted here.
 
-    @staticmethod
-    def loadable_spaces(registry) -> list[str]:
-        """Spaces with at least one ingested atlas or reference meshset."""
-        out = []
-        for space_id in registry.spaces:
-            atlases = list(registry.atlases_in_space(space_id))
-            has_atlas = False
-            for atlas in atlases:
-                try:
-                    has_atlas = registry.assets[atlas.asset].path.exists()
-                except KeyError:
-                    has_atlas = False
-                if has_atlas:
-                    break
-            if not has_atlas:
-                has_atlas = any(
-                    asset.role in ("neuropil", "brain") and asset.path.exists()
-                    for asset in registry.assets_in_space(space_id)
-                )
-            if has_atlas:
-                out.append(space_id)
-        return out
-
     def settle(self) -> None:
-        """Sit below the compartment panel, however it was just re-added.
+        """Sit above the compartment panel, however it was just re-added.
 
-        Loading a scene creates a NEW compartment panel and docks it, and Qt
-        puts a newly added dock above an existing one in the same area -- so
-        after one switch this control had jumped from the bottom of the right
-        column to the top of it, and stayed there. Re-splitting pins the
-        order rather than relying on insertion order.
+        Which space is open is read before anything about it, so the picker
+        heads the right column. Loading a scene creates a NEW compartment
+        panel and docks it, and Qt places a newly added dock wherever its
+        insertion lands, so the order is pinned by re-splitting rather than
+        left to insertion order.
         """
         panel = getattr(self.session, "dock", None)
         if self.dock is None or panel is None:
@@ -116,7 +127,7 @@ class SpaceSwitcher(QWidget):
         with contextlib.suppress(Exception):
             from qtpy.QtCore import Qt
 
-            window.splitDockWidget(panel, self.dock, Qt.Vertical)
+            window.splitDockWidget(self.dock, panel, Qt.Vertical)
             # And give it as little of the column as it will take. This is a
             # one-line control; the compartment table beside it is the thing
             # worth the height. Qt distributes by RATIO, not pixels, so the
@@ -137,8 +148,60 @@ class SpaceSwitcher(QWidget):
                                     QSizePolicy.Policy.Minimum)
             wanted = max(self.dock.sizeHint().height(),
                          self.dock.minimumSizeHint().height())
-            window.resizeDocks([panel, self.dock], [10_000, wanted],
+            window.resizeDocks([self.dock, panel], [wanted, 10_000],
                                Qt.Vertical)
+
+    def _fill_slices(self, keep: str | None = None) -> None:
+        """List the open space's slice axes, keeping the anatomy chosen.
+
+        The same anatomical axis is a different array axis in another space
+        -- anterior-posterior is z in FAFB and y in the hemibrain -- so a
+        switch keeps the name the user picked and finds its axis anew.
+        """
+        space = self.registry.spaces.get(self.session.space)
+        choices = slice_axes(space)
+        self.slice.blockSignals(True)
+        try:
+            self.slice.clear()
+            for choice in choices:
+                self.slice.addItem(choice.label, choice.axis)
+            wanted = next((c.axis for c in choices if keep and c.anatomy == keep),
+                          self.session.slice_axis)
+            self.slice.setCurrentIndex(max(0, self.slice.findData(wanted)))
+        finally:
+            self.slice.blockSignals(False)
+        self._anatomy = {c.axis: c.anatomy for c in choices}
+        self.session.slice_axis = int(self.slice.currentData())
+
+    def _on_slice(self, _index: int) -> None:
+        axis = self.slice.currentData()
+        if self._busy or axis is None:
+            return
+        with contextlib.suppress(Exception):
+            self.session.set_slice_axis(int(axis))
+
+    def _on_mode(self, event=None) -> None:
+        self.slice.setEnabled(self.viewer.dims.ndisplay == 2)
+
+    def _on_order(self, event=None) -> None:
+        """Keep napari's own roll-dims button in step with the menu.
+
+        In 2D a roll picks another slice axis behind the menu's back: the
+        menu kept its old name and the contours showed an empty plane. It is
+        taken as a choice made in the menu. In 3D the order must stay the
+        identity (see `app.install_display_mode`), so a roll there is undone.
+        """
+        if self._busy:
+            return
+        order = tuple(self.viewer.dims.order)
+        if self.viewer.dims.ndisplay == 3:
+            identity = tuple(range(len(order)))
+            if order != identity:
+                self.viewer.dims.order = identity
+            return
+        index = self.slice.findData(order[0])
+        if index >= 0 and order[0] != self.session.slice_axis:
+            self.slice.setCurrentIndex(index)
 
     def _on_mirror(self, on: bool) -> None:
         """Reflect the loaded scene, or put it back."""
@@ -154,33 +217,65 @@ class SpaceSwitcher(QWidget):
         # Reentrancy guard: restoring the combo on failure re-emits the
         # signal, which would try to load the failed space a second time.
         self._busy = True
-        previous = self.session.space
         try:
-            self.status.setText(f"loading {want}...")
-            self.session.teardown()
-            self.session = self._load(want)
-            # A new space comes up unmirrored and the control follows it.
-            # The mirror is a property of how one space is being looked
-            # at, not a preference: carrying it across would hand back a
-            # reflected scene without anything having been clicked, and
-            # the reflection is the one thing here that can make left
-            # read as right. Safe during the switch because `_busy` makes
-            # `_on_mirror` a no-op, and the new scene is already plain.
-            self.mirror.setChecked(False)
+            self._switch(want)
+        finally:
+            self._busy = False
+
+    def _switch(self, want: str) -> None:
+        """Build `want` beside the open scene, and only then drop the open one.
+
+        A failed build is undone and the open scene was never touched, so the
+        user gets back exactly what they had: every tab's checked rows,
+        labels, fills, filter and driver line, the open tab, the mirror.
+        What the build did move belongs to the viewer -- the slice axis and
+        plane, the camera, the selected layer, the title, the axis triads
+        and the home button -- and is put back from what was captured before
+        it started. Rebuilding the previous space instead, as this used to,
+        gave its defaults back rather than the user's scene.
+        """
+        old = self.session
+        anatomy = self._anatomy.get(old.slice_axis)
+        before = capture_view(self.viewer)
+        self.status.setText(f"loading {want}...")
+        new = None
+        try:
+            new = self._load(want)
+            self.session = new
+            self._fill_slices(keep=anatomy)
+        except Exception as exc:                      # noqa: BLE001
+            self.session = old
+            steps = [self._fill_slices, lambda: restore_view(self.viewer, before),
+                     old.reassert]
+            if new is not None:
+                steps.insert(0, new.teardown)
+            # Each step on its own: this runs inside a Qt slot, where an
+            # exception aborts the process, and every step that can still
+            # run gives back more of the user's scene.
+            for step in steps:
+                with contextlib.suppress(Exception):
+                    step()
+            self.status.setText(f"{want} failed: {exc}")
+            index = self.combo.findData(old.space)
+            if index >= 0:
+                self.combo.setCurrentIndex(index)
+            return
+        old.teardown()
+        # The new space comes up unmirrored and the control follows it. The
+        # mirror is how one space is being looked at, not a preference:
+        # carried across, it would hand back a reflected scene nobody
+        # reflected, and the reflection is the one thing here that can make
+        # left read as right. `_busy` keeps `_on_mirror` out of it. A failed
+        # switch keeps the open scene, mirror and all, and never gets here.
+        self.mirror.setChecked(False)
+        try:
+            new.settle_view()
             self.settle()
             self.status.setText("")
         except Exception as exc:                      # noqa: BLE001
-            # A failed switch must not leave an empty viewer, so fall back to
-            # what was loaded before and say why.
-            self.status.setText(f"{want} failed: {exc}")
-            with contextlib.suppress(Exception):
-                self.session = self._load(previous)
-                self.mirror.setChecked(False)
-            index = self.combo.findData(self.session.space)
-            if index >= 0:
-                self.combo.setCurrentIndex(index)
-        finally:
-            self._busy = False
+            # The new scene is complete and the old one gone; only framing
+            # it failed, which is worth saying but not undoing.
+            self.status.setText(f"{want}: {exc}")
 
 
 __all__ = ["SpaceSwitcher"]

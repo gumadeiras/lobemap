@@ -84,7 +84,7 @@ class AtlasAudit:
     stale: tuple[str, ...] = ()
     #: Rows whose relation is not a plain identity. These are the hand-made
     #: part of the table and cannot be re-derived from the atlases: the
-    #: Schlegel rename chain and Grabe's VP1 merge live here.
+    #: Schlegel rename chain and the S11 VM6 split live here.
     curated: tuple[Correspondence, ...] = ()
 
     @property
@@ -215,8 +215,11 @@ class Nomenclature:
             for c in self._corr[atlas]
         ]
         with path.open("w", newline="", encoding="utf-8") as fh:
+            # "\n", not the csv module's default "\r\n": the committed table
+            # is LF, and a CRLF rewrite changes every one of its lines.
             w = csv.DictWriter(
-                fh, fieldnames=["atlas", "published_name", "canonical", "relation"]
+                fh, fieldnames=["atlas", "published_name", "canonical", "relation"],
+                lineterminator="\n",
             )
             w.writeheader()
             w.writerows(rows)

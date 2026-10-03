@@ -8,15 +8,11 @@ is why this is tested rather than eyeballed.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
 from lobemap.core.model import Space, anatomical_axes, axis_vector
 from lobemap.core.registry import Registry
-
-REGISTRY = Path(__file__).resolve().parents[1] / "registry"
 
 
 @pytest.mark.parametrize(
@@ -34,13 +30,14 @@ def test_axis_vector_rejects_nonsense():
 
 
 #: Determined twice over, from positional nomenclature and from handedness.
-def test_left_al_lands_on_the_viewers_right_except_in_fafb():
+@pytest.mark.requires_data
+def test_left_al_lands_on_the_viewers_right_except_in_fafb(registry_root):
     """The handedness convention, which fixes the sign of dorsal.
 
     Screen right is view x up. Getting that cross product backwards inverts
     dorsal, which renders the brain upside down and looks like a camera bug.
     """
-    reg = Registry.load(REGISTRY)
+    reg = Registry.load(registry_root)
     cases = {
         "FAFB14": ("fafb_neuropil", "AL_L", "AL_R", -1),
         "JRCFIB2018F": ("neuprint_hemibrain_neuropil", "AL(L)", "AL(R)", +1),
@@ -63,13 +60,14 @@ def test_left_al_lands_on_the_viewers_right_except_in_fafb():
         assert (offset > 0) == (want > 0), (space_id, offset)
 
 
-def test_the_antennal_lobes_lie_anterior_in_fafb():
+@pytest.mark.requires_data
+def test_the_antennal_lobes_lie_anterior_in_fafb(registry_root):
     """A third, independent check on the anterior axis alone.
 
     The landmark is the union of all 78 neuropils, which is what stands in
     for a brain outline now that the Bates Plotly brain mesh is gone.
     """
-    reg = Registry.load(REGISTRY)
+    reg = Registry.load(registry_root)
     brain = reg.mesh("fafb_neuropil").vertices
     mid = (brain.min(0) + brain.max(0)) / 2
     al = reg.mesh("benton2025_glomeruli").vertices.mean(0)
@@ -77,14 +75,14 @@ def test_the_antennal_lobes_lie_anterior_in_fafb():
     assert np.dot(al - mid, anterior) > 0, "ALs must be on the anterior side"
 
 
-def test_every_space_opens_with_exactly_one_atlas_and_its_image():
+def test_every_space_opens_with_exactly_one_atlas_and_its_image(registry_root):
     """Two atlases stacked at startup is unreadable; that is the whole point.
 
     This used to read the answer out of a scene preset. There is no preset
     now: the space names its primary atlas, and the image comes along
     because an image is shown whenever it is on disk.
     """
-    reg = Registry.load(REGISTRY)
+    reg = Registry.load(registry_root)
     expected = {
         "FAFB14": ("benton2025", "fafb_stain"),
         "JRCFIB2018F": ("neuprint_hemibrain", "hemibrain_stain"),
@@ -99,44 +97,44 @@ def test_every_space_opens_with_exactly_one_atlas_and_its_image():
         assert images == [image], (space_id, images)
 
 
-def test_spaces_with_an_atlas_all_declare_a_default():
-    reg = Registry.load(REGISTRY)
+def test_spaces_with_an_atlas_all_declare_a_default(registry_root):
+    reg = Registry.load(registry_root)
     for space_id, space in reg.spaces.items():
         if reg.atlases_in_space(space_id):
             assert space.primary_atlas, f"{space_id} has atlases but no primary"
 
 
-def test_the_other_atlases_of_a_space_are_still_loaded():
+def test_the_other_atlases_of_a_space_are_still_loaded(registry_root):
     """Not shown is not the same as not there.
 
     JRCFIB2018F is the case the whole design exists for: three
     parcellations of one volume, superposable because they share a space.
     Opening on one of them must not mean the other two are absent.
     """
-    reg = Registry.load(REGISTRY)
+    reg = Registry.load(registry_root)
     here = {a.id for a in reg.atlases_in_space("JRCFIB2018F")}
     assert here == {"neuprint_hemibrain", "schlegel2021_s11",
                     "schlegel2021_s12"}
     assert reg.primary_atlas("JRCFIB2018F").id == "neuprint_hemibrain"
 
 
-def test_registry_rejects_an_unknown_primary_atlas():
+def test_registry_rejects_an_unknown_primary_atlas(registry_root):
     from lobemap.core.registry import RegistryError
 
-    reg = Registry.load(REGISTRY, validate=False)
+    reg = Registry.load(registry_root, validate=False)
     reg.spaces["FAFB14"] = Space(id="FAFB14", title="x", units="um",
                                  primary_atlas="no_such_atlas")
     with pytest.raises(RegistryError, match="no_such_atlas"):
         reg.validate()
 
 
-def test_several_atlases_and_no_primary_is_a_registry_error():
+def test_several_atlases_and_no_primary_is_a_registry_error(registry_root):
     """Otherwise the viewer picks one and the choice is invisible."""
     from dataclasses import replace
 
     from lobemap.core.registry import RegistryError
 
-    reg = Registry.load(REGISTRY, validate=False)
+    reg = Registry.load(registry_root, validate=False)
     reg.spaces["JRCFIB2018F"] = replace(reg.spaces["JRCFIB2018F"],
                                         primary_atlas=None)
     with pytest.raises(RegistryError, match="no primary_atlas"):
@@ -155,28 +153,29 @@ def viewer():
 
 
 def test_orient_anterior_points_the_camera_down_the_measured_axis(viewer):
-    from lobemap.viewer.app import GIMBAL_NUDGE_DEG, orient_anterior
+    from lobemap.viewer.app import orient_anterior
 
     space = Space(id="S", title="s", units="um",
                   anatomical_rotation_axis=(0.0, 1.0, 0.0),
                   anatomical_rotation_deg=90.0)
     assert orient_anterior(viewer, space) is True
-    cam = getattr(viewer, "scene", viewer).camera
-    # Camera sits anterior and looks posteriorly, i.e. along +z, less the
-    # small yaw that keeps it off the gimbal singularity.
+    cam = viewer.scene.camera
+    # Camera sits anterior and looks posteriorly, i.e. along +z: exactly
+    # axis-aligned here, which napari keeps (see the next test).
     off = np.degrees(np.arccos(np.clip(
         np.dot(np.asarray(cam.view_direction), (0, 0, 1)), -1, 1)))
-    assert off == pytest.approx(GIMBAL_NUDGE_DEG, abs=0.01)
+    assert off == pytest.approx(0.0, abs=0.01)
     assert np.dot(np.asarray(cam.up_direction), (0, 1, 0)) > 0.99
 
 
-def test_an_exactly_axis_aligned_camera_is_flipped_by_napari(viewer):
-    """Why `GIMBAL_NUDGE_DEG` exists. Pins the napari behavior.
+def test_an_exactly_axis_aligned_camera_keeps_its_up_vector(viewer):
+    """Why the home view is not turned off axis. Pins the napari behavior.
 
-    At exact gimbal lock napari's vispy round trip -- angles to quaternion and
-    back -- cannot recover the third Euler angle and zeroes it, which returns
-    a NEGATED up vector. The brain renders upside down with no error. If this
-    test starts failing, napari has fixed it and the nudge can go.
+    At exact gimbal lock napari 0.9.1's vispy round trip -- angles to
+    quaternion and back -- could not recover the third Euler angle and zeroed
+    it, which returned a NEGATED up vector: the brain rendered upside down
+    with no error, so the camera was turned one degree off axis. napari 0.9.2
+    keeps the up vector, and the pin's floor is 0.9.2.
     """
     from napari._vispy.camera import (
         napari_angles_to_vispy_quat as forward,
@@ -189,22 +188,20 @@ def test_an_exactly_axis_aligned_camera_is_flipped_by_napari(viewer):
     def round_trip(view, up):
         cam = Camera()
         cam.set_view_direction(view_direction=view, up_direction=up)
-        angles = backward(forward(np.array(cam.angles), (False,) * 3),
+        angles = backward(forward(tuple(cam.angles), (False,) * 3),
                           (False,) * 3)
         out = Camera()
         out.angles = tuple(angles)
         return np.asarray(out.up_direction)
 
-    assert np.dot(round_trip((0, 0, 1), (0, 1, 0)), (0, 1, 0)) < -0.99, (
-        "napari no longer inverts an axis-aligned camera; drop the nudge"
-    )
-    eps = np.tan(np.radians(1.0))
-    nudged = np.array([eps, 0.0, 1.0])
-    nudged /= np.linalg.norm(nudged)
-    assert np.dot(round_trip(tuple(nudged), (0, 1, 0)), (0, 1, 0)) > 0.99
+    for view, up in (((0, 0, 1), (0, 1, 0)), ((0, 1, 0), (1, 0, 0)),
+                     ((1, 0, 0), (0, 0, 1))):
+        assert np.dot(round_trip(view, up), up) > 0.99, (
+            f"napari inverts the camera looking along {view}; the home view "
+            "needs turning off axis again")
 
 
-def test_the_nudge_survives_the_round_trip_for_every_space():
+def test_the_home_view_survives_the_round_trip_for_every_space(registry_root):
     from napari._vispy.camera import (
         napari_angles_to_vispy_quat as forward,
     )
@@ -216,14 +213,14 @@ def test_the_nudge_survives_the_round_trip_for_every_space():
     from lobemap.viewer.app import orient_anterior
 
     napari = pytest.importorskip("napari")
-    reg = Registry.load(REGISTRY)
+    reg = Registry.load(registry_root)
     viewer = napari.Viewer(ndisplay=3, show=False)
     try:
         for space_id, space in reg.spaces.items():
             dorsal = anatomical_axes(space)["D"]
             assert orient_anterior(viewer, space) is True
-            cam = getattr(viewer, "scene", viewer).camera
-            angles = backward(forward(np.array(cam.angles), (False,) * 3),
+            cam = viewer.scene.camera
+            angles = backward(forward(tuple(cam.angles), (False,) * 3),
                               (False,) * 3)
             after = Camera()
             after.angles = tuple(angles)
@@ -239,10 +236,10 @@ def test_a_space_without_a_rotation_is_left_alone(viewer):
     arbitrary roll, which is worse than not trying."""
     from lobemap.viewer.app import orient_anterior
 
-    before = tuple(getattr(viewer, "scene", viewer).camera.view_direction)
+    before = tuple(viewer.scene.camera.view_direction)
     space = Space(id="S", title="s", units="um")
     assert orient_anterior(viewer, space) is False
-    after = tuple(getattr(viewer, "scene", viewer).camera.view_direction)
+    after = tuple(viewer.scene.camera.view_direction)
     assert before == after
 
 
@@ -266,15 +263,15 @@ def test_fit_view_keeps_the_orientation(viewer):
                   anatomical_rotation_deg=90.0)
     orient_anterior(viewer, space)
     fit_view(viewer)
-    cam = getattr(viewer, "scene", viewer).camera
+    cam = viewer.scene.camera
     assert np.dot(np.asarray(cam.view_direction), (0, 0, 1)) > 0.999
     assert np.dot(np.asarray(cam.up_direction), (0, 1, 0)) > 0.99
     assert cam.zoom > 0
 
 
-def test_a_space_with_no_atlases_has_no_primary():
+def test_a_space_with_no_atlases_has_no_primary(registry_root):
     """Nothing to open means nothing to open ON, rather than a crash."""
-    reg = Registry.load(REGISTRY, validate=False)
+    reg = Registry.load(registry_root, validate=False)
     reg.spaces["EMPTY"] = Space(id="EMPTY", title="empty", units="um")
     assert reg.primary_atlas("EMPTY") is None
 
@@ -289,7 +286,7 @@ def test_the_initial_fit_follows_the_canvas(viewer):
 
     viewer.add_image(np.zeros((40, 30, 20), np.uint8))
     assert install_initial_fit(viewer) is True
-    cam = getattr(viewer, "scene", viewer).camera
+    cam = viewer.scene.camera
     assert cam.zoom > 0
 
 
@@ -297,15 +294,30 @@ def test_the_initial_fit_watches_napari_canvas_not_the_widget(viewer):
     """`fit_to_view` divides by `viewer.canvas.size`, which lags the widget.
 
     Watching the Qt widget instead is why FAFB kept its 900x700 zoom while
-    other spaces happened to refit correctly.
+    other spaces happened to refit correctly. So only napari's own canvas
+    size changes here, as it does after a resize settles: the widget keeps
+    its size, and the view must refit anyway on the next draw. Once the
+    user touches the view, it is theirs and stays put.
     """
-    import inspect
+    from lobemap.viewer.app import fit_view, install_initial_fit
 
-    from lobemap.viewer.app import install_initial_fit
+    viewer.add_image(np.zeros((40, 30, 20), np.uint8))
+    assert install_initial_fit(viewer) is True
+    canvas = viewer.window._qt_viewer.canvas
+    cam = viewer.scene.camera
+    before = cam.zoom
 
-    source = inspect.getsource(install_initial_fit)
-    assert 'getattr(viewer, "canvas", None)' in source
-    assert "native" not in source
+    viewer.canvas.size = (400, 1600)
+    canvas.events.draw()
+    refit = cam.zoom
+    assert refit != pytest.approx(before), "no refit when napari's size moved"
+    fit_view(viewer)
+    assert cam.zoom == pytest.approx(refit), "refit was not a fit to the new size"
+
+    canvas.events.mouse_press(pos=(1, 1), button=1)
+    viewer.canvas.size = (1600, 400)
+    canvas.events.draw()
+    assert cam.zoom == pytest.approx(refit), "refit after the user took the view"
 
 
 def test_the_initial_fit_survives_a_viewer_without_a_canvas():
@@ -331,21 +343,19 @@ def _home(viewer):
     viewer.window._qt_viewer.viewerButtons.resetViewButton.click()
 
 
+@pytest.mark.requires_data
 @pytest.mark.parametrize(
     "space_id", ["FAFB14", "JRCFIB2018F", "JRCFIB2022M", "GRABE"]
 )
-def test_home_looks_down_a_p_with_dorsal_up(space_id):
+def test_home_looks_down_a_p_with_dorsal_up(registry_root, space_id):
     """`reset_view` sets the camera angles to (0, 0, 0), a view down the
     ARRAY axes. Those are not the anatomical ones, so the home button used
     to leave the brain at an arbitrary attitude."""
     napari = pytest.importorskip("napari")
 
-    from lobemap.core.registry import Registry
     from lobemap.viewer.app import load_space
 
-    reg = Registry.load(REGISTRY)
-    if not (REGISTRY / "data").is_dir():
-        pytest.skip("no ingested data")
+    reg = Registry.load(registry_root)
     try:
         viewer = napari.Viewer(show=False, ndisplay=3)
     except Exception as exc:                        # pragma: no cover
@@ -356,11 +366,11 @@ def test_home_looks_down_a_p_with_dorsal_up(space_id):
         frame = anatomical_axes(space)
         anterior, dorsal = frame["A"], frame["D"]
 
-        viewer.camera.angles = (17, 42, -63)        # the user rotates
+        viewer.scene.camera.angles = (17, 42, -63)        # the user rotates
         _home(viewer)
 
-        view = np.asarray(viewer.camera.view_direction)
-        up = np.asarray(viewer.camera.up_direction)
+        view = np.asarray(viewer.scene.camera.view_direction)
+        up = np.asarray(viewer.scene.camera.up_direction)
         # Looking POSTERIORLY means the view runs against anterior.
         assert float(np.dot(view, anterior)) < -0.99, (space_id, view)
         assert float(np.dot(up, dorsal)) > 0.99, (space_id, up)
@@ -368,16 +378,14 @@ def test_home_looks_down_a_p_with_dorsal_up(space_id):
         viewer.close()
 
 
-def test_home_survives_a_scene_switch():
+@pytest.mark.requires_data
+def test_home_survives_a_scene_switch(registry_root):
     """The wrapper is installed once and re-pointed, not stacked."""
     napari = pytest.importorskip("napari")
 
-    from lobemap.core.registry import Registry
     from lobemap.viewer.app import load_space
 
-    reg = Registry.load(REGISTRY)
-    if not (REGISTRY / "data").is_dir():
-        pytest.skip("no ingested data")
+    reg = Registry.load(registry_root)
     try:
         viewer = napari.Viewer(show=False, ndisplay=3)
     except Exception as exc:                        # pragma: no cover
@@ -389,10 +397,10 @@ def test_home_survives_a_scene_switch():
         load_space(viewer, reg, "JRCFIB2018F", fit=False)
         assert viewer.__dict__.get("reset_view") is first, "wrapper stacked"
 
-        viewer.camera.angles = (5, 5, 5)
+        viewer.scene.camera.angles = (5, 5, 5)
         _home(viewer)
         anterior = anatomical_axes(reg.spaces["JRCFIB2018F"])["A"]
-        view = np.asarray(viewer.camera.view_direction)
+        view = np.asarray(viewer.scene.camera.view_direction)
         assert float(np.dot(view, anterior)) < -0.99, (
             "home re-oriented to the previous space"
         )
@@ -400,25 +408,23 @@ def test_home_survives_a_scene_switch():
         viewer.close()
 
 
-def test_a_fit_that_keeps_the_angle_is_not_re_oriented():
+@pytest.mark.requires_data
+def test_a_fit_that_keeps_the_angle_is_not_re_oriented(registry_root):
     """`fit_view` passes `reset_camera_angle=False` on purpose, so it must
     leave whatever the user is looking at alone."""
     napari = pytest.importorskip("napari")
 
-    from lobemap.core.registry import Registry
     from lobemap.viewer.app import fit_view, load_space
 
-    reg = Registry.load(REGISTRY)
-    if not (REGISTRY / "data").is_dir():
-        pytest.skip("no ingested data")
+    reg = Registry.load(registry_root)
     try:
         viewer = napari.Viewer(show=False, ndisplay=3)
     except Exception as exc:                        # pragma: no cover
         pytest.skip(f"no Qt display: {exc}")
     try:
         load_space(viewer, reg, "FAFB14", fit=False)
-        viewer.camera.angles = (17, 42, -63)
+        viewer.scene.camera.angles = (17, 42, -63)
         fit_view(viewer)
-        assert tuple(round(a) for a in viewer.camera.angles) == (17, 42, -63)
+        assert tuple(round(a) for a in viewer.scene.camera.angles) == (17, 42, -63)
     finally:
         viewer.close()

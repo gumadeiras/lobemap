@@ -237,3 +237,22 @@ def test_npz_storage_keys_do_not_leak_into_a_zarr_store(tmp_path):
     assert staged.meta["data_file"] == "v.data.npy"
     back = Volume.load(staged.save(tmp_path / "v.zarr"))
     assert "data_file" not in back.meta
+
+
+def test_a_size_three_axis_is_reduced_by_the_factor_its_metadata_records(tmp_path):
+    """Level 1 halves a size-3 axis to 1 and records factor 2 and a half-voxel
+    shift, so its value must be the mean of planes 0-1, not of all three."""
+    import json
+
+    from lobemap.core.imagefmt import Volume
+
+    data = np.zeros((256, 8, 3), np.uint8)
+    data[:, :, 2] = 90                       # only the plane factor 2 drops
+    path = Volume(data=data, voxel_um=(1.0, 1.0, 1.0), origin_um=(0.0, 0.0, 0.0),
+                  meta={"source": "test"}).save(tmp_path / "v.zarr")
+    back = Volume.load(path)
+    assert back.levels[1].shape == (128, 4, 1)
+    ds = json.loads((path / ".zattrs").read_text(encoding="utf-8"))
+    scale, trans = ds["multiscales"][0]["datasets"][1]["coordinateTransformations"]
+    assert scale["scale"][2] == 2.0 and trans["translation"][2] == 0.5
+    assert (np.asarray(back.levels[1]) == 0).all()

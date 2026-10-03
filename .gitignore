@@ -22,9 +22,3 @@ data/cache/
 # 76 MB it saved was not worth two answers to one question.
 registry/data/*
 !registry/data/README.md
-
-# Working notes, kept locally rather than published. data-sources.md is
-# the exception: it records where each dataset came from, which belongs
-# with the code.
-docs/*
-!docs/data-sources.md

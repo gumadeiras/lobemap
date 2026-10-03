@@ -1,0 +1,77 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests and installed wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      # The viewer tests open napari.Viewer(show=False), which still needs a
+      # display with OpenGL: QT_QPA_PLATFORM=offscreen fails with
+      # "QOpenGLWidget is not supported". This installs Qt's X11 libraries
+      # and starts Xvfb, as napari's own CI does.
+      - name: Set up a headless display
+        uses: pyvista/setup-headless-display-action@v5
+        with:
+          qt: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # From the data-v1 release of gumadeiras/lobemap that
+      # registry/manifest.toml names. This step fails until that release is
+      # published, which is also a prerequisite for merging: a fetch that
+      # fails must fail the job, not let the data tests skip.
+      - name: Fetch the core data
+        run: uv run lobemap fetch --nostains
+
+      - name: Run tests
+        run: uv run pytest -q -rs
+
+      - name: Build the wheel
+        run: uv build --wheel --out-dir "$RUNNER_TEMP/dist"
+
+      # RELEASE.md step 7: a source checkout hides missing package data, so
+      # the installed wheel is run from outside the checkout. LOBEMAP_DATA
+      # lets `validate` count the compartments when the fetch above worked.
+      - name: Check the installed wheel outside the checkout
+        working-directory: ${{ runner.temp }}
+        env:
+          LOBEMAP_DATA: ${{ github.workspace }}/registry/data
+        run: |
+          uv venv wheel-env
+          uv pip install --python wheel-env/bin/python dist/*.whl
+          version="$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["project"]["version"])' "$GITHUB_WORKSPACE/pyproject.toml")"
+          actual="$(wheel-env/bin/lobemap --version)"
+          if [ "$actual" != "lobemap $version" ]; then
+            echo "::error::lobemap --version printed '$actual', expected 'lobemap $version'"
+            exit 1
+          fi
+          wheel-env/bin/lobemap spaces
+          wheel-env/bin/lobemap validate

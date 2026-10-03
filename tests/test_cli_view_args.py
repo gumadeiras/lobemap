@@ -15,13 +15,19 @@ from lobemap import cli
 
 @pytest.fixture
 def captured(monkeypatch):
-    """Intercept `run` so the CLI can be exercised without a GUI."""
+    """Intercept `run` so the CLI can be exercised without a GUI.
+
+    And the autofetch `view` does first. Left in, it downloaded the release
+    into the checkout on a fresh clone, and these tests passed whether the
+    download worked or not.
+    """
     calls: list[dict] = []
 
     def fake_run(registry_root, space=None, **kwargs):
         calls.append({"registry_root": registry_root, "space": space, **kwargs})
 
     monkeypatch.setattr("lobemap.viewer.app.run", fake_run)
+    monkeypatch.setattr("lobemap.cli._autofetch", lambda *args, **kwargs: None)
     return calls
 
 
@@ -33,13 +39,13 @@ def _view(captured, argv):
 
 
 def test_show_is_forwarded(captured):
-    assert _view(captured, ["FAFB14", "--show", "axes"])["show"] == ("axes",)
+    assert _view(captured, ["FAFB14", "--show", "neuropil"])["show"] == ("neuropil",)
 
 
 def test_show_is_repeatable(captured):
-    call = _view(captured, ["FAFB14", "--show", "axes",
+    call = _view(captured, ["FAFB14", "--show", "neuropil",
                             "--show", "fafb_stain"])
-    assert call["show"] == ("axes", "fafb_stain")
+    assert call["show"] == ("neuropil", "fafb_stain")
 
 
 def test_no_show_means_no_layers_forced(captured):
@@ -59,3 +65,27 @@ def test_cross_space_flags_are_gone(captured):
     for flag in ("--bridged", "--align-biology"):
         with _pytest.raises(SystemExit):
             cli.main(["view", "FAFB14", flag])
+
+
+@pytest.mark.parametrize("fetched", [False, True])
+def test_the_checked_registry_is_reused_unless_data_arrived(monkeypatch, captured, fetched):
+    """`view` loaded the registry to check the request and `run` loaded it
+    again, reading every atlas mesh twice before the window opened. Only a
+    fetch that brought new data makes the first one stale."""
+    from lobemap.core.registry import Registry
+
+    loads = []
+    real = Registry.load.__func__
+
+    def counted(cls, *args, **kwargs):
+        loads.append(args)
+        return real(cls, *args, **kwargs)
+
+    monkeypatch.setattr(Registry, "load", classmethod(counted))
+    monkeypatch.setattr("lobemap.cli._autofetch", lambda *args, **kwargs: fetched)
+    call = _view(captured, ["GRABE"])
+    assert len(loads) == 1
+    if fetched:
+        assert call["registry"] is None, "a registry loaded before the fetch was reused"
+    else:
+        assert isinstance(call["registry"], Registry)

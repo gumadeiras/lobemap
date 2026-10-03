@@ -29,6 +29,28 @@ from .model import (
 from .names import Nomenclature, parse_roi
 
 
+def default_registry_root() -> Path:
+    """Where the registry metadata lives when nothing names one.
+
+    A wheel carries it as package data, `lobemap/registry`; `pyproject.toml`
+    maps the checkout's `registry/` there without its `data/` or `sources/`.
+    A source checkout, editable install included, has no such directory
+    inside the package, and its registry is the one at the checkout root.
+    """
+    from importlib.resources import files
+
+    packaged = Path(str(files("lobemap") / "registry"))
+    if packaged.is_dir():
+        return packaged
+    return Path(__file__).resolve().parents[3] / "registry"
+
+
+def require_registry(root: Path) -> None:
+    """Raise `RegistryError` unless `root` holds a registry (a spaces table)."""
+    if not (Path(root) / "spaces.toml").is_file():
+        raise RegistryError(f"no registry at {root}: it has no spaces.toml")
+
+
 def default_data_root(root: Path) -> Path:
     """Where asset files live.
 
@@ -109,6 +131,10 @@ class Registry:
     def load(cls, root: str | Path, validate: bool = True,
              data_root: str | Path | None = None) -> Registry:
         r = cls(root, data_root=data_root)
+        # Every table is optional on its own, so a wrong path used to load
+        # as an empty registry and each command reported on nothing:
+        # `validate` said "ok: 0 spaces" and exited 0.
+        require_registry(r.root)
         r._load_spaces()
         r._load_assets()
         r.names = Nomenclature.load(r.root / "nomenclature.csv")
@@ -118,10 +144,7 @@ class Registry:
         return r
 
     def _load_spaces(self) -> None:
-        path = self.root / "spaces.toml"
-        if not path.exists():
-            return
-        for sid, body in _read_toml(path).items():
+        for sid, body in _read_toml(self.root / "spaces.toml").items():
             tmpl = body.get("flybrains_template") or None
             self.spaces[sid] = Space(
                 id=sid,
@@ -183,6 +206,10 @@ class Registry:
                 citation=body.get("citation", ""),
                 doi=body.get("doi", ""),
                 parent=body.get("parent") or None,
+                uncertain=tuple(
+                    (name, entry["note"], entry.get("reason", ""))
+                    for name, entry in body.get("uncertain", {}).items()
+                ),
             )
             self.atlases[aid] = replace(
                 atlas, compartments=self._compartments_for(atlas)
@@ -203,6 +230,12 @@ class Registry:
         # two conventions in one space: Benton's glomeruli reported side R
         # while sitting inside the shell named `AL_L`.
         default_side = asset.side if asset.side in ("L", "R") else None
+        doubts = {name: (note, why) for name, note, why in atlas.uncertain}
+        unknown = sorted(set(doubts) - set(ms.names))
+        if unknown:
+            # A misspelled name would otherwise drop its note silently.
+            raise RegistryError(f"{atlas.id}: [uncertain] names compartments the "
+                                f"atlas does not publish: {', '.join(unknown)}")
         out: list[Compartment] = []
         for i, name in enumerate(ms.names):
             _glom, side = parse_roi(name)
@@ -215,6 +248,8 @@ class Registry:
                     side=side,
                     canonical=corr.canonical if corr else (),
                     relation=corr.relation if corr else "absent",
+                    uncertain=doubts.get(name, ("", ""))[0],
+                    uncertain_reason=doubts.get(name, ("", ""))[1],
                 )
             )
         return tuple(out)

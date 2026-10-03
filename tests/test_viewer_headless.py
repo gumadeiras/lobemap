@@ -6,23 +6,12 @@ either is absent.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
-REGISTRY = Path(__file__).resolve().parents[1] / "registry"
-
 pytest.importorskip("napari")
 
-
-@pytest.fixture(scope="module")
-def registry():
-    from lobemap.core.registry import Registry
-
-    if not (REGISTRY / "data").is_dir():
-        pytest.skip("no ingested data")
-    return Registry.load(REGISTRY)
+pytestmark = pytest.mark.requires_data
 
 
 @pytest.fixture(scope="module")

@@ -16,6 +16,8 @@ from __future__ import annotations
 import numpy as np
 
 from ..core.meshfmt import MeshSet
+from . import napari_private
+from .view import reflect_vertices
 
 
 #: A qualitative palette that stays distinguishable at ~60 entries by cycling
@@ -176,77 +178,176 @@ class AtlasSurface:
         opacity: float = 0.75,
         blending: str = "translucent",
         compact_delay_ms: int = 250,
+        display_names: list[str] | None = None,
+        shading: str = "smooth",
+        visible: bool = True,
+        layer=None,
+        mirror: tuple[int, float] | None = None,
     ) -> None:
+        """`layer` is a hidden Surface layer to take over rather than add one:
+        a stand-in a scene added for this mesh before it was read
+        (`deferred`). It is given everything a new layer would be.
+        `mirror` is (axis, center) for a surface built while the view is
+        reflected (`set_mirror`)."""
         self.viewer = viewer
         self.meshset = meshset
         self.name = name
         n = meshset.n_compartments
+        #: What a reader sees for each compartment: its published name, with
+        #: any doubt about it (`Compartment.label`). `meshset.names` stays the
+        #: identity every lookup uses.
+        self.display_names = list(meshset.names if display_names is None
+                                  else display_names)
         self.colors = categorical_colors(n) if colors is None else colors
         self.selection: set[int] = set(
             range(n) if selection is None else selection
         )
         self.compact_delay_ms = compact_delay_ms
         self._timer = None
-        #: (axis, centre) while the view is reflected, else None.
-        self._mirror: tuple[int, float] | None = None
+        #: (axis, center) while the view is reflected, else None; see
+        #: `_present`.
+        self._mirror = None if mirror is None else (int(mirror[0]), float(mirror[1]))
+        #: The layer that draws this selection in 2D -- the slice contours --
+        #: once the display mode pairs them. See `sync`.
+        self.twin = None
+        #: Called after napari's own visibility toggle changed the selection,
+        #: so the compartment table can follow it.
+        self.listeners: list = []
+        #: The selection an eye toggle hid, given back when it is shown again.
+        self._stashed: set[int] | None = None
+        self._syncing = False
         self._resident: list[int] = sorted(self.selection)
         v, f, vals = meshset.select(sorted(self.selection))
         v, f = self._present(v, f)
-        self.layer = viewer.add_surface(
-            (v, f, vals),
-            name=name,
-            colormap=step_colormap(self.colors, name=f"{name}-colors"),
-            contrast_limits=contrast_limits_for(n),
-            opacity=opacity,
-            shading="smooth",
-            blending=blending,
-        )
+        settings = {
+            "colormap": step_colormap(self.colors, name=f"{name}-colors"),
+            "contrast_limits": contrast_limits_for(n),
+            "opacity": opacity,
+            # Given here rather than set afterwards, so vispy never computes
+            # the vertex normals a shell drawn with "none" does not use: they
+            # are most of the cost of showing a large mesh in 3D, 0.45 s for
+            # the hemibrain neuropils.
+            "shading": shading,
+            "blending": blending,
+        }
+        if layer is None:
+            self.layer = viewer.add_surface(
+                (v, f, vals), name=name, **settings,
+                # A scene makes its surfaces hidden and lets `sync` show each
+                # in the mode that draws it: napari slices a visible layer as
+                # it is added, so a surface made visible was sliced for nothing
+                # in 2D, and in 3D had its normals computed twice.
+                visible=visible,
+            )
+        else:
+            # Hidden first, and shaded before it has the mesh, for the same
+            # reasons; a stand-in switched on is being built to be shown.
+            layer.visible = False
+            layer.shading = settings.pop("shading")
+            layer.data = (v, f, vals)
+            layer.name = name
+            for key, value in settings.items():
+                setattr(layer, key, value)
+            layer.visible = visible
+            self.layer = layer
         self.layer.metadata["lobemap"] = {"meshset": meshset, "kind": "atlas"}
+        self.layer.events.visible.connect(self._on_eye)
+        #: Whether napari's vispy node still holds this layer's 3D build of
+        #: its current data; see `hide_mesh`.
+        self._built_3d = False
+        self.layer.events.set_data.connect(self._on_built)
+        self.layer.events.data.connect(self._on_changed)
+        for setting in ("affine", "scale", "translate", "rotate", "shear", "shading"):
+            getattr(self.layer.events, setting).connect(self._on_set_in_2d)
+
+    # -- the 3D build, kept through 2D -------------------------------------
+    #
+    # napari rebuilds a Surface's vispy mesh every time the layer is shown,
+    # and vispy computes its vertex normals anew for it: 0.21 s for GRABE's
+    # 1.57 M faces on every entry into 3D, for a mesh that did not change.
+    # So the mesh is hidden before napari slices it for 2D (`hide_mesh`),
+    # which leaves the node its 3D build, and is shown again without a
+    # refresh when nothing it was built from has changed since.
+
+    def _on_built(self, event=None) -> None:
+        self._built_3d = self.viewer.dims.ndisplay == 3
+
+    def _on_changed(self, event=None) -> None:
+        # A visible layer is rebuilt by napari straight after; a hidden one
+        # is not, so the node is left with the old mesh.
+        if not self.layer.visible:
+            self._built_3d = False
+
+    def _on_set_in_2d(self, event=None) -> None:
+        # napari sets these on the node for the displayed axes: a transform,
+        # and the shading, which a 2D node has none of, so a mesh restyled in
+        # 2D would come back into 3D unlit.
+        if self.viewer.dims.ndisplay != 3:
+            self._built_3d = False
+
+    def hide_mesh(self) -> None:
+        """Hide the mesh before napari slices it for 2D, keeping its 3D build.
+
+        Only a mesh with a twin: one without draws in 2D itself.
+        """
+        if (self.twin is None or not self.layer.visible
+                or self.layer not in self.viewer.layers):
+            return
+        self._syncing = True
+        try:
+            with napari_private.no_scene_update(self.viewer, self.layer):
+                self.layer.visible = False
+        finally:
+            self._syncing = False
+
+    def _show_mesh(self) -> None:
+        if self._built_3d and self.viewer.dims.ndisplay == 3:
+            with napari_private.shown_unsliced(self.layer):
+                self.layer.visible = True
+        else:
+            self.layer.visible = True
 
     # -- orientation -----------------------------------------------------
 
     def _present(self, vertices, faces):
-        """Geometry as UPLOADED: reflected, if the view is reflected.
+        """Geometry as UPLOADED: reflected, with its winding reversed, while
+        the view is reflected.
 
-        The reflection is applied to the vertices here rather than to
-        `layer.affine`, and the winding is reversed along with it. Both
-        are needed, for one reason.
+        A surface reflects its own vertices rather than riding on
+        `layer.affine` as the images and contours do. napari loads the
+        affine into the vispy NODE transform, and a determinant -1 transform
+        there reverses the rasterized winding, which flips
+        `gl_FrontFacing`; vispy's smooth shading negates the normal by
+        exactly that (`normal = gl_FrontFacing ? normal : -normal`), so
+        every glomerulus came out lit from inside. Reflecting the vertices
+        keeps the node transform proper, and reversing the winding puts
+        back the orientation the reflection took away.
 
-        napari loads a layer's affine into the vispy NODE transform. A
-        determinant -1 transform there reverses the rasterized winding,
-        which flips `gl_FrontFacing`, and vispy's smooth shading path
-        negates the normal by exactly that:
+        Re-winding ALONE, as this used to, does nothing visible: it flips
+        the normals and `gl_FrontFacing` together and they cancel. Measured
+        on GRABE in 3D, the node's signed volume and share of outward
+        normals: +2.672e+05 and 76.8% unmirrored,
+        -2.672e+05 and 23.2% under the affine mirror re-wound, +2.672e+05
+        and 76.8% with the vertices reflected.
 
-            normal = gl_FrontFacing ? normal : -normal;
-
-        so every glomerulus comes out lit from inside. Reflecting the
-        vertices instead keeps the node transform proper and the facing
-        correct; reversing the winding then puts back the orientation
-        the reflection took away.
-
-        It is also why re-winding ALONE does nothing visible: it flips
-        the MeshData normal and `gl_FrontFacing` together, and they
-        cancel in that expression. Measured on GRABE in 3D, node signed
-        volume and the share of outward normals:
-
-            unmirrored                  +2.672e+05   76.8% outward
-            affine mirror, re-wound     -2.672e+05   23.2% outward
-            affine mirror, not re-wound +2.672e+05   76.8% outward
-
-        The MeshSet is untouched throughout. This changes only what is
-        handed to napari, so the data on disk and every measurement
-        taken from it are unaffected.
+        Applied wherever geometry is uploaded, because `compact` re-uploads
+        straight from the MeshSet on a debounce. The MeshSet itself is never
+        touched, so the data and every measurement taken from it are not.
         """
         if self._mirror is None:
             return vertices, faces
-        axis, centre = self._mirror
-        v = np.array(vertices, dtype=np.float32, copy=True)
-        v[:, axis] = np.float32(2.0 * centre) - v[:, axis]
-        return v, np.ascontiguousarray(faces[:, ::-1])
+        axis, center = self._mirror
+        return (reflect_vertices(vertices, center, axis),
+                np.ascontiguousarray(faces[:, ::-1]))
 
-    def set_mirror(self, axis: int | None, centre: float = 0.0) -> None:
-        """Reflect this surface about `centre` on `axis`, or stop."""
-        want = None if axis is None else (int(axis), float(centre))
+    @property
+    def mirrored(self) -> bool:
+        """Whether this surface is drawn reflected."""
+        return self._mirror is not None
+
+    def set_mirror(self, axis: int | None, center: float = 0.0) -> None:
+        """Reflect this surface about `center` along `axis`, or stop."""
+        want = None if axis is None else (int(axis), float(center))
         if want == self._mirror:
             return
         self._mirror = want
@@ -255,6 +356,8 @@ class AtlasSurface:
         v, f, vals = self.meshset.select(self._resident)
         v, f = self._present(v, f)
         self.layer.data = (v, f, vals)
+        # Moved, not shrunk: a hidden layer would keep its old extent.
+        napari_private.clear_extent(self.layer)
 
     # -- selection -------------------------------------------------------
     #
@@ -269,16 +372,23 @@ class AtlasSurface:
     # still matters: while hidden geometry is resident it is invisible but
     # still absorbs the 3D pick ray, so `name_at_value` filters to the
     # current selection to cover the transient.
+    #
+    # The selection is also the ONLY record of what is shown. A layer is
+    # visible exactly when something is selected and the current mode draws
+    # it, so a checked row is a drawn glomerulus in either mode, and there
+    # is no remembered visibility to go stale across 2D/3D switches.
 
     def set_visible(self, index: int, visible: bool) -> None:
         if visible:
             self.selection.add(index)
         else:
             self.selection.discard(index)
+        self._stashed = None
         self.refresh()
 
     def set_selection(self, indices) -> None:
         self.selection = set(indices)
+        self._stashed = None
         self.refresh()
 
     def show_all(self) -> None:
@@ -289,17 +399,93 @@ class AtlasSurface:
 
     def refresh(self) -> None:
         """Repaint now (cheap); compact the geometry shortly (expensive)."""
-        self._set_visible_if_changed(bool(self.selection))
+        self.sync(redraw=True)
         if self.selection:
             self._apply_alpha()
         self._schedule_compact()
 
-    def _set_visible_if_changed(self, value: bool) -> None:
-        # napari does NOT short-circuit a no-op write to `visible`: assigning
-        # True to an already-visible layer costs ~70 ms here, which dwarfs
-        # everything else in a toggle. Guard it.
-        if self.layer.visible != value:
-            self.layer.visible = value
+    def pair(self, twin) -> None:
+        """Let `twin` -- a contour overlay -- draw this selection in 2D.
+
+        Visibility is left to the next `sync`, which the display mode runs
+        once it has put the slider on the right axis and plane.
+        """
+        if self.twin is twin:
+            return
+        self.twin = twin
+        twin.layer.events.visible.connect(self._on_eye)
+
+    def draws_now(self) -> bool:
+        """Whether this layer, rather than its twin, draws in this mode."""
+        return self.twin is None or self.viewer.dims.ndisplay == 3
+
+    def mode_layer(self):
+        """The layer the current mode draws this selection with."""
+        return self.layer if self.draws_now() else self.twin.layer
+
+    def sync(self, redraw: bool = False) -> None:
+        """Show the selection in whichever layer the current mode draws.
+
+        Each visibility is written only when it changes: napari does NOT
+        short-circuit a no-op write to `visible`, and assigning True to an
+        already-visible layer cost 40-200 ms here, which was nearly all of
+        a row toggle. `redraw` recomputes the twin's contours for a changed
+        selection; a twin switched on redraws itself.
+        """
+        shown = bool(self.selection)
+        mesh = shown and self.draws_now()
+        self._syncing = True
+        try:
+            if self.layer.visible != mesh:
+                if mesh:
+                    self._show_mesh()
+                else:
+                    self.layer.visible = False
+            twin = self.twin
+            if twin is not None:
+                twin.selection = set(self.selection)
+                want = shown and not mesh
+                if twin.layer.visible != want:
+                    twin.layer.visible = want
+                elif want and redraw:
+                    twin.refresh()
+        finally:
+            self._syncing = False
+
+    def _on_eye(self, event=None) -> None:
+        """napari's visibility toggle, read as a change to the selection.
+
+        Hiding the layer the mode draws unchecks everything, and remembers
+        it; showing it again gives that back, or everything if there was
+        nothing to give. Without this the eye and the table disagreed.
+        """
+        if self._syncing:
+            return
+        layer = self.mode_layer()
+        source = getattr(event, "source", layer)
+        if source is not layer:
+            # The eye of the layer this mode does not draw -- the mesh in 2D,
+            # the contours in 3D -- still means this atlas. Turned on, it
+            # shows the atlas where the mode draws it and goes back off;
+            # ignored, it drew the whole mesh over a slice with no row checked.
+            if not source.visible:
+                return
+            if self.selection:
+                self.sync()
+                return
+            showing = True
+        elif layer.visible == bool(self.selection):
+            return
+        else:
+            showing = layer.visible
+        if showing:
+            restored = self._stashed or set(range(self.meshset.n_compartments))
+            self.selection, self._stashed = set(restored), None
+        else:
+            self._stashed, self.selection = set(self.selection), set()
+        self.refresh()
+        for listener in list(self.listeners):
+            listener()
 
     def _apply_alpha(self) -> None:
         colors = self.colors.copy()
@@ -322,22 +508,93 @@ class AtlasSurface:
             self._timer.timeout.connect(self.compact)
         self._timer.start(self.compact_delay_ms)
 
+    def stop(self) -> None:
+        """Cancel a pending compaction, for a scene being torn down."""
+        if self._timer is not None:
+            self._timer.stop()
+
     def compact(self) -> None:
-        """Upload only the selected compartments. Restores exact picking."""
+        """Upload only the selected compartments. Restores exact picking.
+
+        Geometry only. It used to switch the layer back on as well, so in
+        2D the mesh reappeared under the slice a quarter second after any
+        row change; visibility belongs to `sync` alone.
+        """
         want = sorted(self.selection)
-        if want == self._resident:
-            return
-        if not want:
-            self._set_visible_if_changed(False)
+        if not want or want == self._resident:
             return
         v, f, vals = self.meshset.select(want)
         v, f = self._present(v, f)
         self.layer.data = (v, f, vals)
         self._resident = want
-        self._set_visible_if_changed(True)
         self._apply_alpha()
 
     # -- identification --------------------------------------------------
+
+    def pick(self, position, view_direction, dims_displayed) -> int | None:
+        """The shown compartment a view ray through `position` meets first.
+
+        napari's own Surface pick tests every triangle of the layer -- about
+        40 ms for Benton's 298k -- and hovering asks on every mouse move.
+        Bounding boxes first: only the compartments whose box the ray enters
+        are tested, nearest box first, stopping once no remaining box starts
+        nearer than a hit already found. Only selected compartments count,
+        so geometry awaiting compaction cannot answer for a hidden one.
+        """
+        from napari.utils.geometry import find_nearest_triangle_intersection
+
+        if view_direction is None or not self.selection:
+            return None
+        start, end = self.layer.get_ray_intersections(
+            position, view_direction, list(dims_displayed), world=True
+        )
+        if start is None or end is None:
+            return None
+        start = np.asarray(start, dtype=float)
+        direction = np.asarray(end, dtype=float) - start
+        length = float(np.linalg.norm(direction))
+        if length == 0.0:
+            return None
+        direction /= length
+        if self._mirror is not None:
+            # The ray is in the uploaded geometry's coordinates, reflected;
+            # the boxes and triangles below are the MeshSet's (`_present`).
+            axis, center = self._mirror
+            start[axis] = 2.0 * center - start[axis]
+            direction[axis] = -direction[axis]
+        lo, hi = self._boxes()
+        indices = np.array(sorted(self.selection))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            near = (lo[indices] - start) / direction
+            far = (hi[indices] - start) / direction
+        enter = np.nanmax(np.minimum(near, far), axis=1)
+        leave = np.nanmin(np.maximum(near, far), axis=1)
+        crossed = leave >= np.maximum(enter, 0.0)
+        best, best_t = None, np.inf
+        for j in np.flatnonzero(crossed)[np.argsort(enter[crossed])]:
+            if enter[j] > best_t:
+                break
+            v, f = self.meshset.compartment(int(indices[j]))
+            hit, point = find_nearest_triangle_intersection(start, direction, v[f])
+            if hit is None:
+                continue
+            t = float(np.dot(np.asarray(point) - start, direction))
+            if t < best_t:
+                best, best_t = int(indices[j]), t
+        return best
+
+    def _boxes(self) -> tuple[np.ndarray, np.ndarray]:
+        """(K, 3) lowest and highest vertex of each compartment, cached."""
+        if getattr(self, "_box_cache", None) is None:
+            v = np.asarray(self.meshset.vertices, dtype=float)
+            starts = np.asarray(self.meshset.vertex_offsets[:-1])
+            lo = np.full((self.meshset.n_compartments, 3), np.nan)
+            hi = np.full((self.meshset.n_compartments, 3), np.nan)
+            filled = np.diff(self.meshset.vertex_offsets) > 0
+            lo[filled] = np.minimum.reduceat(v, starts[filled], axis=0)
+            hi[filled] = np.maximum.reduceat(v, starts[filled], axis=0)
+            self._box_cache = (lo, hi)
+        return self._box_cache
 
     def name_at_value(self, value: float | None) -> str | None:
         """Map a picked vertex value back to a compartment name.

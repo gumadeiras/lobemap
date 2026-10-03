@@ -9,25 +9,13 @@ sort rather than before.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-REGISTRY = Path(__file__).resolve().parents[1] / "registry"
 pytest.importorskip("napari")
 
 
-@pytest.fixture(scope="module")
-def registry():
-    from lobemap.core.registry import Registry
-
-    if not (REGISTRY / "data").is_dir():
-        pytest.skip("no ingested data")
-    return Registry.load(REGISTRY)
-
-
 @pytest.fixture
-def tab(registry):
+def tab(core_data, registry):
     import napari
 
     from lobemap.viewer.app import build_scene
@@ -52,6 +40,36 @@ def _col(tab, name):
     return COLUMNS.index(name)
 
 
+def _click(tab, text):
+    """Press one of the tab's buttons, the way a user does."""
+    from qtpy.QtWidgets import QPushButton
+
+    buttons = {b.text(): b for b in tab.findChildren(QPushButton)}
+    assert text in buttons, f"no {text!r} button in {sorted(buttons)}"
+    buttons[text].click()
+
+
+def _drawn(tab) -> set[int]:
+    """The compartments the canvas shows, not the ones the panel holds.
+
+    In 2D the cross-sections on the contour layer; in 3D the mesh's
+    resident compartments that its colormap does not make transparent.
+    """
+    import numpy as np
+
+    if tab.surface.viewer.dims.ndisplay == 2 and tab.contour is not None:
+        from viewer_harness import contour_loops
+
+        return {owner for owner, _loop in contour_loops(tab.contour)}
+    layer = tab.surface.layer
+    if not layer.visible:
+        return set()
+    values = np.unique(np.asarray(layer.data[2]))
+    lo, hi = layer.contrast_limits
+    alpha = layer.colormap.map((values - lo) / (hi - lo))[:, 3]
+    return {round(float(v)) for v, a in zip(values, alpha) if a > 0}
+
+
 def test_it_opens_sorted_by_glomerulus(tab):
     from lobemap.viewer.panel import NAME_COL, _natural_key
 
@@ -61,7 +79,7 @@ def test_it_opens_sorted_by_glomerulus(tab):
     assert tab.table.isSortingEnabled()
 
 
-def test_numbers_sort_naturally(tab):
+def test_numbers_sort_naturally():
     """DA10 after DA9, which plain string order gets wrong."""
     from lobemap.viewer.panel import _natural_key
 
@@ -107,20 +125,23 @@ def test_highlight_finds_the_row_for_an_index(tab):
 
 def test_show_none_then_all_round_trips(tab):
     n = tab.table.rowCount()
-    tab._none()
+    _click(tab, "Show none")
     assert tab.surface.selection == set()
-    tab._all()
+    assert _drawn(tab) == set(), "Show none left glomeruli on screen"
+    _click(tab, "Show all")
     assert tab.surface.selection == set(range(n))
+    assert _drawn(tab) == set(range(n)), "Show all did not draw them all"
 
 
 def test_filtered_only_selects_the_right_compartments(tab):
     """The filter hides rows; the selection must be in index space."""
-    tab._apply_filter("DA1")
-    tab._filtered_only()
-    chosen = {tab.surface.meshset.names[i] for i in tab.surface.selection}
+    tab.filter.setText("DA1")
+    _click(tab, "Filtered")
+    chosen = {tab.surface.meshset.names[i] for i in _drawn(tab)}
     assert chosen, "nothing matched DA1"
     assert all("da1" in n.lower() for n in chosen), chosen
-    tab._apply_filter("")
+    assert _drawn(tab) == tab.surface.selection
+    tab.filter.setText("")
 
 
 def test_the_fill_column_drives_the_contour_overlay(tab):
@@ -169,7 +190,7 @@ def test_annotation_columns_are_populated(tab):
 
 
 @pytest.fixture
-def fafb_tabs(registry):
+def fafb_tabs(core_data, registry):
     """FAFB has both kinds of layer: one atlas and one neuropil set."""
     import napari
 
@@ -268,40 +289,49 @@ def test_a_hex_color_spec_does_not_break_filling():
         assert all(0.0 <= v <= 1.0 for v in (r, g, b, a)), spec
 
 
-def test_fill_all_works_on_a_neuropil_layer(fafb_tabs):
-    """End to end, in 2D, where the contours actually draw."""
-    import numpy as np
+def _fill_alphas(contour) -> set[float]:
+    """The alpha of every filled triangle the contour's mesh visual draws."""
+    from viewer_harness import assert_renders_loops, rendered_mesh
 
-    tab = fafb_tabs["fafb_neuropil"]
+    assert_renders_loops(contour)
+    _vertices, faces, colors = rendered_mesh(contour)
+    alphas = {round(float(a), 4) for a in colors[faces[:, 0], 3]} if len(faces) else set()
+    return alphas - {1.0}
+
+
+def test_fill_all_works_on_a_neuropil_layer(session):
+    """End to end, in 2D, where the contours actually draw."""
+
+    viewer, sess = session
+    tab = sess.panel.tabs["fafb_neuropil"]
     if tab.contour is None:
         pytest.skip("no contour overlay")
-    tab.contour.layer.visible = True
-    tab.contour.refresh()
+    viewer.dims.ndisplay = 2
+    _click(tab, "Show all")
+    assert _drawn(tab), "the slice cuts no neuropil"
 
-    tab._fill_for_shown()
+    _click(tab, "Fill all")
     assert tab.contour.filled == set(tab.surface.selection)
-    if len(tab.contour.layer.data):
-        kinds = {getattr(s, "name", str(s)).lower()
-                 for s in tab.contour.layer.shape_type}
-        assert kinds == {"polygon"}, kinds
-        faces = np.asarray(tab.contour.layer.face_color)
-        assert np.allclose(faces[:, 3], tab.contour.FILL_ALPHA)
+    assert _fill_alphas(tab.contour) == {round(tab.contour.FILL_ALPHA, 4)}
 
-    tab._no_fill()
+    _click(tab, "Fill none")
     assert tab.contour.filled == set()
+    assert _fill_alphas(tab.contour) == set()
 
 
-def test_fill_buttons_track_the_checkboxes(fafb_tabs):
+def test_fill_buttons_track_the_checkboxes(session):
     from qtpy.QtCore import Qt
 
     from lobemap.viewer.panel import FILL_COL
 
-    tab = fafb_tabs["benton2025"]
-    tab._fill_for_shown()
+    viewer, sess = session
+    viewer.dims.ndisplay = 2
+    tab = sess.panel.tabs["benton2025"]
+    _click(tab, "Fill all")
     states = {tab.table.item(r, FILL_COL).checkState()
               for r in range(tab.table.rowCount())}
     assert states == {Qt.Checked}, "Fill all left boxes unticked"
-    tab._no_fill()
+    _click(tab, "Fill none")
     states = {tab.table.item(r, FILL_COL).checkState()
               for r in range(tab.table.rowCount())}
     assert states == {Qt.Unchecked}, "Fill none left boxes ticked"
@@ -382,6 +412,7 @@ def test_a_bare_name_matching_its_canonical_is_not_red(tab):
     assert da1.foreground().color().name() != DISAGREE_COLOR
 
 
+@pytest.mark.requires_data
 def test_the_canonical_column_only_appears_where_it_says_something(registry):
     """Per atlas: S12 shares a space with two that disagree but has none
     of its own, so it does not carry the column."""
@@ -419,10 +450,10 @@ def test_the_canonical_column_only_appears_where_it_says_something(registry):
 def test_the_filter_reaches_every_text_column(tab):
     """Not just name/canonical/side: the annotation columns too."""
     def shown(needle):
-        tab._apply_filter(needle)
+        tab.filter.setText(needle)
         n = sum(1 for r in range(tab.table.rowCount())
                 if not tab.table.isRowHidden(r))
-        tab._apply_filter("")
+        tab.filter.setText("")
         return n
 
     assert shown("Or67d") == 1, "receptor column not searched"
@@ -434,7 +465,7 @@ def test_the_filter_reaches_every_text_column(tab):
 
 
 @pytest.fixture
-def session(registry):
+def session(core_data, registry):
     """A full FAFB session, so the display-mode hook is installed."""
     import napari
 
@@ -464,11 +495,11 @@ def test_showing_in_2d_draws_contours_not_meshes(session, layer):
         pytest.skip("no contour overlay")
     viewer.dims.ndisplay = 2
 
-    tab._all()
+    _click(tab, "Show all")
     assert tab.surface.layer.visible is False, "mesh switched on in 2D"
     assert tab.contour.layer.visible is True, "contours left off in 2D"
 
-    tab._none()
+    _click(tab, "Show none")
     assert tab.surface.layer.visible is False
     assert tab.contour.layer.visible is False
 
@@ -485,7 +516,7 @@ def test_a_single_checkbox_obeys_the_mode_too(session, layer):
     if tab.contour is None:
         pytest.skip("no contour overlay")
     viewer.dims.ndisplay = 2
-    tab._none()
+    _click(tab, "Show none")
 
     tab.table.item(0, VISIBLE_COL).setCheckState(Qt.Checked)
     assert tab.surface.layer.visible is False, "mesh switched on in 2D"
@@ -496,8 +527,9 @@ def test_3d_still_shows_the_mesh(session):
     viewer, sess = session
     tab = sess.panel.tabs["benton2025"]
     viewer.dims.ndisplay = 3
-    tab._all()
+    _click(tab, "Show all")
     assert tab.surface.layer.visible is True
+    assert _drawn(tab) == set(range(tab.table.rowCount()))
     if tab.contour is not None:
         assert tab.contour.layer.visible is False
 
@@ -508,6 +540,7 @@ def test_3d_still_shows_the_mesh(session):
 # sits underneath them, which also made a neuropil shell tab 0. The panel
 # then opened on the one tab with no glomeruli behind it.
 
+@pytest.mark.requires_data
 @pytest.mark.parametrize("space,expect", [
     ("JRCFIB2018F", "neuprint_hemibrain"),   # three atlases; spaces.toml picks
     ("FAFB14", "benton2025"),                # one atlas, behind fafb_neuropil
@@ -532,6 +565,7 @@ def test_it_opens_on_the_spaces_primary_atlas(registry, space, expect):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_the_open_tab_is_the_atlas_that_is_drawn(registry):
     """The panel and the canvas must agree on which atlas is showing."""
     import napari
@@ -555,6 +589,7 @@ def test_the_open_tab_is_the_atlas_that_is_drawn(registry):
         viewer.close()
 
 
+@pytest.mark.requires_data
 def test_reference_tabs_come_after_every_atlas(registry):
     """Neuropil and brain shells read last, whatever order the scene built.
 

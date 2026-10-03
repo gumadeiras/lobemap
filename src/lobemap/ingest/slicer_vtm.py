@@ -22,9 +22,9 @@ from ..core.meshfmt import MeshSet
 from ..core.meshrepair import RepairReport, repair_meshset
 from ..core.units import scale_to_um, verify_extent
 
-#: Plausible size of one glomerulus, in micrometers.
+#: Plausible size of one glomerulus, in micrometers. Used to CHECK the units
+#: the recipe declares, never to choose them.
 COMPARTMENT_EXTENT_UM = (4.0, 45.0)
-#: Used to CHECK the units the recipe declares, never to choose them.
 
 #: RAS -> LPS: negate the first two axes. See module docstring.
 RAS_TO_LPS = np.array([-1.0, -1.0, 1.0])

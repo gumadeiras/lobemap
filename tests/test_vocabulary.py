@@ -13,14 +13,8 @@ from __future__ import annotations
 
 import pytest
 
-from lobemap.core.registry import Registry
 
-
-@pytest.fixture(scope="module")
-def registry():
-    return Registry.load("registry", validate=False)
-
-
+@pytest.mark.requires_data
 def test_each_space_with_atlases_has_a_vocabulary(registry):
     for space_id in registry.spaces:
         atlases = registry.atlases_in_space(space_id)
@@ -31,6 +25,7 @@ def test_each_space_with_atlases_has_a_vocabulary(registry):
             assert vocabulary == [], f"{space_id} has no atlases but has names"
 
 
+@pytest.mark.requires_data
 def test_a_vocabulary_covers_its_own_atlases_only(registry):
     """A space's names come from its atlases and nowhere else."""
     for space_id in registry.spaces:
@@ -41,6 +36,7 @@ def test_a_vocabulary_covers_its_own_atlases_only(registry):
         assert set(registry.vocabulary(space_id)) == expected
 
 
+@pytest.mark.requires_data
 def test_vocabularies_are_independent(registry):
     """Spaces may disagree, and that is the point.
 
@@ -56,6 +52,7 @@ def test_vocabularies_are_independent(registry):
     )
 
 
+@pytest.mark.requires_data
 def test_the_vocabulary_is_stable(registry):
     """Color is assigned by position, so the order cannot wobble."""
     for space_id in registry.spaces:

@@ -10,13 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from lobemap.core.registry import Registry
 from lobemap.viewer.app import load_space
 
-
-@pytest.fixture(scope="module")
-def registry():
-    return Registry.load("registry")
+pytestmark = pytest.mark.requires_data
 
 
 def _handler_count(viewer):

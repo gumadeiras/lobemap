@@ -36,6 +36,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .atomic import replacing
+
 NGFF_VERSION = "0.4"
 #: Mirrors imagefmt's, recorded in the group's own attributes.
 FORMAT_VERSION = 1
@@ -192,37 +194,45 @@ def save_zarr(volume, path: str | Path, chunks=DEFAULT_CHUNK,
     Levels are built from the level below rather than from level 0, so the
     whole pyramid costs one extra pass over the data rather than one per
     level, and nothing larger than a slab is ever resident.
+
+    The store is built beside `path` and renamed into place at the end. An
+    interrupted write therefore leaves no store, rather than one that opens
+    and reads zeros for every chunk it did not reach.
     """
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     compressor = default_compressor() if compressor is None else compressor
     levels = pyramid_levels(volume.shape, min_extent)
 
-    group = _open_group(path, "w")
-    arrays = []
-    for level, (shape, _factors) in enumerate(levels):
-        arr = _create(group, str(level), shape, volume.data.dtype, chunks,
-                      compressor)
-        if level == 0:
-            step = max(1, (block_planes // max(1, chunks[0])) * chunks[0])
-            for a in range(0, int(shape[0]), step):
-                b = min(int(shape[0]), a + step)
-                arr[a:b] = np.asarray(volume.data[a:b])
-        else:
-            prev_shape = levels[level - 1][0]
-            stride = tuple(p // n for p, n in zip(prev_shape, shape))
-            downsample(arrays[-1], arr, stride, block_planes)
-        arrays.append(arr)
+    with replacing(path) as scratch:
+        group = _open_group(scratch, "w")
+        arrays = []
+        for level, (shape, factors) in enumerate(levels):
+            arr = _create(group, str(level), shape, volume.data.dtype, chunks,
+                          compressor)
+            if level == 0:
+                step = max(1, (block_planes // max(1, chunks[0])) * chunks[0])
+                for a in range(0, int(shape[0]), step):
+                    b = min(int(shape[0]), a + step)
+                    arr[a:b] = np.asarray(volume.data[a:b])
+            else:
+                # The step the metadata records, not the shape ratio: a
+                # size-3 axis halves to 1, and 3 // 1 would average three
+                # voxels under a transform that says two.
+                prev_factors = levels[level - 1][1]
+                stride = tuple(f // p for f, p in zip(factors, prev_factors))
+                downsample(arrays[-1], arr, stride, block_planes)
+            arrays.append(arr)
 
-    meta = dict(volume.meta)
-    meta.setdefault("format_version", FORMAT_VERSION)
-    # `data_file` names the .npy sidecar of the npz format. Carrying it into a
-    # zarr store would point a reader at a file that is not there.
-    meta.pop("data_file", None)
-    group.attrs["multiscales"] = [multiscale_metadata(
-        levels, volume.voxel_um, volume.origin_um, meta.get("source", path.stem)
-    )]
-    group.attrs["lobemap"] = meta
+        meta = dict(volume.meta)
+        meta.setdefault("format_version", FORMAT_VERSION)
+        # `data_file` names the .npy sidecar of the npz format. Carrying it
+        # into a zarr store would point a reader at a file that is not there.
+        meta.pop("data_file", None)
+        group.attrs["multiscales"] = [multiscale_metadata(
+            levels, volume.voxel_um, volume.origin_um,
+            meta.get("source", path.stem)
+        )]
+        group.attrs["lobemap"] = meta
     return path
 
 

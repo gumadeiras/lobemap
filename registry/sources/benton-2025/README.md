@@ -19,7 +19,7 @@ Builds `benton2025_glomeruli`, the FAFB14 atlas.
 - `BentonDatasetEV2/DatasetEV2-label.nrrd` — the label volume. Not used: the
   atlas is surfaced from the meshes above.
 - `44319_2025_476_MOESM2_ESM.xlsx` — Dataset EV1.
-- `44319_2025_476_MOESM3_ESM.zip` — Dataset EV3.
+- `44319_2025_476_MOESM3_ESM.zip` — Dataset EV2, the archive that holds the files above.
 - `*.webp`, `*.jpg.webp` — figure panels, kept as an orientation reference.
 
 Dataset EV2 revises the antennal-lobe meshes of Bates & Schlegel 2020, which is

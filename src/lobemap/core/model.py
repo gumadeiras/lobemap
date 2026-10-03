@@ -107,7 +107,7 @@ def anatomical_rotation_matrix(space):
 
     Its columns are the anterior, dorsal and lateral directions, so this
     is also exactly what the axis triad needs: arrow i is drawn along
-    +e_i and lands on column i, the pole `axis_labels_for` writes on it.
+    +e_i and lands on column i, the pole `anatomical_triad` names for it.
     """
     import numpy as np
 
@@ -226,19 +226,20 @@ def flip_side(side):
         return "L"
     return side
 
-#: How a compartment corresponds to a canonical name.
-#: How an atlas's compartment relates to the canonical vocabulary, which is
-#: Benton 2025's published names. Read from the atlas's point of view:
+#: How an atlas's compartment relates to the canonical vocabulary of its
+#: space (`Registry.vocabulary`; there is no registry-wide one). Read from the
+#: atlas's point of view:
 #:
 #:   exact    one compartment, one canonical name, same name
 #:   renamed  one compartment, one canonical name, different name
-#:            (Bates VC3l is canonical VC3 -- Schlegel et al. 2021)
+#:            (hemibrain VC3l is canonical VC3 -- Schlegel et al. 2021)
 #:   split    several compartments share ONE canonical name, because this
 #:            atlas resolves a structure the vocabulary does not
 #:            (Schlegel S11's VM6l, VM6m, VM6v are all canonical VM6)
 #:   merge    ONE compartment carries several canonical names, because this
-#:            atlas does not resolve a structure the vocabulary does
-#:            (Grabe's VP1 covers canonical VP1d, VP1l and VP1m)
+#:            atlas does not resolve a structure the vocabulary does. No
+#:            shipped row uses it: Grabe's VP1 was one until GRABE got its own
+#:            vocabulary, where VP1 is simply exact.
 #:   absent   no correspondence
 Relation = Literal["exact", "split", "merge", "renamed", "absent"]
 
@@ -359,8 +360,9 @@ class Compartment:
     """One glomerulus within one atlas.
 
     `published_name` is immutable and authoritative; `canonical` may hold zero,
-    one or several names, because correspondence is not one-to-one -- Grabe's
-    single VP1 carries three canonical names. See `Relation`.
+    one or several names, because correspondence is not one-to-one -- several
+    Schlegel S11 compartments share VM6, and a merge would give one
+    compartment several names. See `Relation`.
     """
 
     local_id: int
@@ -369,9 +371,18 @@ class Compartment:
     canonical: tuple[str, ...] = ()
     relation: Relation = "exact"
     color: tuple[float, float, float, float] | None = None
+    #: A short note shown after the name when its identity is in doubt, such
+    #: as "VM6?", and why. Declared per atlas; see `Atlas.uncertain`. The
+    #: published name and the correspondence stay as they are: the doubt is
+    #: shown to the reader, not resolved.
+    uncertain: str = ""
+    uncertain_reason: str = ""
 
     @property
     def label(self) -> str:
+        """The name to show a reader, with any doubt about it."""
+        if self.uncertain:
+            return f"{self.published_name} ({self.uncertain})"
         return self.published_name
 
 
@@ -385,6 +396,9 @@ class Atlas:
     doi: str = ""
     parent: str | None = None
     compartments: tuple[Compartment, ...] = ()
+    #: (published name, note, reason) for each compartment whose identity is
+    #: uncertain, from the atlas TOML's `[uncertain]` table.
+    uncertain: tuple[tuple[str, str, str], ...] = ()
 
     def by_name(self, name: str) -> Compartment | None:
         for c in self.compartments:

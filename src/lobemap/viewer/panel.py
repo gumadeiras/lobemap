@@ -10,17 +10,23 @@ atlas.
 
 The table is for bulk selection. It complements click-to-identify rather than
 replacing it: picking in the canvas selects the row here, and vice versa.
+
+A checked row is a drawn glomerulus, in either mode: the rows are the
+selection, and the selection is what `AtlasSurface.sync` draws.
 """
 
 from __future__ import annotations
 
 import re
+import webbrowser
 
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QGridLayout,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -109,9 +115,30 @@ class _Cell(QTableWidgetItem):
         return super().__lt__(other)
 
 
+#: Placeholder of the driver-line menu, which applies nothing.
+LINE_PROMPT = "Driver line..."
+
+#: Bulk buttons that act on the 2D slice only, and are disabled in 3D.
+TWO_D_ONLY = ("Label all", "Label none", "Fill all", "Fill none")
+
+
+def _button_tips(title: str) -> dict[str, str]:
+    """What each bulk button does, and to which rows: this tab's only."""
+    return {
+        "Filtered": f"Show exactly the rows of {title} that the filter leaves",
+        "Invert": f"Show the unchecked rows of {title} instead of the checked ones",
+        "Show all": f"Show every row of {title}",
+        "Show none": f"Hide every row of {title}",
+        "Label all": f"Write the name of every shown row of {title} on the slice (2D only)",
+        "Label none": f"Remove every slice label of {title} (2D only)",
+        "Fill all": f"Fill the slice contour of every shown row of {title} (2D only)",
+        "Fill none": f"Draw every slice contour of {title} as an outline (2D only)",
+    }
+
+
 class AtlasTab(QWidget):
     def __init__(self, surface, compartments=None, contour=None,
-                 annotation=None, is_atlas: bool = True) -> None:
+                 annotation=None, is_atlas: bool = True, lines=None) -> None:
         super().__init__()
         self.surface = surface
         self.contour = contour
@@ -124,7 +151,11 @@ class AtlasTab(QWidget):
         #: Glomerulus name -> annotation, from `core.reference`. Empty when
         #: the reference table is absent, which only empties those columns.
         self.reference = annotation or {}
+        #: Compartment index -> the reference row it joins, for the driver
+        #: lines and the VFB link.
+        self._rows: dict[int, dict] = {}
         self._updating = False
+        self._three_d: bool | None = None
 
         layout = QVBoxLayout()
         layout.setContentsMargins(4, 4, 4, 4)
@@ -137,13 +168,26 @@ class AtlasTab(QWidget):
         self.filter.textChanged.connect(self._apply_filter)
         layout.addWidget(self.filter)
 
+        #: Driver-line presets: the glomeruli each line labels, by the
+        #: reference table. Filled once the rows are joined, below.
+        self.lines = QComboBox()
+        self.lines.setToolTip(
+            "Show the glomeruli of this atlas that a driver line labels, "
+            "from the reference table's sensory and projection neuron lines"
+        )
+        self.lines.addItem(LINE_PROMPT, ())
+        self.lines.currentIndexChanged.connect(self._apply_line)
+        layout.addWidget(self.lines)
+
         # A grid rather than two rows of boxes, so each pair lines up in
         # its own column: the button below a given one is always its
         # opposite. `Show` names what the checkbox in column 0 does, which
         # `All`/`None` left to be guessed now that `Label` and `Fill` have
-        # their own pairs.
+        # their own pairs. The tooltips say which rows each one acts on.
         buttons = QGridLayout()
         buttons.setSpacing(4)
+        tips = _button_tips(surface.name)
+        self._two_d_buttons: list[QPushButton] = []
         for col, (top, bottom) in enumerate((
             (("Filtered", self._filtered_only), ("Invert", self._invert)),
             (("Show all", self._all), ("Show none", self._none)),
@@ -153,8 +197,11 @@ class AtlasTab(QWidget):
         )):
             for row, (label, slot) in enumerate((top, bottom)):
                 button = QPushButton(label)
+                button.setToolTip(tips[label])
                 button.clicked.connect(slot)
                 buttons.addWidget(button, row, col)
+                if label in TWO_D_ONLY:
+                    self._two_d_buttons.append(button)
             buttons.setColumnStretch(col, 1)
         layout.addLayout(buttons)
 
@@ -194,7 +241,9 @@ class AtlasTab(QWidget):
             check.setData(INDEX_ROLE, row)
             self.table.setItem(row, VISIBLE_COL, check)
 
-            label = _Cell(name)
+            label = _Cell(comp.label if comp else name)
+            if comp and comp.uncertain_reason:
+                label.setToolTip(comp.uncertain_reason)
             rgba = surface.colors[row]
             label.setForeground(
                 QColor.fromRgbF(float(rgba[0]), float(rgba[1]), float(rgba[2]))
@@ -228,6 +277,8 @@ class AtlasTab(QWidget):
             # published one: that is the name the reference table uses, and
             # it is what makes the same row match across atlases.
             props = self._reference_for(comp, name) if is_atlas else {}
+            if props:
+                self._rows[row] = props
             for i, key in enumerate(REF_COLUMNS):
                 self.table.setItem(row, REF_COL0 + i, _Cell(props.get(key, "")))
 
@@ -237,11 +288,30 @@ class AtlasTab(QWidget):
         self.table.setSortingEnabled(True)
         self.table.sortItems(NAME_COL, Qt.AscendingOrder)
         self.table.itemChanged.connect(self._on_item_changed)
+        self.table.itemSelectionChanged.connect(self._on_row_selected)
         layout.addWidget(self.table, stretch=1)
 
+        footer = QHBoxLayout()
         self.count = QLabel()
-        layout.addWidget(self.count)
+        footer.addWidget(self.count, 1)
+        #: Opens the Virtual Fly Brain term page of the selected glomerulus.
+        self.vfb = QPushButton("VFB")
+        self.vfb.clicked.connect(self._open_vfb)
+        footer.addWidget(self.vfb)
+        layout.addLayout(footer)
         self.setLayout(layout)
+
+        self._fill_lines(lines or {})
+        self.lines.setVisible(is_atlas and self.lines.count() > 1)
+        self.vfb.setVisible(is_atlas)
+        self._on_row_selected()
+
+        # The table follows the eye in napari's layer list, and the count
+        # follows whichever layer the mode draws.
+        surface.listeners.append(self._sync_rows)
+        surface.layer.events.visible.connect(self._update_count)
+        if contour is not None:
+            contour.layer.events.visible.connect(self._update_count)
         self._update_count()
 
     # -- helpers ---------------------------------------------------------
@@ -285,46 +355,99 @@ class AtlasTab(QWidget):
         ).lower()
 
     def _push(self, selection: set[int]) -> None:
-        """Show these compartments in whichever layer the mode can draw.
+        """Show exactly these compartments, in whichever layer the mode draws.
 
-        `AtlasSurface.refresh` turns its layer on whenever something is
-        selected, which is right in 3D and wrong in 2D: the display-mode
-        hook only fires on an `ndisplay` change, so nothing was putting
-        the mesh back. Ticking `Show all` in 2D switched the mesh on
-        underneath the slice, and left the contours -- the thing 2D can
-        actually draw -- off.
-
-        Only when a contour overlay exists. Without one the mesh is what
-        2D shows as well, which is the `USE_SLICE_CONTOURS = False` case
-        `install_display_mode` also defers to.
+        The surface draws its own selection in the mesh or, paired, in its
+        contours (`AtlasSurface.sync`), so a bulk button and a single row's
+        checkbox reach the same code and cannot disagree about the mode.
         """
         self.surface.set_selection(selection)
-        self._apply_mode_visibility()
-        if self.contour is not None:
-            self.contour.set_selection(selection)
+        self._selection_changed()
+
+    def _selection_changed(self) -> None:
+        self._update_count()
+        # A driver line stays named only while it is what is shown.
+        wanted = self.lines.currentData()
+        if self.lines.currentIndex() > 0 and set(wanted or ()) != self.surface.selection:
+            self.lines.blockSignals(True)
+            self.lines.setCurrentIndex(0)
+            self.lines.blockSignals(False)
+
+    def _sync_rows(self) -> None:
+        """Check exactly the selected rows, after the eye changed them."""
+        self._set_checks(VISIBLE_COL, self.surface.selection)
+        self._selection_changed()
+
+    def _update_count(self, event=None) -> None:
+        """How many rows are drawn, which is the checked ones or none.
+
+        None only while napari's eye has the drawing layer off in a way the
+        surface did not take as a selection change -- the wrong mode's layer
+        switched on, say -- so the count never claims what is not drawn.
+        """
+        n = self.table.rowCount()
+        shown = len(self.surface.selection)
+        if shown and not self.surface.mode_layer().visible:
+            self.count.setText(f"0 / {n} shown ({shown} checked, layer hidden)")
+        else:
+            self.count.setText(f"{shown} / {n} shown")
+
+    def set_mode(self, three_d: bool) -> None:
+        """Disable the 2D-only controls in 3D, where they draw nothing."""
+        if three_d == self._three_d:
+            return
+        self._three_d = three_d
+        for button in self._two_d_buttons:
+            button.setEnabled(not three_d)
+        self._updating = True
+        try:
+            for row in range(self.table.rowCount()):
+                for col in (LABEL_COL, FILL_COL):
+                    item = self.table.item(row, col)
+                    flags = item.flags()
+                    item.setFlags(flags & ~Qt.ItemIsEnabled if three_d
+                                  else flags | Qt.ItemIsEnabled)
+        finally:
+            self._updating = False
         self._update_count()
 
-    def _apply_mode_visibility(self) -> None:
-        """Put the selection in whichever layer the current mode can draw.
+    # -- driver lines and VFB --------------------------------------------
 
-        Called from both routes into the layer -- the bulk buttons and a
-        single row's checkbox -- because `set_visible` bypassed `_push`
-        and so kept the bug after the buttons were fixed.
+    def _fill_lines(self, lines) -> None:
+        """One entry per driver line labelling any glomerulus of this atlas."""
+        for line, names in lines.items():
+            members = tuple(sorted(
+                i for i, props in self._rows.items()
+                if props.get(reference.KEY) in names
+            ))
+            if members:
+                self.lines.addItem(f"{line} ({len(members)})", members)
 
-        Visibility is set BEFORE the overlay refreshes: its refresh
-        returns early while the layer is hidden and would redraw nothing.
-        """
-        if self.contour is None:
+    def _apply_line(self, index: int) -> None:
+        if index <= 0:
             return
-        three_d = self.surface.viewer.dims.ndisplay == 3
-        on = bool(self.surface.selection)
-        self.surface.layer.visible = three_d and on
-        self.contour.layer.visible = (not three_d) and on
+        self._set_indices(self.lines.itemData(index) or ())
 
-    def _update_count(self) -> None:
-        self.count.setText(
-            f"{len(self.surface.selection)} / {self.table.rowCount()} shown"
+    def _selected_row(self) -> dict:
+        rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
+        index = self._index_of(rows[0].row()) if rows else None
+        return self._rows.get(index, {}) if index is not None else {}
+
+    def _on_row_selected(self) -> None:
+        props = self._selected_row()
+        url = props.get(reference.VFB, "")
+        name = props.get(reference.KEY, "")
+        self.vfb.setEnabled(bool(url))
+        self.vfb.setText(f"VFB: {name}" if url else "VFB")
+        self.vfb.setToolTip(
+            url or "Select a glomerulus with a Virtual Fly Brain term to open it"
         )
+
+    def _open_vfb(self) -> None:
+        """Open the selected glomerulus's term page on Virtual Fly Brain."""
+        url = self._selected_row().get(reference.VFB, "")
+        if url:
+            webbrowser.open(url)
 
     # -- handlers --------------------------------------------------------
 
@@ -345,10 +468,7 @@ class AtlasTab(QWidget):
         index = int(item.data(INDEX_ROLE))
         visible = item.checkState() == Qt.Checked
         self.surface.set_visible(index, visible)
-        self._apply_mode_visibility()
-        if self.contour is not None:
-            self.contour.set_selection(self.surface.selection)
-        self._update_count()
+        self._selection_changed()
 
     def _set_checks(self, column: int, indices) -> set[int]:
         """Tick exactly these compartments in `column`, whatever the order."""
@@ -408,6 +528,10 @@ class AtlasTab(QWidget):
         self._updating = False
         self._push(selection)
 
+    def select(self, indices) -> None:
+        """Check exactly these compartments, and draw them."""
+        self._set_indices(indices)
+
     def _all_indices(self) -> set[int]:
         return {i for i in (self._index_of(r)
                             for r in range(self.table.rowCount()))
@@ -449,16 +573,44 @@ class AtlasTab(QWidget):
             self.table.scrollToItem(self.table.item(row, NAME_COL))
 
 
+class _Tabs(dict):
+    """The panel's built tabs by name; asking for one not built yet builds it."""
+
+    def __init__(self, panel) -> None:
+        super().__init__()
+        self._panel = panel
+
+    def __missing__(self, name):
+        tab = self._panel.tab(name)
+        if tab is None:
+            raise KeyError(name)
+        return tab
+
+
 class CompartmentPanel(QTabWidget):
+    """One tab per atlas, then one per neuropil set.
+
+    `names` is every part of the scene in scene order; those without a
+    surface in `surfaces` were left for later (`SceneSession.realize`) and
+    get a tab that builds them when it is first opened, through `realize`.
+    `tabs` holds the built ones, and indexing it builds one on demand.
+    """
+
     def __init__(self, viewer, surfaces: dict, registry=None, contours=None,
-                 space: str | None = None) -> None:
+                 space: str | None = None, names=None, realize=None) -> None:
         super().__init__()
         self.viewer = viewer
-        self.tabs: dict[str, AtlasTab] = {}
+        self.registry = registry
+        self.tabs: dict[str, AtlasTab] = _Tabs(self)
+        #: Tabs not built yet: name -> the placeholder page standing in.
+        self._pages: dict[str, QWidget] = {}
+        self._realize = realize
+        self._three_d: bool | None = None
         contours = contours or {}
         # Read once for the whole panel: every tab joins against the same
         # table, and it is a 62-row csv.
-        annotation = reference.load(registry.root) if registry else {}
+        self._annotation = reference.load(registry.root) if registry else {}
+        self._lines = reference.lines(registry.root) if registry else {}
         # Atlases first, reference geometry last. `build_scene` adds the
         # neuropil and brain shells before the atlases so they sit UNDER
         # the glomeruli, but that is a stacking order and this is a reading
@@ -467,19 +619,83 @@ class CompartmentPanel(QTabWidget):
         def is_reference(name: str) -> bool:
             return registry is None or name not in registry.atlases
 
-        for name in sorted(surfaces, key=is_reference):
-            surface = surfaces[name]
-            atlas = registry.atlases.get(name) if registry else None
-            tab = AtlasTab(
-                surface,
-                compartments=atlas.compartments if atlas else None,
-                contour=contours.get(name),
-                annotation=annotation,
-                is_atlas=atlas is not None,
-            )
-            self.tabs[name] = tab
-            self.addTab(tab, name[:20])
+        for name in sorted(list(surfaces) if names is None else names,
+                           key=is_reference):
+            if name in surfaces:
+                tab = self._make_tab(name, surfaces[name], contours.get(name))
+                dict.__setitem__(self.tabs, name, tab)
+                self.addTab(tab, name[:20])
+            else:
+                page = QWidget()
+                self._pages[name] = page
+                self.addTab(page, name[:20])
         self._open_default_tab(registry, space)
+        self.currentChanged.connect(self._on_current)
+        self._on_current(self.currentIndex())
+        if viewer is not None:
+            self.set_mode(viewer.dims.ndisplay == 3)
+
+    def _make_tab(self, name: str, surface, contour) -> AtlasTab:
+        atlas = self.registry.atlases.get(name) if self.registry else None
+        return AtlasTab(
+            surface,
+            compartments=atlas.compartments if atlas else None,
+            contour=contour,
+            annotation=self._annotation,
+            is_atlas=atlas is not None,
+            lines=self._lines,
+        )
+
+    def tab(self, name: str) -> AtlasTab | None:
+        """The tab of `name`, built now if it was left for later.
+
+        None if there is no such tab, or if building it failed; the failure
+        is then written on the tab, which is where the user looks.
+        """
+        if name in self.tabs:
+            return dict.__getitem__(self.tabs, name)
+        page = self._pages.get(name)
+        if page is None or self._realize is None:
+            return None
+        try:
+            surface, contour = self._realize(name)
+        except Exception as exc:                      # noqa: BLE001
+            if page.layout() is None:
+                layout = QVBoxLayout(page)
+                label = QLabel(f"{name} could not be loaded: {exc}")
+                label.setWordWrap(True)
+                layout.addWidget(label)
+                layout.addStretch(1)
+            return None
+        tab = self._make_tab(name, surface, contour)
+        del self._pages[name]
+        index = self.indexOf(page)
+        current = index == self.currentIndex()
+        blocked = self.blockSignals(True)
+        try:
+            self.removeTab(index)
+            self.insertTab(index, tab, name[:20])
+            if current:
+                self.setCurrentIndex(index)
+        finally:
+            self.blockSignals(blocked)
+        page.deleteLater()
+        dict.__setitem__(self.tabs, name, tab)
+        if self._three_d is not None:
+            tab.set_mode(self._three_d)
+        return tab
+
+    def _on_current(self, index: int) -> None:
+        """Opening a tab not built yet builds it."""
+        page = self.widget(index)
+        name = next((n for n, p in self._pages.items() if p is page), None)
+        if name is not None:
+            self.tab(name)
+
+    def set_mode(self, three_d: bool) -> None:
+        self._three_d = three_d
+        for tab in self.tabs.values():
+            tab.set_mode(three_d)
 
     def _open_default_tab(self, registry, space: str | None) -> None:
         """Open on an atlas, never on the reference geometry.

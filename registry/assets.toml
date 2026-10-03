@@ -1,6 +1,11 @@
 # Assets are geometry or images, atlas and reference alike, distinguished by
 # `role`. Paths are relative to the registry root.
 # Populated by `lobemap ingest`; entries below are added as data lands.
+#
+# Every asset records its data license in `source.license` and the page that
+# states it in `source.license_url`, each checked against the primary source
+# (the dataset page, the data portal or the paper). The code's MIT license
+# does not cover any of them; README.md has the summary.
 
 [neuprint_hemibrain_glomeruli]
 role = "glomeruli"
@@ -12,6 +17,7 @@ path = "data/neuprint_hemibrain_glomeruli.npz"
 url = "https://neuprint.janelia.org"
 doi = "10.7554/eLife.57443"
 license = "CC BY 4.0"
+license_url = "https://www.janelia.org/project-team/flyem/hemibrain"
 
 [neuprint_hemibrain_neuropil]
 role = "neuropil"
@@ -21,6 +27,9 @@ side = "both"
 path = "data/neuprint_hemibrain_neuropil.npz"
 [neuprint_hemibrain_neuropil.source]
 url = "https://neuprint.janelia.org"
+doi = "10.7554/eLife.57443"
+license = "CC BY 4.0"
+license_url = "https://www.janelia.org/project-team/flyem/hemibrain"
 
 [neuprint_cns_glomeruli]
 role = "glomeruli"
@@ -31,6 +40,8 @@ path = "data/neuprint_cns_glomeruli.npz"
 [neuprint_cns_glomeruli.source]
 url = "https://neuprint-cns.janelia.org"
 doi = "10.1016/j.cell.2026.08.015"
+license = "CC BY 4.0"
+license_url = "https://male-cns.janelia.org/download/"
 
 [neuprint_cns_neuropil]
 role = "neuropil"
@@ -41,12 +52,19 @@ path = "data/neuprint_cns_neuropil.npz"
 [neuprint_cns_neuropil.source]
 url = "https://neuprint-cns.janelia.org"
 doi = "10.1016/j.cell.2026.08.015"
+license = "CC BY 4.0"
+license_url = "https://male-cns.janelia.org/download/"
 
 # The fly's LEFT AL. The Bates 2020 masks these revise sat on FAFB's
 # image-right, which in this mirrored space is biologically left; Benton
 # inherits that. Delivered in 3D Slicer RAS, and ingest negates x and y --
 # checked when Bates was still here, which put the two centroid clouds 0.0 um
 # apart.
+#
+# The article is CC BY 4.0, and its data -- Dataset EV2 included -- carry a
+# CC0 public-domain waiver, which the article states and which does not
+# extend to its figures. The meshes are adapted from Bates et al. 2020's FAFB
+# meshes, not from FlyWire, so FlyWire's terms do not apply to them.
 [benton2025_glomeruli]
 role = "glomeruli"
 space = "FAFB14"
@@ -56,9 +74,16 @@ path = "data/benton2025_glomeruli.npz"
 [benton2025_glomeruli.source]
 doi = "10.1038/s44319-025-00476-8"
 url = "https://doi.org/10.1038/s44319-025-00476-8"
+license = "CC0 1.0"
+license_url = "https://europepmc.org/article/PMC/PMC12187929"
 
 # Both lobes: 108 meshes, 54 per side, each name carrying its own (L)/(R)
 # suffix, so the asset-level default is never consulted for this one.
+#
+# All three Grabe assets are built from files reproduced from the paper and
+# its atlas. No license for them is published -- neither the journal (the
+# article is not open access) nor the atlas page states terms -- so the
+# rights stay with the authors and the publisher, and none is granted here.
 [grabe2015_glomeruli]
 role = "glomeruli"
 space = "GRABE"
@@ -68,6 +93,8 @@ path = "data/grabe2015_glomeruli.npz"
 [grabe2015_glomeruli.source]
 doi = "10.1002/cne.23697"
 url = "https://doi.org/10.1002/cne.23697"
+license = "none stated; reproduced from the paper"
+license_url = "https://www.ice.mpg.de/232714/vivo-3d-atlas"
 
 # NOTE ON LATERALITY: these are delivered in JRCFIB2018Fraw -- hemibrain
 # coordinates -- and hemibrain is NOT left-right inverted (see the asymmetric
@@ -92,6 +119,7 @@ path = "data/schlegel2021_s11.npz"
 doi = "10.7554/eLife.66018"
 url = "https://cdn.elifesciences.org/articles/66018/elife-66018-supp11-v2.zip"
 license = "CC BY 4.0"
+license_url = "https://elifesciences.org/articles/66018"
 
 [schlegel2021_s12_glomeruli]
 role = "glomeruli"
@@ -103,13 +131,14 @@ path = "data/schlegel2021_s12.npz"
 doi = "10.7554/eLife.66018"
 url = "https://cdn.elifesciences.org/articles/66018/elife-66018-supp12-v2.zip"
 license = "CC BY 4.0"
+license_url = "https://elifesciences.org/articles/66018"
 
 # Grabe's in vivo confocal stack: the only reference layer its island space
 # has. Voxel size read from the ImageJ TIFF metadata (0.34 x 0.34 x 0.96 um),
 # not assumed. Shares its grid with the label volume the glomeruli are
 # surfaced from, so index * voxel_size with a zero origin is exact rather than
 # fitted -- verified at 0.0001 um mean offset over 108 glomeruli.
-# Displayed like the virtual stains -- magenta, lifted gamma, depth-attenuated
+# Displayed like the virtual stains -- gray, lifted gamma, depth-attenuated
 # MIP -- although its role stays `template_image`, because it is a real
 # confocal channel rather than a synthesised one.
 # The publication's own voxel-wise masks, unmodified -- the thing the meshes
@@ -125,6 +154,9 @@ side = "both"
 path = "data/grabe2015_labels.npz"
 [grabe2015_labels.source]
 doi = "10.1002/cne.23697"
+url = "https://doi.org/10.1002/cne.23697"
+license = "none stated; reproduced from the paper"
+license_url = "https://www.ice.mpg.de/232714/vivo-3d-atlas"
 
 [grabe2015_stack]
 role = "template_image"
@@ -137,6 +169,10 @@ path = "data/grabe2015_stack.npz"
 display = { colormap = "gray", gamma = 0.7, attenuation = 0.1 }
 [grabe2015_stack.source]
 doi = "10.1002/cne.23697"
+# The atlas page publishes this stack as "Original Confocal Stack".
+url = "https://www.ice.mpg.de/232714/vivo-3d-atlas"
+license = "none stated; reproduced from the paper"
+license_url = "https://www.ice.mpg.de/232714/vivo-3d-atlas"
 
 # FAFB AL neuropil shells, from fafbseg.get_neuropil_volumes, which returns
 # FlyWire (FAFB14.1) space; bridged here into FAFB14, the hub.
@@ -165,16 +201,20 @@ side = "both"
 path = "data/fafb_neuropil.npz"
 [fafb_neuropil.source]
 url = "https://github.com/navis-org/fafbseg-py"
+doi = "10.1038/s41586-024-07558-y"
+license = "CC BY-NC 4.0"
+license_url = "https://flywire.ai/guidelines"
 
 # The JRC2018U nc82 template image was dropped. It was never in a scene, and
 # JRC2018U has no native atlas, so the only thing it fed was a validation
 # check on a bridge into a space nothing displays. The space itself remains
 # as a bridging target.
 
-# Virtual neuropil stains: presynapse density at LM resolution, sigma 900 nm
-# on a 0.5 um grid (effective 912 nm after binning). Built from the published
-# bulk releases rather than neuPrint, because ~60% of detected synapses are
-# not assigned to proofread neurons, mostly postsynapses on fine twigs.
+# Virtual neuropil stains: presynapse density at LM resolution, sigma 450 nm
+# on a 0.25 um grid (effective 456 nm after binning; registry/recipes.toml
+# has the parameters). Built from the published bulk releases rather than
+# neuPrint, because ~60% of detected synapses are not assigned to proofread
+# neurons, mostly postsynapses on fine twigs.
 #
 # Presynapses only: nc82 labels Bruchpilot at presynaptic active zones.
 # T-bars are deduplicated where a source lists synapse pairs, so a T-bar is
@@ -189,8 +229,16 @@ path = "data/hemibrain_stain.zarr"
 [hemibrain_stain.source]
 url = "gs://neuroglancer-janelia-flyem-hemibrain/v1.2/synapses/by_id/"
 doi = "10.7554/eLife.57443"
+license = "CC BY 4.0"
+license_url = "https://www.janelia.org/project-team/flyem/hemibrain"
 
-# 79,935,406 unique presynapses from 219,060,529 synapse pairs.
+# 79,935,406 unique presynapses from 219,060,529 synapse pairs, from the
+# Princeton synapse table of FlyWire v783: the synapse detection of Yu et al.
+# 2025 (bioRxiv, doi:10.1101/2025.07.11.664377), on the FlyWire
+# reconstruction of Dorkenwald et al. 2024 (doi:10.1038/s41586-024-07558-y).
+# The table has no confidence column, so no threshold was applied: the
+# published artifact's own metadata says `confidence_threshold: 0.5`, which
+# the build recorded but never used. FlyWire data, so CC BY-NC 4.0.
 [fafb_stain]
 role = "virtual_stain"
 space = "FAFB14"
@@ -198,8 +246,10 @@ kind = "image"
 side = "both"
 path = "data/fafb_stain.zarr"
 [fafb_stain.source]
-url = "fafb_v783_princeton_synapse_table.csv.gz"
-doi = "10.1038/s41586-024-07558-y"
+url = "https://storage.googleapis.com/flywire-data/codex/data/fafb/783/fafb_v783_princeton_synapse_table.csv.gz"
+doi = "10.1101/2025.07.11.664377"
+license = "CC BY-NC 4.0"
+license_url = "https://flywire.ai/guidelines"
 
 # Cropped to brain: the VNC is excluded by the grid bounds, which drop
 # 10,418,893 of 45,656,140 presynapses. The boundary is unambiguous --
@@ -213,3 +263,6 @@ side = "both"
 path = "data/malecns_stain.zarr"
 [malecns_stain.source]
 url = "gs://flyem-male-cns/v1.0/connectome-data/flat-connectome/syn-points-male-cns-v1.0-minconf-0.5.feather"
+doi = "10.1016/j.cell.2026.08.015"
+license = "CC BY 4.0"
+license_url = "https://male-cns.janelia.org/download/"

@@ -12,10 +12,10 @@ requires-python = ">=3.11,<3.13"
 # Gustavo Madeira Santana originated lobemap and holds the copyright in
 # LICENSE. The viewer here is a rewrite, but the project, its name, the
 # curated nomenclature tables and the source data under registry/sources/
-# are his work, so he stays on the package metadata -- see README Lineage.
+# are his work, so he stays on the package metadata -- see README Authors.
 authors = [
   { name = "David Zimmerman" },
-  { name = "Gustavo Madeira Santana" },
+  { name = "Gustavo Madeira Santana", email = "fromweb1@gumadeiras.com" },
 ]
 keywords = ["drosophila", "napari", "neuroanatomy", "visualization"]
 # The original's list, plus the two the rewrite earns: it reads and
@@ -40,7 +40,7 @@ classifiers = [
 # scene from the canonical mesh format and the registry alone, with no network
 # access, no neuPrint token, and no CMTK.
 dependencies = [
-  "napari[pyqt6]>=0.6",
+  "napari[pyqt6,bermuda]>=0.9.2,<0.10",  # pinned for its internals; see tests/test_napari_private.py
   "numpy>=1.26",
   "pandas>=2.2",
   "scipy>=1.13",
@@ -49,7 +49,7 @@ dependencies = [
   "platformdirs>=4.2",  # cache location for bridged/derived geometry
   "tifffile>=2024.8",   # Grabe LM stack
   "pynrrd>=1.0",        # NRRD image stacks (ingest.image_stack)
-  "zarr>=2.18",         # OME-Zarr volumes: chunked, compressed and multiscale
+  "zarr>=3",            # OME-Zarr volumes: chunked, compressed and multiscale
   "numcodecs>=0.12",    # blosc/zstd codec for the above
   "dask>=2024.1",       # lazy slicing: napari materialises an eager array whole
   "rtree>=1.3",         # trimesh ray engine, for exact point-in-mesh containment
@@ -62,8 +62,10 @@ Homepage = "https://github.com/gumadeiras/lobemap"
 Source = "https://github.com/gumadeiras/lobemap"
 Changelog = "https://github.com/gumadeiras/lobemap/blob/main/CHANGELOG.md"
 
-[dependency-groups]
-# Ingest and cache-rebuild time only.
+[project.optional-dependencies]
+# Ingest, bridging and rebuild time only; the viewer never needs them.
+# Published as an extra so an installed lobemap can get them too:
+# `pip install "lobemap[ingest]"`.
 ingest = [
   "navis>=1.12",          # transform engine: xform_brain, mirror_brain
   "flybrains>=0.6",      # navis-flybrains: templates and bridging registrations
@@ -73,14 +75,46 @@ ingest = [
   "h5py>=3.11",          # H5 deformation fields
   "requests>=2.32",
   "pytz>=2024.1",        # undeclared fafbseg import; pandas 3.0 no longer supplies it
+  "scikit-image>=0.24",  # marching cubes for the Grabe label volume
+  "pyarrow>=16",         # the FAFB and male CNS bulk synapse tables
+  "cloud-volume>=12",    # the hemibrain synapse shards
 ]
+
+[dependency-groups]
+# A checkout's `uv sync` installs both groups (`default-groups` below), so
+# the tests and every `build` recipe work there. `uv sync --no-group
+# ingest` leaves the ingest extra out.
+ingest = ["lobemap[ingest]"]
 dev = [
   "pytest>=8.2",
   "ruff>=0.6",
+  "setuptools>=77",      # tests/test_wheel.py builds the wheel in-process
 ]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# The registry metadata ships inside the package as `lobemap/registry`, so an
+# installed lobemap finds its spaces, assets, atlases and nomenclature
+# without a checkout. It stays at `registry/` in the source tree, beside
+# `registry/data` and `registry/sources`, which are gigabytes and never
+# ship: the globs below name the metadata files and nothing under those
+# two directories. Mapping a directory outside `src/` needs an explicit
+# package list; a subpackage missing from it would not ship, and
+# `tests/test_wheel.py` fails if one is.
+[tool.setuptools]
+packages = [
+  "lobemap",
+  "lobemap.core",
+  "lobemap.ingest",
+  "lobemap.registry",
+  "lobemap.validate",
+  "lobemap.viewer",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+"lobemap.registry" = "registry"
+
+[tool.setuptools.package-data]
+"lobemap.registry" = ["*.toml", "*.csv", "atlases/*.toml", "reference/*.csv"]
 
 [project.scripts]
 lobemap = "lobemap.cli:main"
@@ -101,3 +135,21 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# No deprecated API: any deprecation is an error. napari attributes its
+# own attribute deprecations to the wrong frame, so a filter on lobemap's
+# module names would miss them; hence the blanket rule. A deprecation in a
+# thread surfaces as an unhandled thread exception, so that is an error too.
+# The exceptions are dependencies whose own internals warn and that no
+# permitted upgrade fixes: scikit-image 0.26 sets an array's shape, which
+# NumPy 2.5 deprecated; napari's pydantic models use `json_encoders`; and
+# npe2 0.9 declares its models with pydantic 1 options. Add one only for a
+# warning raised inside a dependency, as narrowly as it can be named.
+filterwarnings = [
+  "error::DeprecationWarning",
+  "error::PendingDeprecationWarning",
+  "error::FutureWarning",
+  "error::pytest.PytestUnhandledThreadExceptionWarning",
+  "default:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:skimage",
+  'default:`json_encoders` is deprecated:DeprecationWarning:pydantic\._internal\._generate_schema',
+  'default::DeprecationWarning:npe2\.',
+]

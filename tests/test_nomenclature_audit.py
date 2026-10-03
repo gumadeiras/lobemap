@@ -12,21 +12,12 @@ vocabulary and it has to reconcile them.
 from __future__ import annotations
 
 import csv
-import pathlib
 import subprocess
 import sys
 
 import pytest
 
 from lobemap.core.names import Correspondence, Nomenclature, audit_atlas
-from lobemap.core.registry import Registry
-
-REGISTRY = "registry"
-
-
-@pytest.fixture(scope="module")
-def registry():
-    return Registry.load(REGISTRY, validate=False)
 
 
 def _curated() -> Nomenclature:
@@ -74,14 +65,20 @@ def test_drop_removes_only_the_named_rows():
     assert {c.published_name for c in nom.for_atlas("a")} == {"VP1(L)", "VC3l(R)"}
 
 
-def test_running_the_command_writes_nothing(tmp_path):
-    """The real registry, the real command, and the file must not move."""
-    source = pathlib.Path(REGISTRY) / "nomenclature.csv"
+@pytest.mark.requires_data
+def test_running_the_command_writes_nothing(tmp_path, registry_root):
+    """The real registry, the real command, and the file must not move.
+
+    With data, so the command has atlases to audit: without it every
+    atlas is unreadable and there is nothing it could have written.
+    """
+    source = registry_root / "nomenclature.csv"
     before = source.read_bytes()
     (tmp_path / "before.csv").write_bytes(before)
 
     result = subprocess.run(
-        [sys.executable, "-m", "lobemap.cli", "nomenclature"],
+        [sys.executable, "-m", "lobemap.cli", "--registry", str(registry_root),
+         "nomenclature"],
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -90,7 +87,8 @@ def test_running_the_command_writes_nothing(tmp_path):
     )
 
 
-def test_a_single_atlas_space_has_nothing_to_reconcile():
+@pytest.mark.requires_data
+def test_a_single_atlas_space_has_nothing_to_reconcile(registry):
     """Its vocabulary IS its atlas, so every mapping is the identity.
 
     Grabe's `VP1` used to map onto `VP1d;VP1l;VP1m` -- three names its own
@@ -100,26 +98,25 @@ def test_a_single_atlas_space_has_nothing_to_reconcile():
     """
     from lobemap.core.names import parse_roi
 
-    reg = Registry.load(REGISTRY, validate=False)
-    for space in reg.spaces:
-        atlases = reg.atlases_in_space(space)
+    for space in registry.spaces:
+        atlases = registry.atlases_in_space(space)
         if len(atlases) != 1:
             continue
         published = {
             parse_roi(c.published_name)[0] for c in atlases[0].compartments
         }
-        assert set(reg.vocabulary(space)) == published, (
+        assert set(registry.vocabulary(space)) == published, (
             f"{space}: vocabulary and atlas disagree with no second atlas "
             f"to reconcile against"
         )
 
 
-def test_the_curated_relations_are_still_in_the_shipped_table():
+def test_the_curated_relations_are_still_in_the_shipped_table(registry_root):
     """A regression guard on the data, not the code.
 
     If these ever come back as `exact`, something regenerated the table.
     """
-    path = pathlib.Path(REGISTRY) / "nomenclature.csv"
+    path = registry_root / "nomenclature.csv"
     with path.open(encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     by_relation: dict[str, int] = {}

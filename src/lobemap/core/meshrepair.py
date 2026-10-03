@@ -60,10 +60,19 @@ class RepairReport:
 def _approx_volume(mesh) -> float:
     """Enclosed volume, tolerating an open mesh.
 
-    Used only to quantify how much a repair changed the geometry.
+    Used only to quantify how much a repair changed the geometry, so it is
+    measured about the mesh's own center. An open mesh encloses nothing: its
+    signed volume counts, for every hole, the cone from the origin to the
+    hole's rim. From the world origin, hundreds of um away, that cone swamps
+    the mesh -- the male CNS AB(L) and AB(R) were logged as shrinking 85% and
+    89%, while the repaired AB(R) is within 2% of the hemibrain's watertight
+    one. From the center, the cone is only as large as the hole.
     """
     try:
-        return float(abs(mesh.volume))
+        v = np.asarray(mesh.vertices, dtype=np.float64)
+        tri = (v - v.mean(axis=0))[np.asarray(mesh.faces)]
+        det = np.einsum("ij,ij->i", tri[:, 0], np.cross(tri[:, 1], tri[:, 2]))
+        return float(abs(det.sum()) / 6.0)
     except Exception:  # noqa: BLE001 - degenerate input
         return 0.0
 

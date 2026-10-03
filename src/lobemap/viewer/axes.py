@@ -1,4 +1,4 @@
-"""Anatomical names for napari's own axis indicator.
+"""Axis indicators: napari's own for the voxel grid, a second for the anatomy.
 
 Every space in this project uses different array axes for the same anatomy --
 the antero-posterior axis is z in FAFB and the male CNS but y in the
@@ -6,25 +6,13 @@ hemibrain -- and each may run either way along them. So "which way is
 anterior" is not something a reader can carry between scenes, and without
 this the only thing that knew it was the camera.
 
-napari already draws an axis indicator, so the job here is only to name it:
-`dims.axis_labels` becomes the anatomy and the overlay is switched on.
-
-Each label is the single pole its own arrow POINTS AT. The indicator draws
-one arrow per array axis, always along INCREASING index, and which pole
-that reaches differs per space -- FAFB's third axis runs posterior while
-the hemibrain's second runs anterior -- so the labels differ too: FAFB
-reads R, V, P and the hemibrain L, A, V.
-
-They used to read as a direction of travel, "A->P". That was accurate and
-still misread: it looks like the NAME of an axis, and naming the axis
-leaves which end is which to be worked out from the arrow. A label that
-names one pole cannot be read as an axis name, and cannot contradict the
-arrow it sits on, because it is derived from where that arrow goes.
-
-Labeling every arrow `A`, `D`, `L` regardless was considered and is not
-possible here: `CanvasAxesOverlay` has no way to reverse an arrow, so on
-FAFB's third axis the label would point opposite to the arrow under it --
-the same disagreement that got the old Vectors layer removed, below.
+napari's indicator is left naming the ARRAY axes, x/y/z, which is also what
+the dimension sliders step. In 3D a second triad beside it is turned onto
+the space's measured frame, and each of its arrows is labeled with the pole
+it points at: A, D, and R or L (`apply_axis_mode`). An earlier version
+instead labeled napari's own arrows with the pole each reached -- FAFB read
+R, V, P and the hemibrain L, A, V -- which left nothing showing where the
+voxel grid ran.
 
 napari 0.9 offers two: a SCENE overlay drawn at the world origin, and a
 CANVAS overlay anchored in a corner. This uses the canvas one, because the
@@ -60,63 +48,6 @@ from ..core.model import (
 )
 
 
-def axis_labels_for(space) -> tuple[str, ...] | None:
-    """The pole each ANATOMICAL arrow points at, in arrow order.
-
-    Chosen with the arrows themselves, to put each as near as it can be
-    to its own world basis vector -- see `core.model.anatomical_triad`.
-    So these move with the angle, and a space turned far enough reports
-    a different set. They name the second triad only; napari's own is
-    always x/y/z.
-    """
-    triad = anatomical_triad(space)
-    return None if triad is None else triad[1]
-
-
-def label_viewer_axes(viewer, space) -> bool:
-    """Name the sliders anatomically and show napari's axis overlay.
-
-    The labels are the part that matters and they work in 2D as well as 3D,
-    because they are the slider names rather than geometry. They are also
-    independent of the overlay: turning the overlay off would not cost them.
-    """
-    labels = axis_labels_for(space)
-    if labels is None:
-        return False
-    # napari TRUNCATES a label tuple longer than `ndim`, keeping the tail, so
-    # on a viewer that is still 2D three labels silently become two and land
-    # on the wrong axes -- D->V onto x and A->P onto y. Refuse instead: this
-    # runs at the end of `build_scene`, by which point the layers have made
-    # the viewer 3D, and a viewer that is not is not one these labels
-    # describe.
-    if getattr(viewer.dims, "ndim", 3) != len(labels):
-        return False
-    try:
-        viewer.dims.axis_labels = labels
-    except Exception:            # noqa: BLE001 - cosmetic, never fatal
-        return False
-    # The canvas overlay, not the scene one: see the module docstring. Both
-    # exist in napari 0.9 under `canvas.overlays` and `scene.overlays`;
-    # older napari has only `viewer.axes`, which is the canvas-anchored one.
-    overlay = None
-    for holder in ("canvas", "scene"):
-        container = getattr(getattr(viewer, holder, None), "overlays", None)
-        if container is not None:
-            with contextlib.suppress(Exception):
-                overlay = container["axes"]
-            if overlay is not None:
-                break
-    if overlay is None:
-        with contextlib.suppress(Exception):
-            overlay = viewer.axes
-    if overlay is None:
-        return True             # labels landed; the indicator is cosmetic
-    with contextlib.suppress(Exception):
-        overlay.visible = True
-        overlay.labels = True
-    return True
-
-
 def _vispy_axes_overlay(viewer):
     """napari's own axes OVERLAY, or None.
 
@@ -124,16 +55,7 @@ def _vispy_axes_overlay(viewer):
     the whole point is to keep napari's triad -- its geometry, arrowheads,
     colors, sizing and font -- and change only where it points.
     """
-    model = None
-    for holder in ("canvas", "scene"):
-        container = getattr(getattr(viewer, holder, None), "overlays", None)
-        if container is not None:
-            with contextlib.suppress(Exception):
-                model = container["axes"]
-            if model is not None:
-                break
-    if model is None:
-        return None
+    model = viewer.canvas.overlays["axes"]
     canvas = None
     with contextlib.suppress(Exception):
         canvas = viewer.window._qt_viewer.canvas
@@ -201,20 +123,22 @@ def _anatomy_triad(overlay):
     return node
 
 
-def _reflection_4x4(axis: int) -> np.ndarray:
+def _reflection_4x4(axis: int, displayed=(0, 1, 2)) -> np.ndarray:
     """A reflection along one ARRAY axis, in vispy's geometry order.
 
-    The triad is drawn in vispy x,y,z, the reverse of the array order,
-    and vispy multiplies row vectors -- so conjugate by the reversal
-    and transpose, exactly as the anatomical triad's matrix is handled
-    below. A reflection is symmetric, so the transpose is a no-op here;
-    it is written out to stay parallel with that code.
+    napari draws arrow k of its triad for array axis `displayed[::-1][k]`,
+    along vispy axis k, so the reflection goes on whichever vispy axis
+    carries `axis` in the current mode. In 3D that is the reversal of the
+    array order; in 2D it is the column axis for x. Taking 3D's answer in
+    2D reflected a vispy axis that does not exist there, so the x arrow
+    kept pointing the unmirrored way. An axis that is not displayed -- a
+    slice stepping along it -- has no arrow to reflect.
     """
-    flip = np.eye(3)[::-1]
-    mirror = np.eye(3)
-    mirror[axis, axis] = -1.0
     mat = np.eye(4)
-    mat[:3, :3] = (flip @ mirror @ flip).T
+    order = list(displayed)[::-1]
+    if axis in order:
+        k = order.index(axis)
+        mat[k, k] = -1.0
     return mat
 
 
@@ -259,13 +183,10 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
     # Switching it on is also what makes napari BUILD the visual: it
     # skips overlays that are not visible and waits on their `visible`
     # event, so nothing below is reachable until this has happened.
-    for holder in ("canvas", "scene"):
-        container = getattr(getattr(viewer, holder, None), "overlays", None)
-        if container is not None:
-            with contextlib.suppress(Exception):
-                container["axes"].visible = True
-                container["axes"].labels = True
-                break
+    with contextlib.suppress(Exception):
+        model = viewer.canvas.overlays["axes"]
+        model.visible = True
+        model.labels = True
 
     overlay = _vispy_axes_overlay(viewer)
     if overlay is None:
@@ -280,7 +201,9 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
         # move.
         overlay.node.axes.transform = (
             NullTransform() if mirror_axis is None
-            else MatrixTransform(_reflection_4x4(mirror_axis))
+            else MatrixTransform(
+                _reflection_4x4(mirror_axis, tuple(viewer.dims.displayed))
+            )
         )
         overlay.node.axes._default_color = VOXEL_COLORS
         overlay._on_data_change()
@@ -316,6 +239,4 @@ __all__ = [
     "VOXEL_COLORS",
     "VOXEL_LABELS",
     "apply_axis_mode",
-    "axis_labels_for",
-    "label_viewer_axes",
 ]

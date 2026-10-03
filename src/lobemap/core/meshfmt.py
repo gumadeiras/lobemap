@@ -17,6 +17,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .atomic import replacing
+
 FORMAT_VERSION = 1
 
 
@@ -168,34 +170,39 @@ class MeshSet:
         return h.hexdigest()[:16]
 
     def save(self, path: str | Path) -> Path:
+        """Write the container; an interrupted save leaves `path` untouched."""
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
         meta = dict(self.meta)
         meta.setdefault("format_version", FORMAT_VERSION)
         meta["content_hash"] = self.content_hash()
-        np.savez_compressed(
-            path,
-            vertices=self.vertices,
-            faces=self.faces,
-            vertex_offsets=self.vertex_offsets,
-            face_offsets=self.face_offsets,
-            # JSON, not an object array: an object array can only be read
-            # back through pickle, and these containers are meant to be
-            # fetched rather than shipped. See `load`.
-            names_json=np.asarray(json.dumps(list(self.names))),
-            meta=np.asarray(json.dumps(meta)),
-        )
+        # Through a file handle, so numpy writes exactly this path rather
+        # than appending `.npz` to one without it.
+        with replacing(path) as scratch, scratch.open("wb") as fh:
+            np.savez_compressed(
+                fh,
+                vertices=self.vertices,
+                faces=self.faces,
+                vertex_offsets=self.vertex_offsets,
+                face_offsets=self.face_offsets,
+                # JSON, not an object array: an object array can only be
+                # read back through pickle, and these containers are meant
+                # to be fetched rather than shipped. See `load`.
+                names_json=np.asarray(json.dumps(list(self.names))),
+                meta=np.asarray(json.dumps(meta)),
+            )
         return path
 
     @classmethod
-    def load(cls, path: str | Path) -> MeshSet:
+    def load(cls, path: str | Path, allow_legacy_pickle: bool = False) -> MeshSet:
         """Read a container, without unpickling.
 
         Containers written before names were stored as JSON hold them in a
-        numpy object array, which numpy can only read by unpickling. Those are
-        still readable, but only on an explicit second pass, so the default
-        path never executes pickle opcodes from a file that may have been
-        downloaded. Re-saving migrates a legacy file in place.
+        numpy object array, which numpy can only read by unpickling, and
+        unpickling runs whatever code the file carries. A data root, the
+        bridge cache or a custom `--base-url` can all hand this a file
+        nobody here wrote, so such a container is refused unless the caller
+        passes `allow_legacy_pickle=True` for a file it trusts. Re-saving
+        migrates it: `MeshSet.load(p, allow_legacy_pickle=True).save(p)`.
         """
         path = Path(path)
         with np.load(path, allow_pickle=False) as z:
@@ -210,7 +217,18 @@ class MeshSet:
                 "meta": meta,
             }
         if names is None:
+            if not allow_legacy_pickle:
+                raise LegacyContainerError(
+                    f"{path} stores its names as a pickled object array, and "
+                    f"reading them would run pickle. If you trust the file, "
+                    f"migrate it with MeshSet.load(path, "
+                    f"allow_legacy_pickle=True).save(path)."
+                )
             with np.load(path, allow_pickle=True) as z:
                 names = [str(n) for n in z["names"]]
             kwargs["meta"] = {**meta, "legacy_names_container": True}
         return cls(names=[str(n) for n in names], **kwargs)
+
+
+class LegacyContainerError(ValueError):
+    """A container that can only be read by unpickling, refused by default."""
