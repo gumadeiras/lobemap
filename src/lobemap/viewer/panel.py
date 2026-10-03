@@ -35,6 +35,11 @@ from .rows import natural_key
 #: tab's table fits it without scrolling sideways.
 WIDTH = 440
 
+#: Room around each tab's title. napari's 3 x 6 px left the text almost
+#: touching the tab's edges; the brain with the most tabs still fits them
+#: all in `WIDTH`.
+TAB_PADDING = "QTabBar::tab { padding: 6px 12px; }"
+
 
 def plain_reason(exc: BaseException) -> str:
     """Why a tab could not be opened, in words rather than a traceback.
@@ -77,6 +82,7 @@ class CompartmentPanel(QTabWidget):
     def __init__(self, viewer, surfaces: dict, registry=None, contours=None,
                  space: str | None = None, names=None, realize=None) -> None:
         super().__init__()
+        self.tabBar().setStyleSheet(TAB_PADDING)
         self.viewer = viewer
         self.registry = registry
         self.tabs: dict[str, AtlasTab] = _Tabs(self)
@@ -246,6 +252,7 @@ __all__ = [
     "NEUROPIL_COLUMNS",
     "RECEPTOR_COL",
     "SIDE_COL",
+    "TAB_PADDING",
     "VISIBLE_COL",
     "WIDTH",
     "AtlasTab",

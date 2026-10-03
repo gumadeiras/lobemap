@@ -76,3 +76,69 @@ def test_the_panel_asks_for_the_column_width(monkeypatch):
 
     with launched(monkeypatch, "view", "GRABE") as (code, viewer):
         assert session(viewer).panel.sizeHint().width() == WIDTH == 440
+
+
+#: The room, in screen pixels, between a tab's title as drawn and its edges.
+TAB_MARGIN_X, TAB_MARGIN_Y = 10, 5
+
+
+def _drawn_text(bar, index: int):
+    """The tab's rect and the box around its title's pixels, both in logical
+    pixels: in each row of the tab, the pixels unlike the row's background.
+
+    Read off the tab bar as Qt draws it, so it is where the text is, not
+    where a font metric says it should be. The rounded top corners and the
+    one-pixel frame are left out.
+    """
+    from collections import Counter
+
+    pixmap = bar.grab()
+    image = pixmap.toImage()
+    ratio = pixmap.devicePixelRatio()
+    rect = bar.tabRect(index)
+    x0, y0 = round(rect.left() * ratio), round(rect.top() * ratio)
+    x1, y1 = round((rect.right() + 1) * ratio), round((rect.bottom() + 1) * ratio)
+    edge, corner = round(2 * ratio), round(5 * ratio)
+    hits = []
+    for y in range(y0 + edge, y1 - edge):
+        xs = [x for x in range(x0 + edge, x1 - edge)
+              if not (y < y0 + corner and (x < x0 + corner or x >= x1 - corner))]
+        colors = [image.pixelColor(x, y).getRgb()[:3] for x in xs]
+        background = Counter(colors).most_common(1)[0][0]
+        hits += [(x, y) for x, c in zip(xs, colors, strict=True)
+                 if sum(abs(a - b) for a, b in zip(c, background, strict=True)) > 90]
+    if not hits:
+        return rect, None
+    xs, ys = [h[0] for h in hits], [h[1] for h in hits]
+    return rect, (min(xs) / ratio, min(ys) / ratio, (max(xs) + 1) / ratio, (max(ys) + 1) / ratio)
+
+
+def test_every_tab_title_has_room_inside_its_tab(monkeypatch):
+    """Measured on the drawn tab bar, in every brain: each title in full,
+    clear of its tab's edges, and every tab in view without scrolling."""
+    from qtpy.QtWidgets import QToolButton
+
+    with launched(monkeypatch, "view", SPACES[0]) as (code, viewer):
+        assert code == 0
+        _lay_out(viewer)
+        for space in SPACES:
+            if space != SPACES[0]:
+                switch_to(viewer, space)
+                pump(100)
+            bar = session(viewer).panel.tabBar()
+            assert bar.count() >= 1, space
+            # No scroll arrows: the tabs fit the column.
+            assert not [b for b in bar.findChildren(QToolButton) if b.isVisible()], space
+            assert bar.tabRect(bar.count() - 1).right() < bar.width(), space
+            for i in range(bar.count()):
+                rect, box = _drawn_text(bar, i)
+                title = bar.tabText(i)
+                assert box is not None, (space, title)
+                left, top, right, bottom = box
+                margins = (left - rect.left(), rect.right() + 1 - right,
+                           top - rect.top(), rect.bottom() + 1 - bottom)
+                assert min(margins[:2]) >= TAB_MARGIN_X, (space, title, margins)
+                assert min(margins[2:]) >= TAB_MARGIN_Y, (space, title, margins)
+                # In full: as wide as the font draws the whole title.
+                full = bar.fontMetrics().horizontalAdvance(title)
+                assert right - left >= full - 3, (space, title, right - left, full)
