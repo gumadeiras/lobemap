@@ -131,6 +131,9 @@ def test_a_click_selects_and_a_drag_does_not(monkeypatch):
             assert sess.panel.currentWidget() is neuropils
             assert primary.selected() is None
             assert _layout(viewer, sess) == before
+            # Nor does a right click.
+            click(viewer, target, button=2)
+            assert primary.selected() is None
             # A click opens the row's tab, selects it and fills the details.
             said = click(viewer, target)
             row = primary.selected()

@@ -286,6 +286,8 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
             viewer.status = picked[2]
 
     def _on_press(_viewer, event):
+        if getattr(event, "button", 1) != 1:
+            return          # not the left button: napari's own, or a menu
         start = np.asarray(event.pos, float)
         yield
         while event.type == "mouse_move":

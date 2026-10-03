@@ -464,25 +464,26 @@ def hover(viewer, world) -> str:
     return status if isinstance(status, str) else str(status)
 
 
-def click(viewer, world, drag: float = 0.0) -> str:
-    """Press and release the left button over `world`, through napari's own
-    mouse path; `drag` moves the cursor that many pixels in between. What
-    the status bar says after."""
+def click(viewer, world, drag: float = 0.0, button: int = 1) -> str:
+    """Press and release a button, the left by default, over `world`,
+    through napari's own mouse path; `drag` moves the cursor that many
+    pixels in between. What the status bar says after."""
     from vispy.app.canvas import MouseEvent
 
     canvas = viewer.window._qt_viewer.canvas
     x, y = canvas_position(viewer, world)
     viewer.status = ""
-    press = MouseEvent(type="mouse_press", pos=(x, y), modifiers=(), button=1,
-                       buttons=[1])
+    press = MouseEvent(type="mouse_press", pos=(x, y), modifiers=(), button=button,
+                       buttons=[button])
     canvas._on_mouse_press(press)
     if drag:
         for k in range(1, 4):
             move = MouseEvent(type="mouse_move", pos=(x + drag * k / 3, y),
-                              modifiers=(), button=1, buttons=[1], press_event=press)
+                              modifiers=(), button=button, buttons=[button],
+                              press_event=press)
             canvas._on_mouse_move(move)
     end = (x + drag, y)
-    release = MouseEvent(type="mouse_release", pos=end, modifiers=(), button=1,
+    release = MouseEvent(type="mouse_release", pos=end, modifiers=(), button=button,
                          buttons=[], press_event=press)
     canvas._on_mouse_release(release)
     pump()
