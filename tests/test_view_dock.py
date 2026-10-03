@@ -1,16 +1,214 @@
 """The View dock and napari's own window, as lobemap lays them out.
 
-The outline layers are checked by napari's own layer state, not by any
-widget's text.
+The layout is measured on a window laid out for real at 1440 x 900: the
+View dock tabbed with napari's layer settings above the layer list on the
+left, the compartment panel alone on the right, and the canvas between.
+The controls are checked by what they do to the viewer, and the outline
+layers by napari's own layer state, not by any widget's text.
 """
 
 from __future__ import annotations
 
+import re
+
 import pytest
-from viewer_harness import launched, pump, session
+from viewer_harness import SPACES, launched, pump, session, switch_to, switcher
+
+from lobemap.viewer.chrome import LEFT_WIDTH, RIGHT_WIDTH
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
+
+TITLES = {
+    "FAFB14": "FAFB (female brain, EM)",
+    "JRCFIB2018F": "Hemibrain (female, EM)",
+    "JRCFIB2022M": "Male CNS (EM)",
+    "GRABE": "Grabe 2015 (live brain, light microscopy)",
+}
+PANEL = "Glomeruli and neuropils"
+#: The narrowest canvas the layout may leave at 1440 px. The left column
+#: can be no narrower than napari's layer settings, whose colormap menus
+#: list every colormap a session has registered: lobemap's are named after
+#: their layers, so after a few brains the column is 416 px and the canvas
+#: 558. Shorter layer names give the canvas that back.
+MIN_CANVAS = 550
+
+
+def _show(viewer, width: int = 1440, height: int = 900):
+    """Lay the window out for real, at this size, without putting it on screen."""
+    from qtpy.QtCore import Qt
+
+    window = viewer.window._qt_window
+    window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    window.resize(width, height)
+    window.show()
+    pump(300)
+    return window
+
+
+def _dock(window, title: str):
+    from qtpy.QtWidgets import QDockWidget
+
+    found = [d for d in window.findChildren(QDockWidget) if d.windowTitle() == title]
+    assert len(found) == 1, (title, found)
+    return found[0]
+
+
+def _tabs(window) -> list[tuple[list[str], int]]:
+    from qtpy.QtWidgets import QTabBar
+
+    return [([bar.tabText(i) for i in range(bar.count())], bar.currentIndex())
+            for bar in window.findChildren(QTabBar) if bar.isVisible()]
+
+
+def _assert_layout(viewer) -> None:
+    """The window matches the approved map, and nothing scrolls sideways."""
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import QAbstractScrollArea, QDockWidget, QPushButton
+
+    window = viewer.window._qt_window
+    qt_viewer = viewer.window._qt_viewer
+    view, panel = _dock(window, "View"), _dock(window, PANEL)
+    settings, layers = _dock(window, "Layer settings"), _dock(window, "Layers")
+    canvas = qt_viewer.canvas.native
+    left = canvas.mapTo(window, canvas.rect().topLeft()).x()
+    right = left + canvas.width()
+
+    assert window.width() == 1440, window.width()
+    assert canvas.width() >= MIN_CANVAS, canvas.width()
+    # The columns as laid out: the panel at its width, the left one as narrow
+    # as its docks allow.
+    assert panel.width() == RIGHT_WIDTH, panel.width()
+    floor = max(dock.minimumSizeHint().width() for dock in (view, settings, layers))
+    assert view.width() == max(LEFT_WIDTH, floor), (view.width(), floor)
+    # Left: the View tab, shown, ahead of the layer settings, above the list.
+    assert settings in window.tabifiedDockWidgets(view)
+    assert (["View", "Layer settings"], 0) in _tabs(window), _tabs(window)
+    for dock in (view, layers):
+        assert window.dockWidgetArea(dock) == Qt.DockWidgetArea.LeftDockWidgetArea
+        assert dock.geometry().right() < left, (dock.windowTitle(), dock.geometry())
+    assert layers.y() > view.y() + view.height() - 1
+    # Right: the panel alone, at full height.
+    right_docks = [d for d in window.findChildren(QDockWidget) if d.isVisible()
+                   and window.dockWidgetArea(d) == Qt.DockWidgetArea.RightDockWidgetArea]
+    assert right_docks == [panel], [d.windowTitle() for d in right_docks]
+    assert panel.x() > right
+    assert panel.height() >= canvas.height(), (panel.height(), canvas.height())
+    # Nothing in the left column scrolls sideways.
+    for dock in (view, settings, layers):
+        for area in dock.findChildren(QAbstractScrollArea):
+            assert not area.horizontalScrollBar().isVisible(), (dock.windowTitle(), area)
+    # No dock can be closed for good; lobemap's come back from the Window menu.
+    for dock in window.findChildren(QDockWidget):
+        assert not dock.findChildren(QPushButton, "QTitleBarCloseButton"), dock.windowTitle()
+    menu = viewer.window.window_menu.actions()
+    for dock in (view, panel):
+        assert dock.toggleViewAction() in menu, dock.windowTitle()
+
+
+@pytest.mark.parametrize("space", SPACES)
+def test_the_window_is_laid_out_as_the_map(monkeypatch, space):
+    with launched(monkeypatch, "view", space) as (code, viewer):
+        assert code == 0
+        _show(viewer)
+        for ndisplay in (3, 2):
+            viewer.dims.ndisplay = ndisplay
+            pump(200)
+            _assert_layout(viewer)
+        assert viewer.title == f"lobemap — {TITLES[space]}"
+
+
+def test_a_switch_keeps_the_layout_and_a_hidden_dock_comes_back(monkeypatch):
+    with launched(monkeypatch, "view", "GRABE") as (code, viewer):
+        assert code == 0
+        window = _show(viewer)
+        switch_to(viewer, "FAFB14")
+        pump(300)
+        _assert_layout(viewer)
+        assert viewer.title == f"lobemap — {TITLES['FAFB14']}"
+        for title in ("View", PANEL):
+            dock = _dock(window, title)
+            dock.close()
+            pump()
+            assert not dock.isVisible()
+            dock.toggleViewAction().trigger()
+            pump()
+            assert dock.isVisible(), title
+
+
+def test_the_view_controls_drive_the_viewer(monkeypatch):
+    """3D and Slice, Home view and Sections do what napari's buttons did."""
+    from qtpy.QtCore import Qt
+
+    with launched(monkeypatch, "view", "JRCFIB2018F") as (code, viewer):
+        assert code == 0
+        window = _show(viewer)
+        sw, sess = switcher(viewer), session(viewer)
+        camera = viewer.scene.camera
+
+        def mode_shown(three_d: bool) -> None:
+            assert sw.three_d.isChecked() is three_d
+            assert sw.slice_view.isChecked() is not three_d
+            # Sections stays in view, disabled in 3D, and says why.
+            assert sw.slice.isVisible() and sw.slice.isEnabled() is not three_d
+            assert sw.slice_note.isVisible() is three_d
+            assert sw.slice_note.text() == "Slice view only"
+            assert sw.legend.isVisible() is three_d
+
+        mode_shown(True)
+        sw.slice_view.click()
+        pump()
+        assert viewer.dims.ndisplay == 2
+        mode_shown(False)
+        # Sections pick the slice axis.
+        sw.slice.setCurrentIndex(sw.slice.findText("Sagittal", Qt.MatchFlag.MatchStartsWith))
+        pump()
+        assert int(viewer.dims.order[0]) == sess.slice_axis == int(sw.slice.currentData()) == 0
+        # napari's own shortcut, still live, keeps the buttons in step.
+        viewer.dims.ndisplay = 3
+        pump()
+        mode_shown(True)
+        sw.three_d.click()
+        assert viewer.dims.ndisplay == 3
+
+        # Home view gives the camera napari's Home button gave, in both modes.
+        for ndisplay in (3, 2):
+            viewer.dims.ndisplay = ndisplay
+            pump()
+            homes = []
+            for press in (sw.home.click,
+                          viewer.window._qt_viewer.viewerButtons.resetViewButton.click):
+                camera.zoom = camera.zoom * 1.7
+                if ndisplay == 3:
+                    camera.angles = (17.0, 42.0, -63.0)
+                press()
+                pump()
+                homes.append((tuple(camera.center), camera.zoom, tuple(camera.angles)))
+            (center, zoom, angles), (center2, zoom2, angles2) = homes
+            assert center == pytest.approx(center2) and zoom == pytest.approx(zoom2)
+            assert angles == pytest.approx(angles2), homes
+
+        # napari's viewer and layer buttons are gone from the window.
+        qt_viewer = viewer.window._qt_viewer
+        for row in (qt_viewer.viewerButtons, qt_viewer.layerButtons):
+            assert not row.isVisible()
+            assert not any(button.isVisibleTo(window) for button in row.children()
+                           if hasattr(button, "isVisibleTo"))
+
+
+def test_the_mirror_reflects_and_another_brain_clears_it(monkeypatch):
+    with launched(monkeypatch, "view", "GRABE") as (code, viewer):
+        assert code == 0
+        sw = switcher(viewer)
+        sw.mirror.click()
+        pump()
+        assert session(viewer).mirrored
+        sw.mirror.click()
+        pump()
+        assert not session(viewer).mirrored
+        sw.mirror.click()
+        switch_to(viewer, "FAFB14")
+        assert not session(viewer).mirrored and not sw.mirror.isChecked()
 
 
 def test_the_main_layer_is_active_and_outlines_cannot_be_drawn_in(monkeypatch):
@@ -51,3 +249,95 @@ def test_the_main_layer_is_active_and_outlines_cannot_be_drawn_in(monkeypatch):
         pump()
         mine.mode = "add_rectangle"
         assert mine.editable and mine.mode == "add_rectangle"
+
+
+def test_the_view_dock_says_everything_in_words(monkeypatch):
+    """Every string the dock shows: the approved wording, and no ids or tags."""
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import QAbstractButton, QComboBox, QLabel
+
+    with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
+        assert code == 0
+        sw = switcher(viewer)
+        registry = session(viewer).registry
+        menu = sw.combo
+        brains = {menu.itemData(i): menu.itemText(i) for i in range(menu.count())}
+        assert brains == TITLES
+        tips = {menu.itemData(i): menu.itemData(i, Qt.ItemDataRole.ToolTipRole)
+                for i in range(menu.count())}
+        for space, template in (("FAFB14", "FAFB14"), ("JRCFIB2018F", "JRCFIB2018F"),
+                                ("JRCFIB2022M", "JRCFIB2022M"),
+                                ("GRABE", "Grabe 2015")):
+            assert f"the {template} template" in tips[space], tips[space]
+        for space in ("FAFB14", "JRCFIB2018F", "JRCFIB2022M"):
+            assert "electron microscopy" in tips[space], tips[space]
+        assert sw.slice.itemText(0) == "Frontal (17.5° off true)"
+        assert [sw.slice.itemText(i).split(" (")[0] for i in range(sw.slice.count())] == [
+            "Frontal", "Horizontal", "Sagittal"]
+        assert sw.slice.toolTip() == (
+            "Which sections the slider steps through. The sections follow the image's "
+            "own grid, which is at the angle shown from the brain's true plane. Slice "
+            "view only.")
+        assert sw.mirror.text() == "Mirror left and right"
+        assert sw.mirror.toolTip() == (
+            "Show the brain as its mirror image, to compare a left lobe with a right "
+            "one. Display only; the data do not change. The corner arrows follow. "
+            "Opening another brain turns it off.")
+        assert sw.legend.text() == (
+            "Arrows: A anterior, P posterior, D dorsal, V ventral, L left, R right. "
+            "x, y, z are the image's own axes.")
+
+        shown = []
+        for widget in sw.findChildren(QLabel) + sw.findChildren(QAbstractButton):
+            shown += [widget.text(), widget.toolTip()]
+        for combo in sw.findChildren(QComboBox):
+            shown.append(combo.toolTip())
+            for i in range(combo.count()):
+                shown += [combo.itemText(i),
+                          combo.itemData(i, Qt.ItemDataRole.ToolTipRole) or ""]
+        ids = set(registry.assets) | set(registry.atlases)
+        for text in filter(None, shown):
+            assert not re.search(r"[A-Za-z0-9]_[A-Za-z0-9]", text), text
+            assert not re.search(r"[\[\]]", text), text
+            assert not any(re.search(rf"\b{re.escape(i)}\b", text) for i in ids), text
+
+
+def test_the_status_line_says_what_happened(monkeypatch):
+    """Opening, a brain that cannot open, and one that opens but cannot be fitted."""
+    from lobemap.viewer import scene
+    from lobemap.viewer import switcher as module
+
+    with launched(monkeypatch, "view", "GRABE") as (code, viewer):
+        assert code == 0
+        sw = switcher(viewer)
+        seen = []
+        real = sw._load
+
+        def missing(space):
+            seen.append(sw.status.text())
+            raise FileNotFoundError(f"{space}: fafb_stain.zarr")
+
+        sw._load = missing
+        switch_to(viewer, "FAFB14")
+        assert seen == ["Opening FAFB (female brain, EM)…"]
+        assert sw.status.text() == (
+            "Could not open FAFB (female brain, EM): its data are not downloaded; "
+            "run lobemap fetch. Your view is unchanged.")
+        assert session(viewer).space == "GRABE"
+        assert sw.combo.currentData() == "GRABE"
+
+        def unfitted(self):
+            raise RuntimeError("no fit")
+
+        sw._load = real
+        monkeypatch.setattr(scene.SceneSession, "settle_view", unfitted)
+        switch_to(viewer, "FAFB14")
+        assert session(viewer).space == "FAFB14"
+        assert sw.status.text() == (
+            "Opened FAFB (female brain, EM), but could not fit it to the window.")
+
+    assert module.plain_reason(MemoryError()) == "there is not enough memory"
+    assert module.plain_reason(PermissionError()) == (
+        "a data file could not be read; the terminal has the details")
+    assert module.plain_reason(ValueError("x_y")) == (
+        "an unexpected error; the terminal has the details")

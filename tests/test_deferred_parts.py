@@ -741,7 +741,8 @@ def test_a_space_opens_without_its_deferred_meshes_and_a_tab_waits_for_one(monke
 
 
 @pytest.mark.parametrize("reading", ["corners", "mesh"])
-def test_a_switch_that_fails_while_the_thread_reads_leaves_nothing(monkeypatch, reading):
+def test_a_switch_that_fails_while_the_thread_reads_leaves_nothing(monkeypatch, capfd,
+                                                                   reading):
     """Its thread reads no further file, and has ended once the switch is undone.
 
     It fails before the stand-ins, while the corners are read, or after them,
@@ -791,8 +792,10 @@ def test_a_switch_that_fails_while_the_thread_reads_leaves_nothing(monkeypatch, 
         kept = session(viewer)
         before = layer_names(viewer)
         assert _wait(lambda: not _reading())
+        capfd.readouterr()
         switch_to(viewer, space)
-        assert want in switcher(viewer).status.text()
+        assert switcher(viewer).status.text().startswith("Could not open ")
+        assert want in capfd.readouterr().err
         assert not _reading(), "the failed scene's thread outlived it"
         assert session(viewer) is kept
         assert layer_names(viewer) == before

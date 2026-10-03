@@ -14,7 +14,7 @@ import numpy as np
 
 from ..core.registry import Registry
 from .axes import apply_axis_mode
-from .chrome import lock_outlines
+from .chrome import add_dock, lock_outlines, tidy
 from .images import (
     BASE_DISPLAY,
     ROLE_DISPLAY,
@@ -49,6 +49,12 @@ from .view import (
     maximize,
     orient_anterior,
 )
+
+#: The compartment panel's dock, on the right.
+PANEL_TITLE = "Glomeruli and neuropils"
+
+#: The View dock, on the left; see `switcher`.
+VIEW_TITLE = "View"
 
 #: Slice x-y and step through z, the way a confocal stack is read. Volume axes
 #: are (x, y, z) to match the mesh columns, and napari would otherwise display
@@ -320,9 +326,7 @@ def load_space(
             contours=session.contours, space=space,
             names=list(session.parts), realize=session.realize,
         )
-        session.dock = viewer.window.add_dock_widget(
-            session.panel, area="right", name="Compartments"
-        )
+        session.dock = add_dock(viewer, session.panel, PANEL_TITLE, "right")
         session.callbacks += install_picking(
             viewer, session.surfaces, session.contours, panel=session.panel
         )
@@ -387,13 +391,10 @@ def run(
         switcher = SpaceSwitcher(viewer, registry, session, _load)
         # Added ONCE and never torn down, unlike the compartment panel: it is
         # the control that does the switching, so it cannot be owned by the
-        # scene it replaces. Right, beside the compartment panel and above it:
-        # the two are the scene's controls, and which space is open is read
-        # before anything about it.
-        switcher.dock = viewer.window.add_dock_widget(
-            switcher, area="right", name="Space", tabify=False
-        )
-        switcher.settle()
+        # scene it replaces. Left, tabbed with napari's layer settings, so the
+        # right column is the compartment panel's alone; see `chrome.tidy`.
+        view_dock = add_dock(viewer, switcher, VIEW_TITLE, "left")
+        tidy(viewer, view_dock, session.dock)
     except BaseException:
         viewer.close()
         raise
@@ -410,10 +411,12 @@ __all__ = [
     "BASE_DISPLAY",
     "DIMS_ORDER_XYZ",
     "MIRROR_AXIS",
+    "PANEL_TITLE",
     "REFERENCE_CONTOUR_COLOR",
     "ROLE_DISPLAY",
     "VIEW3D_MAX_AXIS",
     "VIEW3D_MAX_VOXELS",
+    "VIEW_TITLE",
     "MissingAssets",
     "SceneSession",
     "ViewRequestError",

@@ -172,7 +172,7 @@ def _rendered(viewer) -> dict:
         "visible": sorted(layer.name for layer in viewer.layers if layer.visible),
         "affines": {layer.name: np.round(layer.affine.affine_matrix, 6).tolist()
                     for layer in viewer.layers},
-        "docks": len(docks(viewer, "Compartments")),
+        "docks": len(docks(viewer, "Glomeruli and neuropils")),
         "handlers": handler_counts(viewer),
         # Building the next scene turns both triads onto its space.
         "triads": _triads(viewer),
@@ -240,14 +240,16 @@ def _fail_in_panel(monkeypatch, viewer):
 
 
 def _fail_in_dock(monkeypatch, viewer):
-    real = viewer.window.add_dock_widget
+    from lobemap.viewer import app
 
-    def refuse(widget, *args, **kwargs):
-        if kwargs.get("name") == "Compartments":
+    real = app.add_dock
+
+    def refuse(viewer, widget, name, *args, **kwargs):
+        if name == app.PANEL_TITLE:
             raise RuntimeError("the dock refused")
-        return real(widget, *args, **kwargs)
+        return real(viewer, widget, name, *args, **kwargs)
 
-    monkeypatch.setattr(viewer.window, "add_dock_widget", refuse)
+    monkeypatch.setattr(app, "add_dock", refuse)
     return "the dock refused"
 
 
@@ -295,7 +297,7 @@ FAILURES = {
 
 @pytest.mark.parametrize("ndisplay", ["2", "3"])
 @pytest.mark.parametrize("where", list(FAILURES))
-def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, where, ndisplay):
+def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, capfd, where, ndisplay):
     with launched(monkeypatch, "view", SPACE, "--ndisplay", ndisplay) as (
         code, viewer,
     ):
@@ -318,10 +320,12 @@ def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, where, ndisplay
             assert before[PRIMARY]["filled drawn"]
 
         want = FAILURES[where](monkeypatch, viewer)
+        capfd.readouterr()
         switch_to(viewer, TARGET)
         pump(400)
 
-        assert want in switcher(viewer).status.text()
+        assert switcher(viewer).status.text().startswith("Could not open Grabe 2015 (")
+        assert want in capfd.readouterr().err
         _assert_same(before, _rendered(viewer))
         assert session(viewer) is kept
         center, zoom, angles = _camera(viewer)
@@ -355,14 +359,14 @@ def test_a_switch_that_succeeds_still_replaces_the_scene(monkeypatch):
         assert switcher(viewer).status.text() == ""
         assert all(name.startswith(("grabe", "Grabe")) for name in layer_names(viewer)), (
             layer_names(viewer))
-        assert len(docks(viewer, "Compartments")) == 1
+        assert len(docks(viewer, "Glomeruli and neuropils")) == 1
         # The mirror does not carry over, or the new space would come up
         # reflected with nothing clicked; the anatomy chosen for the slice
         # does.
         assert not sess.mirrored
         assert not switcher(viewer).mirror.isChecked()
         assert all(not s.mirrored for s in sess.surfaces.values())
-        assert switcher(viewer).slice.currentText().startswith("Anterior-Posterior")
+        assert switcher(viewer).slice.currentText().startswith("Frontal (")
         # On the new scene's own grid, cutting its atlas.
         axis = int(viewer.dims.order[0])
         start, _stop, step = viewer.dims.range[axis]

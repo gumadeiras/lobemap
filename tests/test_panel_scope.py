@@ -1,13 +1,13 @@
 """Which panel controls work where, and which rows each one acts on.
 
-Label and Fill draw on the 2D slice only, so they are disabled in 3D; the
-space picker heads the right column; each bulk button names its rows.
+Label and Fill draw on the 2D slice only, so they are disabled in 3D; each
+bulk button names its rows. Where the panel sits is `test_view_dock`'s.
 """
 
 from __future__ import annotations
 
 import pytest
-from viewer_harness import launched, pump, session, switch_to
+from viewer_harness import launched, pump, session
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
@@ -48,31 +48,7 @@ def test_label_and_fill_are_disabled_in_3d_only(monkeypatch):
                 assert buttons["All"].isEnabled()
 
 
-# -- the dock order and the button scopes ----------------------------------
-
-
-def _dock_tops(viewer):
-    from qtpy.QtCore import Qt
-    from qtpy.QtWidgets import QDockWidget
-
-    window = viewer.window._qt_window
-    # Laid out for real, but never put on screen.
-    window.setAttribute(Qt.WA_DontShowOnScreen, True)
-    window.resize(1400, 900)
-    window.show()
-    pump(100)
-    tops = {d.windowTitle(): d.geometry().top()
-            for d in window.findChildren(QDockWidget) if d.isVisible()}
-    return tops["Space"], tops["Compartments"]
-
-
-def test_the_space_picker_sits_above_the_compartments(monkeypatch):
-    with launched(monkeypatch, "view", "GRABE") as (code, viewer):
-        space, panel = _dock_tops(viewer)
-        assert space < panel, (space, panel)
-        switch_to(viewer, "FAFB14")
-        space, panel = _dock_tops(viewer)
-        assert space < panel, "a switch put the picker back below"
+# -- the button scopes -----------------------------------------------------
 
 
 def test_each_bulk_button_says_which_rows_it_acts_on(monkeypatch):

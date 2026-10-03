@@ -1,11 +1,15 @@
-"""A space picker that swaps the scene without restarting the viewer.
+"""The View dock: which brain is open, and how it is shown.
 
-Rebuilding in place rather than relaunching is the whole point: the process,
-the Qt window and the GPU context survive, so a switch costs only the data.
-Tearing the window down and putting a new one up would also lose the
-maximized geometry and put a fresh window wherever the window manager felt
-like, which for a viewer whose default view is carefully fitted is a
-regression, not a neutral implementation detail.
+Brain, 3D or Slice, Home view, the sections a slice steps through, and the
+mirror: the controls that belong to the scene rather than to one atlas,
+whose controls are the compartment panel's.
+
+Picking another brain rebuilds the scene in place rather than relaunching:
+the process, the Qt window and the GPU context survive, so a switch costs
+only the data. Tearing the window down and putting a new one up would also
+lose the maximized geometry and put a fresh window wherever the window
+manager felt like, which for a viewer whose default view is carefully
+fitted is a regression, not a neutral implementation detail.
 
 The next scene is built beside the open one, which is torn down only once
 that build has succeeded, so a failed switch leaves the user's scene as it
@@ -15,39 +19,99 @@ was. `SceneSession.teardown` does the unloading; this is only the control.
 from __future__ import annotations
 
 import contextlib
+import re
+import sys
+import traceback
 
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from .request import loadable_spaces
-from .slicing import slice_axes
+from .request import MissingAssets, loadable_spaces
+from .slicing import AXIS_LETTERS, slice_axes
 from .view import capture_view, restore_view
 
-#: What the slice-axis menu is for, and why its angles are shown.
-SLICE_TIP = (
-    "The array axis 2D steps along, named by the anatomical axis nearest it. "
-    "A slice is cut along the voxel grid, and the angle is how far that grid "
-    "is turned from the anatomy -- which is also why no anatomical arrows are "
-    "drawn over a 2D slice. 2D only."
+#: The plane a section lies in, by the anatomical axis the slider steps along.
+PLANES = {"Anterior-Posterior": "Frontal", "Dorsal-Ventral": "Horizontal",
+          "Left-Right": "Sagittal"}
+
+SECTIONS_TIP = (
+    "Which sections the slider steps through. The sections follow the image's "
+    "own grid, which is at the angle shown from the brain's true plane. Slice "
+    "view only."
 )
+MIRROR_TIP = (
+    "Show the brain as its mirror image, to compare a left lobe with a right "
+    "one. Display only; the data do not change. The corner arrows follow. "
+    "Opening another brain turns it off."
+)
+THREE_D_TIP = "Show the brain in 3D. Drag to turn it."
+SLICE_TIP = "Show one section at a time. The slider under the image steps through them."
+HOME_TIP = "Fit the brain to the window. In 3D, also turn it to face the front, dorsal side up."
+#: Said under the Sections menu while 3D disables it.
+SLICE_ONLY = "Slice view only"
+#: What the corner arrows mean; 3D only, where the anatomical ones are drawn.
+ARROWS = (
+    "Arrows: A anterior, P posterior, D dorsal, V ventral, L left, R right. "
+    "x, y, z are the image's own axes."
+)
+
+OPENING = "Opening {title}…"
+FAILED = "Could not open {title}: {reason}. Your view is unchanged."
+UNFITTED = "Opened {title}, but could not fit it to the window."
+
+
+def section_label(choice) -> str:
+    """'Frontal (17.5° off true)': the plane, and its angle to the anatomy."""
+    if choice.anatomy is None:
+        return f"Image axis {AXIS_LETTERS[choice.axis]}"
+    return f"{PLANES[choice.anatomy]} ({choice.degrees:.1f}° off true)"
+
+
+def brain_tip(space) -> str:
+    """The brain's title with "EM" spelled out, and the template it is shown in.
+
+    'Hemibrain (female, EM)' gives 'Hemibrain: female, electron microscopy.
+    Shown in the JRCFIB2018F template.' A space with no bridging template is
+    its own template, named as the brain is: 'the Grabe 2015 template'.
+    """
+    title = space.title or space.id
+    name, _, details = title.partition(" (")
+    details = re.sub(r"\bEM\b", "electron microscopy", details.rstrip(")"))
+    lead = f"{name}: {details}" if details else name
+    return f"{lead}. Shown in the {space.flybrains_template or name} template."
+
+
+def plain_reason(exc: BaseException) -> str:
+    """Why a brain did not open, in words; the details go to the terminal."""
+    if isinstance(exc, (MissingAssets, FileNotFoundError)):
+        return "its data are not downloaded; run lobemap fetch"
+    if isinstance(exc, MemoryError):
+        return "there is not enough memory"
+    if isinstance(exc, OSError):
+        return "a data file could not be read; the terminal has the details"
+    return "an unexpected error; the terminal has the details"
 
 
 class SpaceSwitcher(QWidget):
-    """Choose the coordinate space; rebuilds the scene on change.
+    """The View dock: choose the brain, and how it is shown.
 
-    Only spaces that actually have something to show are listed. A space with
-    no ingested assets raises from `build_scene`, and offering a choice that
-    cannot be honoured is worse than not offering it.
+    Only brains that actually have something to show are listed. A space
+    with no ingested assets raises from `build_scene`, and offering a choice
+    that cannot be honoured is worse than not offering it.
 
-    Also holds the two controls that belong to the scene rather than to one
-    atlas: the mirror, and the axis a 2D slice steps along.
+    A control that applies to one mode stays visible in the other, disabled,
+    and says why.
     """
 
     loadable_spaces = staticmethod(loadable_spaces)
@@ -59,104 +123,104 @@ class SpaceSwitcher(QWidget):
         self.session = session
         self._load = load
         self._busy = False
-        #: This widget's own QDockWidget, set by whoever docks it. Needed to
-        #: re-assert the vertical order after a reload; see `settle`.
-        self.dock = None
 
         self.combo = QComboBox()
         for space_id in self.loadable_spaces(registry):
             space = registry.spaces[space_id]
             self.combo.addItem(space.title or space_id, space_id)
+            self.combo.setItemData(self.combo.count() - 1, brain_tip(space),
+                                   Qt.ItemDataRole.ToolTipRole)
         index = self.combo.findData(session.space)
         if index >= 0:
             self.combo.setCurrentIndex(index)
+        self._narrow(self.combo)
+        self._on_brain_shown()
         self.combo.currentIndexChanged.connect(self._on_change)
 
-        self.mirror = QCheckBox("Mirror")
-        self.mirror.setToolTip(
-            "Show this space reflected left-right, for display only. The "
-            "data is untouched, and both axis triads follow the mirror, so "
-            "the anatomical one still names the side you are looking at. "
-            "Switching space clears it."
-        )
+        self.three_d = self._mode_button("3D", THREE_D_TIP, 3)
+        self.slice_view = self._mode_button("Slice", SLICE_TIP, 2)
+        group = QButtonGroup(self)
+        group.addButton(self.three_d)
+        group.addButton(self.slice_view)
+        self.home = QPushButton("Home view")
+        self.home.setToolTip(HOME_TIP)
+        # Through the viewer, as napari's own Home button went: the scene
+        # wraps `reset_view` to face the anatomy (`install_home_orientation`).
+        self.home.clicked.connect(lambda: self.viewer.reset_view())
+
+        #: The sections the slider steps through, by array axis.
+        self.slice = QComboBox()
+        self.slice.setToolTip(SECTIONS_TIP)
+        self._narrow(self.slice)
+        self.slice.currentIndexChanged.connect(self._on_slice)
+        self.slice_note = QLabel(SLICE_ONLY)
+        # Shown in 3D only; holding its line keeps the rows below still.
+        policy = self.slice_note.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        self.slice_note.setSizePolicy(policy)
+        self._fill_slices()
+
+        self.mirror = QCheckBox("Mirror left and right")
+        self.mirror.setToolTip(MIRROR_TIP)
         self.mirror.toggled.connect(self._on_mirror)
 
-        #: The slice axis, by the anatomical name of each choice.
-        self.slice = QComboBox()
-        self.slice.setToolTip(SLICE_TIP)
-        self.slice.currentIndexChanged.connect(self._on_slice)
-        self._fill_slices()
-        # The switcher outlives every scene, so it is connected once.
+        self.legend = QLabel(ARROWS)
+        self.legend.setWordWrap(True)
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+
+        show = QHBoxLayout()
+        show.addWidget(self.three_d)
+        show.addWidget(self.slice_view)
+        show.addStretch(1)
+        show.addWidget(self.home)
+        sections = QVBoxLayout()
+        sections.addWidget(self.slice)
+        sections.addWidget(self.slice_note)
+        form = QFormLayout(self)
+        form.setContentsMargins(8, 6, 8, 6)
+        # The menus take the dock's width; on macOS they kept their hint.
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.addRow("Brain", self.combo)
+        form.addRow("Show", show)
+        form.addRow("Sections", sections)
+        form.addRow("Mirror", self.mirror)
+        form.addRow(self.legend)
+        form.addRow(self.status)
+
+        # The dock outlives every scene, so it is connected once.
         viewer.dims.events.ndisplay.connect(self._on_mode)
         viewer.dims.events.order.connect(self._on_order)
         self._on_mode()
 
-        self.status = QLabel("")
-        self.status.setWordWrap(True)
+    def _mode_button(self, text: str, tip: str, ndisplay: int) -> QPushButton:
+        button = QPushButton(text)
+        button.setCheckable(True)
+        button.setToolTip(tip)
+        button.clicked.connect(lambda: setattr(self.viewer.dims, "ndisplay", ndisplay))
+        return button
 
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Space:"))
-        row.addWidget(self.combo, 1)
-        row.addWidget(self.mirror)
-        slicing = QHBoxLayout()
-        slicing.addWidget(QLabel("Slice along:"))
-        slicing.addWidget(self.slice, 1)
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(6, 4, 6, 4)
-        outer.addLayout(row)
-        outer.addLayout(slicing)
-        outer.addWidget(self.status)
-        # No trailing stretch: it made the widget claim any height it was
-        # given, which is the opposite of what is wanted here.
+    @staticmethod
+    def _narrow(combo: QComboBox) -> None:
+        """Let a menu be narrower than its longest item, so the column can be."""
+        combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(12)
+        combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-    def settle(self) -> None:
-        """Sit above the compartment panel, however it was just re-added.
+    def _title(self, space_id: str) -> str:
+        space = self.registry.spaces.get(space_id)
+        return (space.title if space is not None else "") or space_id
 
-        Which space is open is read before anything about it, so the picker
-        heads the right column. Loading a scene creates a NEW compartment
-        panel and docks it, and Qt places a newly added dock wherever its
-        insertion lands, so the order is pinned by re-splitting rather than
-        left to insertion order.
-        """
-        panel = getattr(self.session, "dock", None)
-        if self.dock is None or panel is None:
-            return
-        window = getattr(self.viewer.window, "_qt_window", None)
-        if window is None:
-            return
-        with contextlib.suppress(Exception):
-            from qtpy.QtCore import Qt
-
-            window.splitDockWidget(self.dock, panel, Qt.Vertical)
-            # And give it as little of the column as it will take. This is a
-            # one-line control; the compartment table beside it is the thing
-            # worth the height. Qt distributes by RATIO, not pixels, so the
-            # numbers only have to be lopsided -- and it will still respect
-            # the widget's minimum, which is why `collapse` shrinks that too.
-            self.collapse()
-
-    def collapse(self) -> None:
-        """Shrink to the height this widget actually needs."""
-        window = getattr(self.viewer.window, "_qt_window", None)
-        panel = getattr(self.session, "dock", None)
-        if window is None or panel is None or self.dock is None:
-            return
-        with contextlib.suppress(Exception):
-            from qtpy.QtCore import Qt
-
-            self.dock.setSizePolicy(self.dock.sizePolicy().horizontalPolicy(),
-                                    QSizePolicy.Policy.Minimum)
-            wanted = max(self.dock.sizeHint().height(),
-                         self.dock.minimumSizeHint().height())
-            window.resizeDocks([self.dock, panel], [wanted, 10_000],
-                               Qt.Vertical)
+    def _on_brain_shown(self) -> None:
+        self.combo.setToolTip(self.combo.currentData(Qt.ItemDataRole.ToolTipRole) or "")
 
     def _fill_slices(self, keep: str | None = None) -> None:
-        """List the open space's slice axes, keeping the anatomy chosen.
+        """List the open brain's sections, keeping the anatomy chosen.
 
         The same anatomical axis is a different array axis in another space
         -- anterior-posterior is z in FAFB and y in the hemibrain -- so a
-        switch keeps the name the user picked and finds its axis anew.
+        switch keeps the plane the user picked and finds its axis anew.
         """
         space = self.registry.spaces.get(self.session.space)
         choices = slice_axes(space)
@@ -164,7 +228,7 @@ class SpaceSwitcher(QWidget):
         try:
             self.slice.clear()
             for choice in choices:
-                self.slice.addItem(choice.label, choice.axis)
+                self.slice.addItem(section_label(choice), choice.axis)
             wanted = next((c.axis for c in choices if keep and c.anatomy == keep),
                           self.session.slice_axis)
             self.slice.setCurrentIndex(max(0, self.slice.findData(wanted)))
@@ -181,15 +245,21 @@ class SpaceSwitcher(QWidget):
             self.session.set_slice_axis(int(axis))
 
     def _on_mode(self, event=None) -> None:
-        self.slice.setEnabled(self.viewer.dims.ndisplay == 2)
+        three_d = self.viewer.dims.ndisplay == 3
+        self.three_d.setChecked(three_d)
+        self.slice_view.setChecked(not three_d)
+        self.slice.setEnabled(not three_d)
+        self.slice_note.setVisible(three_d)
+        self.legend.setVisible(three_d)
 
     def _on_order(self, event=None) -> None:
-        """Keep napari's own roll-dims button in step with the menu.
+        """Keep napari's roll-dims shortcut in step with the Sections menu.
 
-        In 2D a roll picks another slice axis behind the menu's back: the
-        menu kept its old name and the contours showed an empty plane. It is
-        taken as a choice made in the menu. In 3D the order must stay the
-        identity (see `app.install_display_mode`), so a roll there is undone.
+        Its button is hidden, but its key still rolls the axes. In 2D a roll
+        picks another slice axis behind the menu's back: the menu kept its
+        old name and the contours showed an empty plane. It is taken as a
+        choice made in the menu. In 3D the order must stay the identity (see
+        `app.install_display_mode`), so a roll there is undone.
         """
         if self._busy:
             return
@@ -211,6 +281,7 @@ class SpaceSwitcher(QWidget):
             self.session.set_mirror(on)
 
     def _on_change(self, _index: int) -> None:
+        self._on_brain_shown()
         want = self.combo.currentData()
         if self._busy or want is None or want == self.session.space:
             return
@@ -233,11 +304,17 @@ class SpaceSwitcher(QWidget):
         and the home button -- and is put back from what was captured before
         it started. Rebuilding the previous space instead, as this used to,
         gave its defaults back rather than the user's scene.
+
+        The status line says what happened in words; what went wrong in
+        detail is printed to the terminal.
         """
         old = self.session
         anatomy = self._anatomy.get(old.slice_axis)
         before = capture_view(self.viewer)
-        self.status.setText(f"loading {want}...")
+        title = self._title(want)
+        self.status.setText(OPENING.format(title=title))
+        # Painted now: the build holds the event loop until it is done.
+        self.status.repaint()
         new = None
         try:
             new = self._load(want)
@@ -255,7 +332,8 @@ class SpaceSwitcher(QWidget):
             for step in steps:
                 with contextlib.suppress(Exception):
                     step()
-            self.status.setText(f"{want} failed: {exc}")
+            _report(f"could not open {want}", exc)
+            self.status.setText(FAILED.format(title=title, reason=plain_reason(exc)))
             index = self.combo.findData(old.space)
             if index >= 0:
                 self.combo.setCurrentIndex(index)
@@ -270,12 +348,18 @@ class SpaceSwitcher(QWidget):
         self.mirror.setChecked(False)
         try:
             new.settle_view()
-            self.settle()
             self.status.setText("")
         except Exception as exc:                      # noqa: BLE001
             # The new scene is complete and the old one gone; only framing
             # it failed, which is worth saying but not undoing.
-            self.status.setText(f"{want}: {exc}")
+            _report(f"opened {want} but could not fit it", exc)
+            self.status.setText(UNFITTED.format(title=title))
 
 
-__all__ = ["SpaceSwitcher"]
+def _report(what: str, exc: BaseException) -> None:
+    """Print a failure in full to the terminal, where a bug report starts."""
+    print(f"lobemap: {what}:", file=sys.stderr)
+    traceback.print_exception(exc, file=sys.stderr)
+
+
+__all__ = ["SpaceSwitcher", "brain_tip", "plain_reason", "section_label"]
