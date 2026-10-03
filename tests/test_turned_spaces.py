@@ -33,9 +33,11 @@ def _center_on_the_atlas(viewer, sess) -> None:
     the pivot a turn keeps, so the turned plane cuts the atlas."""
     name = sess.registry.primary_atlas(sess.space).id
     surface, contour = sess.surfaces[name], sess.contours[name]
+    # The largest compartment's center: every plane through it cuts it.
+    largest = int(np.argmax(np.diff(surface.meshset.vertex_offsets)))
     # Through the contour layer, which carries the mirror. At rest.
-    middle = np.asarray(contour.layer.data_to_world(
-        np.asarray(surface.meshset.vertices, float).mean(axis=0)), float)
+    middle = np.asarray(contour.layer.data_to_world(surface.meshset.centroid(largest)),
+                        float)
     axis = int(viewer.dims.order[0])
     start, _stop, step = viewer.dims.range[axis]
     viewer.dims.set_current_step(axis, round((middle[axis] - start) / step))
@@ -301,6 +303,44 @@ def test_a_label_volume_shown_while_turned_shows_the_turned_plane(registry):
         th.settle_canvas(viewer)
         assert _texels_against_the_source(viewer, sess, labels, registry)
         assert len(viewer.layers) == len(sess.all_layers())
+    finally:
+        viewer.close()
+        pump()
+
+
+@pytest.mark.parametrize("space", SPACES)
+def test_aligned_sections_in_every_space(registry, space):
+    """At zero angles the aligned section is perpendicular to the anatomical
+    axis nearest each slice axis -- 15 to 32 degrees off it -- exact, and
+    the alignment off gives back the view."""
+    from lobemap.core.model import anatomical_axes
+    from lobemap.viewer.slicing import slice_axes
+
+    viewer, sess = _open(registry, space, 2)
+    try:
+        frame = anatomical_axes(registry.spaces[space])
+        names = {"Anterior-Posterior": "A", "Dorsal-Ventral": "D", "Left-Right": "R"}
+        for choice in slice_axes(registry.spaces[space]):
+            sess.set_slice_axis(choice.axis)
+            _center_on_the_atlas(viewer, sess)
+            before = th.state(viewer)
+            sess.set_aligned(True)
+            th.settle_canvas(viewer)
+            contour = sess.contours[registry.primary_atlas(space).id]
+            _origin, normal = th.plane_in_mesh(viewer, contour)
+            pole = np.asarray(frame[names[choice.anatomy]], float)
+            cos = abs(normal @ pole) / np.linalg.norm(normal)
+            assert cos == pytest.approx(1.0, abs=1e-9), (choice.label, cos)
+            grid = np.eye(3)[choice.axis]
+            off = np.degrees(np.arccos(abs(normal @ grid) / np.linalg.norm(normal)))
+            assert off == pytest.approx(choice.degrees, abs=0.05), choice.label
+            assert _contour_vs_trimesh(viewer, sess, th.to_mesh(contour)) > 0
+            for layer in sess.images:
+                if layer.visible and layer.metadata["lobemap"]["asset"] == IMAGES[space]:
+                    assert _texels_against_the_source(viewer, sess, layer, registry)
+            sess.set_aligned(False)
+            th.settle_canvas(viewer)
+            assert th.state(viewer) == before
     finally:
         viewer.close()
         pump()

@@ -16,6 +16,11 @@
   its axes, and the contours cut the meshes in the turned frame
   (`sections.PlaneFrame`). The slider then steps along the turned line of
   sight, over the scene's extent along it.
+- **Aligned**, 2D's base view is not the image grid but the anatomical frame
+  nearest it -- the anatomy 3D's Home is turned onto -- so at zero angles the
+  section is the brain's own frontal, horizontal or sagittal plane, not one
+  15 to 32 degrees off it. It is a fixed turn composed with the angles, and
+  takes the path across the grid.
 
 At rest -- zero angles, no alignment -- none of this is installed, and the
 scene is exactly as `main` shows it. Leaving rest records the view
@@ -96,7 +101,7 @@ class TurnedView:
         if self.at_rest:
             return None
         _spin, tilt, turn = self.angles
-        return "oblique" if tilt or turn or self.aligned else "spin"
+        return "oblique" if tilt or turn or self._anatomy() is not None else "spin"
 
     @property
     def shown(self):
@@ -115,7 +120,24 @@ class TurnedView:
 
     def _q(self) -> np.ndarray:
         """The 2D turn's rotation for the current slice."""
-        return turn_matrix(self.angles, self.viewer.dims.order)
+        return turn_matrix(self.angles, self.viewer.dims.order, self._anatomy())
+
+    def _anatomy(self):
+        """With the alignment, the anatomical directions A, D and R as columns,
+        reflected with the scene; else None, as for a space with no anatomy."""
+        if not self.aligned:
+            return None
+        from ..core.model import anatomical_axes
+        from .view import MIRROR_AXIS
+
+        space = self._space()
+        frame = anatomical_axes(space) if space is not None else None
+        if frame is None:
+            return None
+        anatomy = np.column_stack([frame["A"], frame["D"], frame["R"]]).astype(float)
+        if self.session.mirrored:
+            anatomy[MIRROR_AXIS] *= -1.0
+        return anatomy
 
     def _mirror(self) -> np.ndarray:
         s = self.session
@@ -135,6 +157,7 @@ class TurnedView:
         """Turn the scene to `angles`, and the 2D base view to the anatomy or not."""
         angles = tuple(float(a) for a in angles)
         aligned = self.aligned if aligned is None else bool(aligned)
+        same_angles, was_aligned = angles == self.angles, self.aligned
         was_rest = self.at_rest
         if was_rest and (angles != ZERO or aligned):
             self._leave_rest()
@@ -147,7 +170,9 @@ class TurnedView:
             # The 2D turn is pivoted afresh about where 3D looks, on entry.
             self.turn = None
             self._hook()
-            self._orient()
+            if not (same_angles and aligned != was_aligned):
+                # 3D's base view is Home, whatever 2D's is.
+                self._orient()
             return
         self._turn_2d(self._focus())
         # The next entry into 3D faces Home turned by these angles.

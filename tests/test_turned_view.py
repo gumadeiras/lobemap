@@ -36,9 +36,9 @@ def _scene(viewer, registry, axis=2, mirrored=False, multiscale=False):
     th.settle_canvas(viewer)
     if axis != 2:
         session.set_slice_axis(axis)
-    th.through_middle(viewer, axis)
     if mirrored:
         session.set_mirror(True)
+    th.through_middle(viewer, axis, session.contours["synthetic"])
     th.settle_canvas(viewer)
     return session
 

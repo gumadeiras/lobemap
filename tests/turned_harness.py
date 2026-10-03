@@ -104,16 +104,17 @@ def build(viewer, registry, space: str = "GRABE", multiscale: bool = False):
     return session
 
 
-def through_middle(viewer, axis: int = 2) -> None:
+def through_middle(viewer, axis: int = 2, contour=None) -> None:
     """Fit, then slice along `axis` through the largest body's center and
-    center the view on it: the pivot a turn keeps where it is."""
+    center the view on it: the pivot a turn keeps where it is. Through
+    `contour`'s layer, if given, which carries the mirror."""
     from lobemap.viewer.view import fit_view
 
-    middle = np.mean([c for _n, c, _a in BODIES], axis=0)
-    viewer.dims.set_point(axis, float(middle[axis]))
     fit_view(viewer)
     # The largest body's center: every plane through it cuts it.
     pivot = np.asarray(BODIES[0][1], float)
+    if contour is not None:
+        pivot = np.asarray(contour.layer.data_to_world(pivot), float)
     viewer.dims.set_point(axis, float(pivot[axis]))
     center = list(viewer.scene.camera.center)
     center[-2:] = pivot[list(viewer.dims.displayed)]
