@@ -100,17 +100,31 @@ def section_label(choice, aligned: bool = False) -> str:
     return f"{PLANES[choice.anatomy]} ({choice.degrees:.1f}° off true)"
 
 
-def brain_tip(space) -> str:
-    """The brain's title with "EM" spelled out, and the template it is shown in.
+#: The abbreviations in the brains' titles, and what each stands for.
+SPELLED = {
+    "EM": "electron microscopy",
+    "CNS": "central nervous system",
+    "FAFB": "full adult fly brain",
+}
 
-    'Hemibrain (female, EM)' gives 'Hemibrain: female, electron microscopy.
-    Shown in the JRCFIB2018F template.' A space with no bridging template is
-    its own template, named as the brain is: 'the Grabe 2015 template'.
+
+def brain_tip(space) -> str:
+    """The brain's title with its abbreviations spelled out, and the template
+    it is shown in.
+
+    'Male CNS (EM)' gives 'Male CNS (central nervous system): electron
+    microscopy. Shown in the JRCFIB2022M template.' A space with no bridging
+    template is its own template, named as the brain is: 'the Grabe 2015
+    template'.
     """
     title = space.title or space.id
     name, _, details = title.partition(" (")
-    details = re.sub(r"\bEM\b", "electron microscopy", details.rstrip(")"))
-    lead = f"{name}: {details}" if details else name
+    details = details.rstrip(")")
+    spelled = [SPELLED[w] for w in re.findall(r"\b[A-Z]{2,}\b", name) if w in SPELLED]
+    lead = f"{name} ({', '.join(spelled)})" if spelled else name
+    for short, long in SPELLED.items():
+        details = re.sub(rf"\b{short}\b", long, details)
+    lead = f"{lead}: {details}" if details else lead
     return f"{lead}. Shown in the {space.flybrains_template or name} template."
 
 
