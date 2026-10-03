@@ -111,8 +111,8 @@ class _Cell(QTableWidgetItem):
         return super().__lt__(other)
 
 
-class _Value(QLabel):
-    """One detail's value, as tall as the longest value it can show needs.
+class SteadyLabel(QLabel):
+    """A label as tall as the longest of the texts it can show needs.
 
     Sized again whenever its width changes, so selecting another row changes
     its text and nothing else. Measured on a plain label with its font and
@@ -349,7 +349,7 @@ class AtlasTab(QWidget):
         Below the table rather than in it: they are too many to be columns
         in a dock this narrow, and only one row's are read at a time. Each
         line is as tall as its longest value in this tab needs, wrapped and
-        never cut short (`_Value`), so selecting another row changes their
+        never cut short (`SteadyLabel`), so selecting another row changes their
         text and nothing else: a value that took one line more used to push
         the table up.
         """
@@ -369,7 +369,7 @@ class AtlasTab(QWidget):
         #: Field -> the label showing its value for the selected row.
         self.details: dict[str, QLabel] = {}
         for name in self.detail_fields:
-            value = _Value(lambda name=name: [row.details[name] for row in self.rows.values()])
+            value = SteadyLabel(lambda name=name: [row.details[name] for row in self.rows.values()])
             form.addRow(name, value)
             self.details[name] = value
         #: Opens the Virtual Fly Brain term page of the selected glomerulus.
@@ -646,4 +646,5 @@ __all__ = [
     "RECEPTOR_COL",
     "VISIBLE_COL",
     "AtlasTab",
+    "SteadyLabel",
 ]

@@ -503,11 +503,11 @@ def test_3d_still_shows_the_mesh(session):
         assert tab.contour.layer.visible is False
 
 
-# -- which tab opens -------------------------------------------------------
+# -- which table opens -----------------------------------------------------
 #
 # Reference geometry is built into the scene before the atlases so that it
-# sits underneath them, which also made a neuropil shell tab 0. The panel
-# then opened on the one tab with no glomeruli behind it.
+# sits underneath them, which once made a neuropil shell the first tab. The
+# panel then opened on the one table with no glomeruli behind it.
 
 @pytest.mark.requires_data
 @pytest.mark.parametrize("space,expect", [
@@ -528,8 +528,10 @@ def test_it_opens_on_the_spaces_primary_atlas(registry, space, expect):
         surfaces, contours = build_scene(viewer, registry, space)
         panel = CompartmentPanel(viewer, surfaces, registry=registry,
                                  contours=contours, space=space)
-        assert panel.currentWidget() is panel.tabs[expect]
-        assert panel.currentWidget().is_atlas
+        assert panel.tabText(panel.currentIndex()) == "Glomeruli"
+        assert panel.current() == expect
+        assert panel.currentWidget().stack.currentWidget() is panel.tabs[expect]
+        assert panel.tabs[expect].is_atlas
     finally:
         viewer.close()
 
@@ -552,15 +554,15 @@ def test_the_open_tab_is_the_atlas_that_is_drawn(registry):
                                  contours=contours, space="JRCFIB2018F")
         visible = [name for name, s in surfaces.items()
                    if name in registry.atlases and s.layer.visible]
-        assert visible == [k for k, v in panel.tabs.items()
-                           if v is panel.currentWidget()]
+        assert visible == [panel.current()]
     finally:
         viewer.close()
 
 
 @pytest.mark.requires_data
-def test_reference_tabs_come_after_every_atlas(registry):
-    """Neuropil and brain shells read last, whatever order the scene built.
+def test_the_glomeruli_come_before_the_neuropils(registry):
+    """Neuropil and brain shells read last, whatever order the scene built,
+    and in a tab of their own.
 
     They are added to the scene FIRST, so without a reordering step the
     panel led with them.
@@ -578,10 +580,10 @@ def test_reference_tabs_come_after_every_atlas(registry):
         surfaces, contours = build_scene(viewer, registry, "JRCFIB2018F")
         panel = CompartmentPanel(viewer, surfaces, registry=registry,
                                  contours=contours, space="JRCFIB2018F")
-        kinds = [panel.widget(i).is_atlas for i in range(panel.count())]
-        assert kinds == sorted(kinds, reverse=True), [
-            panel.tabText(i) for i in range(panel.count())
-        ]
-        assert not all(kinds), "this space has reference geometry to order"
+        assert [panel.tabText(i) for i in range(panel.count())] == ["Glomeruli", "Neuropils"]
+        for i, atlas in ((0, True), (1, False)):
+            page = panel.widget(i)
+            assert {panel.tabs[name].is_atlas for name in page.names} == {atlas}
+        assert len(panel.widget(1).names) == 1, "this space has reference geometry"
     finally:
         viewer.close()

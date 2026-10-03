@@ -56,6 +56,7 @@ def _layout(viewer, sess) -> dict:
                                          area.verticalScrollBar().value())
     panel = sess.panel
     out["tab"] = panel.currentIndex()
+    out["sources"] = {kind: page.chosen for kind, page in panel.pages.items()}
     for name, tab in panel.tabs.items():
         model = tab.table.selectionModel()
         out[("selected", name)] = sorted(i.row() for i in model.selectedRows())
@@ -93,7 +94,7 @@ def test_hovering_changes_only_the_status_bar(monkeypatch, space):
             tab.select(every_index(tab))
             tab.table.selectRow(tab.table.rowCount() - 1)
             tab.table.scrollToBottom()
-        sess.panel.setCurrentWidget(sess.panel.tabs[sess.registry.primary_atlas(space).id])
+        sess.panel.open(sess.registry.primary_atlas(space).id)
         pump(400)
         for ndisplay in (3, 2):
             viewer.dims.ndisplay = ndisplay
@@ -114,10 +115,9 @@ def test_a_click_selects_and_a_drag_does_not(monkeypatch):
         assert code == 0
         _show(viewer)
         sess = session(viewer)
-        neuropils = sess.panel.tab("neuprint_hemibrain_neuropil")
+        neuropils = sess.panel.open("neuprint_hemibrain_neuropil")
         neuropils.select([])
         primary = sess.panel.tabs["neuprint_hemibrain"]
-        sess.panel.setCurrentWidget(neuropils)
         pump(300)
         index = primary.surface.meshset.n_compartments // 3
         primary.select([index])
@@ -132,12 +132,12 @@ def test_a_click_selects_and_a_drag_does_not(monkeypatch):
                 target = max((loop for _o, loop in loops_of(sess.contours["neuprint_hemibrain"])),
                              key=len).mean(axis=0)
             primary.table.clearSelection()
-            sess.panel.setCurrentWidget(neuropils)
+            sess.panel.open("neuprint_hemibrain_neuropil")
             pump()
             before = _layout(viewer, sess)
             # A drag turns or pans the view and selects nothing.
             click(viewer, target, drag=40)
-            assert sess.panel.currentWidget() is neuropils
+            assert sess.panel.current() == "neuprint_hemibrain_neuropil"
             assert primary.selected() is None
             assert _layout(viewer, sess) == before
             # Nor does a right click.
@@ -146,12 +146,17 @@ def test_a_click_selects_and_a_drag_does_not(monkeypatch):
             # A click opens the row's tab, selects it and fills the details.
             said = click(viewer, target)
             row = primary.selected()
-            assert sess.panel.currentWidget() is primary
+            assert sess.panel.current() == "neuprint_hemibrain"
             assert row is not None and index in row.indices, ndisplay
             assert said == primary.describe(index)
             assert primary.detail_title.text().startswith(row.name)
             viewer.dims.ndisplay = 3
             pump()
+
+
+def _citations(registry) -> list[str]:
+    """Every source's citation, in every brain."""
+    return [a.about for a in registry.assets.values() if a.kind == "meshset"]
 
 
 def _lines(label, text: str) -> int:
@@ -186,17 +191,21 @@ def test_the_details_hold_their_size_and_show_every_value_in_full(monkeypatch, s
             # its text out for painting, and measured itself wrong after.
             window.grab()
             for name in list(sess.parts):
-                tab = sess.panel.tab(name)
-                sess.panel.setCurrentWidget(tab)
+                tab = sess.panel.open(name)
                 pump(100)
+                # The citation over the table, as tall as the longest any
+                # source of any brain needs.
+                citation = sess.panel.page_of(name).citation
+                need = max(_lines(citation, t) for t in _citations(sess.registry))
+                assert need <= citation.height() <= need + 2, (
+                    space, name, width, citation.height(), need)
                 for field, label in tab.details.items():
                     texts = [row.details[field] for row in tab.rows.values()]
                     need = max(_lines(label, t) for t in texts)
                     assert need <= label.height() <= need + 2, (
                         space, name, field, width, label.width(), label.height(), need)
         for name in list(sess.parts):
-            tab = sess.panel.tab(name)
-            sess.panel.setCurrentWidget(tab)
+            tab = sess.panel.open(name)
             pump(100)
             box = tab.detail_title.parentWidget()
             size, table = box.size(), tab.table.geometry()

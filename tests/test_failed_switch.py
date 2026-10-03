@@ -125,13 +125,11 @@ def _user_scene(viewer) -> None:
         for index in cut[1:4]:
             _tick(primary, FILL_COL, index)
 
-    neuropil = panel.tabs[NEUROPIL]
-    panel.setCurrentWidget(neuropil)
+    neuropil = panel.open(NEUROPIL)
     names = neuropil.surface.meshset.names
     _tick(neuropil, VISIBLE_COL, names.index(next(n for n in names if n.startswith("AL"))))
 
-    secondary = panel.tabs[SECONDARY]
-    panel.setCurrentWidget(secondary)
+    secondary = panel.open(SECONDARY)
     _buttons(secondary)["All"].click()
     menu = secondary.lines
     menu.setCurrentIndex(next(i for i in range(menu.count())
@@ -173,6 +171,7 @@ def _rendered(viewer) -> dict:
                    if viewer.dims.ndisplay == 3 else None),
         "upside down": sess.flipped,
         "open tab": sess.panel.tabText(sess.panel.currentIndex()),
+        "sources": {kind: page.chosen for kind, page in sess.panel.pages.items()},
         "layers": layer_names(viewer),
         "visible": sorted(layer.name for layer in viewer.layers if layer.visible),
         "affines": {layer.name: np.round(layer.affine.affine_matrix, 6).tolist()
@@ -318,7 +317,8 @@ def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, capfd, where, n
         assert before[SECONDARY]["rows"]
         assert 0 < len(before[SECONDARY]["hidden rows"]) < before[SECONDARY]["n rows"]
         assert before[NEUROPIL]["drawn"]
-        assert before["open tab"] == "Schlegel (sensory)"
+        assert before["open tab"] == "Glomeruli"
+        assert before["sources"] == {"Glomeruli": SECONDARY, "Neuropils": NEUROPIL}
         if ndisplay == "2":
             assert before["order"][0] == 1
             assert before[PRIMARY]["labels drawn"]

@@ -11,7 +11,9 @@
 # it is written; `about` is one line under it, a short citation and then
 # what the asset is. Neither may be an id. `origin`, where given, names the
 # project the data come from when the title does not, and a layer's name
-# adds it: "Neuropils (FlyWire) · 3D".
+# adds it: "Neuropils (FlyWire) · 3D". The panel's source menu names an
+# asset by its `origin` if it has one, else by its title, and cites it with
+# its `about` line.
 
 [neuprint_hemibrain_glomeruli]
 title = "neuPrint"

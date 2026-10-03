@@ -449,9 +449,8 @@ def test_an_atlas_that_shows_nothing_gets_nothing_cut(monkeypatch):
         sess = session(viewer)
         name = "schlegel2021_s11"
         panel = sess.panel
-        panel.setCurrentIndex(panel.index_of(name))
+        tab = panel.open(name)
         pump()
-        tab = panel.currentWidget()
         overlay = sess.contours[name]
         assert prefetch.settle(60)
         assert not overlay.layer.visible

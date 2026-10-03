@@ -1,11 +1,13 @@
-"""Every glomerulus tab reads like every other, and so does every neuropil tab.
+"""Every glomerulus table reads like every other, and so does every neuropil one.
 
-All four spaces are opened with every tab built, and each tab is described
-by what it shows: its headers, what each column holds (checked against the
-registry and the reference tables, not against the panel's own rows), its
-details and their order, how a missing value looks, its sort order, and
-which fields its search reaches. Any glomerulus tab that differs from
-another fails, and so does any neuropil tab.
+Each brain has a Glomeruli tab and a Neuropils tab, GRABE the first alone,
+and each tab's source menu lists the brain's atlases of that kind. All four
+spaces are opened with every source's table built, and each table is
+described by what it shows: its headers, what each column holds (checked
+against the registry and the reference tables, not against the panel's own
+rows), its details and their order, how a missing value looks, its sort
+order, and which fields its search reaches. Any glomerulus table that
+differs from another fails, and so does any neuropil table.
 """
 
 from __future__ import annotations
@@ -22,13 +24,14 @@ pytest.importorskip("napari")
 
 SPACES = ("FAFB14", "JRCFIB2018F", "JRCFIB2022M", "GRABE")
 
-#: The tabs each brain opens, as the user reads them.
+#: The tabs each brain opens, and the sources each tab's menu lists, as the
+#: user reads them.
 TABS = {
-    "FAFB14": ["Benton 2025", "Neuropils"],
-    "JRCFIB2018F": ["neuPrint", "Schlegel (sensory)", "Schlegel (projection)",
-                    "Neuropils"],
-    "JRCFIB2022M": ["neuPrint", "Neuropils"],
-    "GRABE": ["Grabe 2015"],
+    "FAFB14": {"Glomeruli": ["Benton 2025"], "Neuropils": ["FlyWire"]},
+    "JRCFIB2018F": {"Glomeruli": ["neuPrint", "Schlegel (sensory)", "Schlegel (projection)"],
+                    "Neuropils": ["neuPrint"]},
+    "JRCFIB2022M": {"Glomeruli": ["neuPrint"], "Neuropils": ["neuPrint"]},
+    "GRABE": {"Glomeruli": ["Grabe 2015"]},
 }
 
 GLOMERULUS = {
@@ -122,9 +125,16 @@ def _groups(tab) -> dict[str, set[int]]:
 
 
 def _title_about(panel, name) -> tuple[str, str]:
-    """How the panel names a source, and the line it says about it."""
-    index = panel.index_of(name)
-    return panel.tabText(index), panel.tabToolTip(index)
+    """How the source menu names a source, and the citation under it once
+    it is chosen, which is also the menu item's tooltip."""
+    from qtpy.QtCore import Qt
+
+    page = panel.page_of(name)
+    item = page.names.index(name)
+    panel.open(name)
+    about = page.citation.text()
+    assert page.menu.itemData(item, Qt.ItemDataRole.ToolTipRole) == about, name
+    return page.menu.itemText(item), about
 
 
 def _describe(registry, panel, name, annotation, neuropils) -> dict:
@@ -275,10 +285,13 @@ def _chrome(panel, name, tab) -> tuple[str, ...]:
 
     from lobemap.viewer.panel import FILL_COL, LABEL_COL
 
-    index = panel.index_of(name)
+    page = panel.page_of(name)
     values = set(map(id, tab.details.values()))
-    out = [panel.tabText(index), panel.tabToolTip(index),
+    out = [panel.tabText(panel.indexOf(page)), panel.tabToolTip(panel.indexOf(page)),
+           *_title_about(panel, name),
            tab.filter.placeholderText(), tab.lines.itemText(0), tab.lines.toolTip()]
+    out += [label.text() for label in page.findChildren(QLabel)
+            if not page.stack.isAncestorOf(label)]
     out += [label.text() for label in tab.findChildren(QLabel) if id(label) not in values]
     for button in tab.findChildren(QPushButton):
         out += [button.text(), button.toolTip()]
@@ -313,7 +326,10 @@ def tabs(core_data, registry):
             assert set(panel.tabs) == set(surfaces), "a tab was left unbuilt"
             out[space] = {name: _describe(registry, panel, name, annotation, neuropils)
                           for name in surfaces}
-            out[space]["_order"] = [panel.tabText(i) for i in range(panel.count())]
+            out[space]["_order"] = {
+                panel.tabText(i): [panel.widget(i).menu.itemText(k)
+                                   for k in range(panel.widget(i).menu.count())]
+                for i in range(panel.count())}
         finally:
             viewer.close()
     return out
@@ -379,7 +395,7 @@ def test_no_string_a_user_sees_is_an_id_or_jargon(tabs, registry):
                 assert not any(layer in text for layer in layers), (name, text)
 
 
-def test_no_tab_title_or_tooltip_is_an_id(tabs):
+def test_no_source_title_or_citation_is_an_id(tabs):
     for kind in ("glomerulus", "neuropil"):
         for name, d in _of_kind(tabs, kind).items():
             for text in (d["title"], d["about"]):

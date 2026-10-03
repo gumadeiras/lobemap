@@ -1,18 +1,34 @@
-"""Right-dock compartment panel: one tab per atlas, then one per neuropil set.
+"""Right-dock compartment panel: a Glomeruli tab and a Neuropils tab.
 
-Visibility is per-compartment ACROSS atlases (design section 1), so each atlas
-gets its own tab driving its own layer, and nothing assumes a single active
-atlas. Each tab is a `panel_tab.AtlasTab`; what its rows say comes from
-`rows`, so every tab of a kind reads the same.
+Each tab names what it holds. A source menu at its top picks which of the
+brain's atlases of that kind its table shows -- neuPrint or either Schlegel
+definition in the hemibrain, Benton 2025 in FAFB -- with the source's
+citation under it, in the same place and at the same size in every brain,
+one source or several.
 
-A tab is named by its asset's `title` in `registry/assets.toml`, and its
-tooltip is that asset's `about` line: the one place either is written.
+Visibility is per-compartment ACROSS atlases (design section 1), so each
+source keeps a table of its own, driving its own layer: choosing one in the
+menu changes which table is shown, never which atlases are drawn. Each table
+is a `panel_tab.AtlasTab`; what its rows say comes from `rows`, so every
+table of a kind reads the same.
+
+A source is named by its asset's `origin` in `registry/assets.toml` when it
+has one, else by its `title`: "FlyWire", "neuPrint", "Benton 2025". Its
+citation is the asset's `about` line. Each is written there and nowhere else.
 """
 
 from __future__ import annotations
 
-from qtpy.QtCore import QSize
-from qtpy.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
+from qtpy.QtCore import QSize, Qt
+from qtpy.QtWidgets import (
+    QComboBox,
+    QFormLayout,
+    QLabel,
+    QStackedWidget,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..core import reference
 from .panel_tab import (
@@ -27,6 +43,7 @@ from .panel_tab import (
     RECEPTOR_COL,
     VISIBLE_COL,
     AtlasTab,
+    SteadyLabel,
 )
 from .rows import natural_key
 
@@ -35,13 +52,17 @@ from .rows import natural_key
 WIDTH = 440
 
 #: Room around each tab's title. napari's 3 x 6 px left the text almost
-#: touching the tab's edges; the brain with the most tabs still fits them
-#: all in `WIDTH`.
+#: touching the tab's edges.
 TAB_PADDING = "QTabBar::tab { padding: 6px 12px; }"
+
+#: The two tabs, by what they hold, in the order they are shown.
+GLOMERULI, NEUROPILS = "Glomeruli", "Neuropils"
+#: What the menu at the top of each tab chooses.
+SOURCE = "Source"
 
 
 def plain_reason(exc: BaseException) -> str:
-    """Why a tab could not be opened, in words rather than a traceback.
+    """Why a source could not be opened, in words rather than a traceback.
 
     The exception itself names files and asset ids, which mean nothing to
     the reader; it stays on the exception.
@@ -56,7 +77,7 @@ def plain_reason(exc: BaseException) -> str:
 
 
 class _Tabs(dict):
-    """The panel's built tabs by name; asking for one not built yet builds it."""
+    """The panel's built tables by name; asking for one not built yet builds it."""
 
     def __init__(self, panel) -> None:
         super().__init__()
@@ -69,13 +90,85 @@ class _Tabs(dict):
         return tab
 
 
+class SourcePage(QWidget):
+    """One tab: its source menu and the citation under it, over one table
+    per source, of which the menu's choice is shown.
+
+    A source not built yet has a blank page standing in until it is chosen
+    with its tab open (`CompartmentPanel.tab`).
+    """
+
+    def __init__(self, panel, names, citations) -> None:
+        super().__init__()
+        self._panel = panel
+        #: The sources, by scene key, in the menu's order.
+        self.names = list(names)
+        layout = QVBoxLayout(self)
+        # The table brings its own margins; the menu sits inside the same.
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        head = QFormLayout()
+        head.setContentsMargins(4, 4, 4, 0)
+        # Left and full width, whatever the texts: macOS centres a form and
+        # sizes its fields to their contents, so each brain and each choice
+        # put the menu somewhere else.
+        head.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        head.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        #: Which source's table the tab shows.
+        self.menu = QComboBox()
+        for i, name in enumerate(self.names):
+            self.menu.addItem(panel.source_title(name), name)
+            self.menu.setItemData(i, panel.about(name), Qt.ItemDataRole.ToolTipRole)
+        #: The chosen source's citation, as tall as the longest of
+        #: `citations` needs, so no choice and no brain moves the table.
+        self.citation = SteadyLabel(lambda: citations)
+        head.addRow(SOURCE, self.menu)
+        head.addRow("", self.citation)
+        layout.addLayout(head)
+
+        self.stack = QStackedWidget()
+        for name in self.names:
+            self.stack.addWidget(dict.get(panel.tabs, name) or QWidget())
+        layout.addWidget(self.stack, stretch=1)
+        self.menu.currentIndexChanged.connect(self._chosen)
+        self._chosen(self.menu.currentIndex())
+
+    @property
+    def chosen(self) -> str:
+        """The scene key of the source the menu shows."""
+        return self.names[self.menu.currentIndex()]
+
+    def choose(self, name: str) -> None:
+        """Show `name`'s table, as picking it in the menu does."""
+        self.menu.setCurrentIndex(self.names.index(name))
+
+    def _chosen(self, index: int) -> None:
+        """Show the table of the source picked; build it if its tab is open,
+        as opening a source's own tab built it."""
+        self.stack.setCurrentIndex(index)
+        self.citation.setText(self._panel.about(self.names[index]))
+        if self._panel.currentWidget() is self:
+            self._panel.tab(self.names[index])
+
+    def put(self, name: str, page: QWidget) -> QWidget:
+        """Put `page` where `name`'s page is, chosen if that one was; return
+        the page it replaced."""
+        index = self.names.index(name)
+        old = self.stack.widget(index)
+        self.stack.insertWidget(index, page)
+        self.stack.removeWidget(old)
+        self.stack.setCurrentIndex(self.menu.currentIndex())
+        return old
+
+
 class CompartmentPanel(QTabWidget):
-    """One tab per atlas, then one per neuropil set.
+    """A Glomeruli tab of the brain's atlases and a Neuropils tab of its
+    neuropil sets, each choosing one source's table to show.
 
     `names` is every part of the scene in scene order; those without a
     surface in `surfaces` were left for later (`SceneSession.realize`) and
-    get a tab that builds them when it is first opened, through `realize`.
-    `tabs` holds the built ones, and indexing it builds one on demand.
+    are built when first chosen with their tab open, through `realize`.
+    `tabs` holds the built tables, and indexing it builds one on demand.
     """
 
     def __init__(self, viewer, surfaces: dict, registry=None, contours=None,
@@ -85,38 +178,39 @@ class CompartmentPanel(QTabWidget):
         self.viewer = viewer
         self.registry = registry
         self.tabs: dict[str, AtlasTab] = _Tabs(self)
-        #: Tabs not built yet: name -> the placeholder page standing in.
-        self._pages: dict[str, QWidget] = {}
+        #: Each tab's page, by its title.
+        self.pages: dict[str, SourcePage] = {}
         self._realize = realize
-        #: Why each tab that could not be built failed, for whoever debugs
-        #: it; the tab itself says so in words (`plain_reason`).
+        #: Why each source that could not be built failed, for whoever
+        #: debugs it; its page says so in words (`plain_reason`).
         self.failures: dict[str, BaseException] = {}
         self._three_d: bool | None = None
         contours = contours or {}
-        # Read once for the whole panel: every tab joins against the same
+        # Read once for the whole panel: every table joins against the same
         # small tables.
         root = registry.root if registry else None
         self._annotation = reference.load(root) if root else {}
         self._lines = reference.lines(root) if root else {}
         self._neuropil_names = reference.neuropil_names(root) if root else {}
-        # Atlases first, reference geometry last. `build_scene` adds the
-        # neuropil and brain shells before the atlases so they sit UNDER
-        # the glomeruli, but that is a stacking order and this is a reading
-        # order: the tabs with glomeruli in them come first. Sorting on a
-        # bool is stable, so each group keeps its scene order.
-        def is_reference(name: str) -> bool:
-            return registry is None or name not in registry.atlases
 
-        for name in sorted(list(surfaces) if names is None else names,
-                           key=is_reference):
+        kinds: dict[str, list[str]] = {GLOMERULI: [], NEUROPILS: []}
+        for name in list(surfaces) if names is None else names:
             if name in surfaces:
-                page = self._make_tab(name, surfaces[name], contours.get(name))
-                dict.__setitem__(self.tabs, name, page)
-            else:
-                page = QWidget()
-                self._pages[name] = page
-            self.setTabToolTip(self.addTab(page, self.title(name)), self._about(name))
-        self._open_default_tab(registry, space)
+                tab = self._make_tab(name, surfaces[name], contours.get(name))
+                dict.__setitem__(self.tabs, name, tab)
+            kinds[self.kind(name)].append(name)
+        # Every citation a source menu can show, so the citation is as tall
+        # in every brain and every tab.
+        if registry is not None:
+            citations = sorted({asset.about for asset in registry.assets.values()
+                                if asset.kind == "meshset" and asset.about})
+        else:
+            citations = [self.about(name) for found in kinds.values() for name in found]
+        for kind, found in kinds.items():
+            if found:
+                self.pages[kind] = SourcePage(self, found, citations)
+                self.addTab(self.pages[kind], kind)
+        self._open_default(registry, space)
         self.currentChanged.connect(self._on_current)
         self._on_current(self.currentIndex())
         if viewer is not None:
@@ -125,19 +219,43 @@ class CompartmentPanel(QTabWidget):
     def sizeHint(self) -> QSize:
         return QSize(WIDTH, super().sizeHint().height())
 
-    def title(self, name: str) -> str:
-        """The plain title of a part's tab, from its asset."""
-        asset = self.registry.asset_of(name) if self.registry else None
-        return asset.title if asset is not None and asset.title else name
+    def kind(self, name: str) -> str:
+        """Which tab a part's table is in: an atlas's is in Glomeruli."""
+        atlases = self.registry.atlases if self.registry else {}
+        return GLOMERULI if name in atlases else NEUROPILS
 
-    def _about(self, name: str) -> str:
+    def source_title(self, name: str) -> str:
+        """The plain name of a part's source, from its asset."""
+        asset = self.registry.asset_of(name) if self.registry else None
+        if asset is None:
+            return name
+        return asset.origin or asset.title or name
+
+    def about(self, name: str) -> str:
+        """The citation of a part's source, from its asset."""
         asset = self.registry.asset_of(name) if self.registry else None
         return asset.about if asset is not None else ""
 
-    def index_of(self, name: str) -> int:
-        """The tab index of a part, built or not; -1 if it has no tab."""
-        page = dict.get(self.tabs, name) or self._pages.get(name)
-        return -1 if page is None else self.indexOf(page)
+    def page_of(self, name: str) -> SourcePage | None:
+        """The tab whose menu lists `name`, or None."""
+        return next((p for p in self.pages.values() if name in p.names), None)
+
+    def current(self) -> str | None:
+        """The scene key of the source whose table is on show."""
+        page = self.currentWidget()
+        return page.chosen if isinstance(page, SourcePage) else None
+
+    def open(self, name: str) -> AtlasTab | None:
+        """Show `name`'s table: its tab open, chosen in the menu, and built.
+
+        None if there is no such source or it could not be built.
+        """
+        page = self.page_of(name)
+        if page is None:
+            return None
+        page.choose(name)
+        self.setCurrentWidget(page)
+        return self.tab(name)
 
     def _make_tab(self, name: str, surface, contour) -> AtlasTab:
         atlas = self.registry.atlases.get(name) if self.registry else None
@@ -152,91 +270,77 @@ class CompartmentPanel(QTabWidget):
         )
 
     def tab(self, name: str) -> AtlasTab | None:
-        """The tab of `name`, built now if it was left for later.
+        """The table of `name`, built now if it was left for later.
 
-        None if there is no such tab, or if building it failed; the failure
-        is then written on the tab, which is where the user looks.
+        None if there is no such table, or if building it failed; the
+        failure is then written where the table would be, which is where
+        the user looks.
         """
         if name in self.tabs:
             return dict.__getitem__(self.tabs, name)
-        page = self._pages.get(name)
+        page = self.page_of(name)
         if page is None or self._realize is None:
             return None
+        blank = page.stack.widget(page.names.index(name))
         try:
             surface, contour = self._realize(name)
         except Exception as exc:                      # noqa: BLE001
             self.failures[name] = exc
-            if page.layout() is None:
-                layout = QVBoxLayout(page)
-                label = QLabel(f"{self.title(name)} could not be opened: "
+            if blank.layout() is None:
+                layout = QVBoxLayout(blank)
+                label = QLabel(f"{self.source_title(name)} could not be opened: "
                                f"{plain_reason(exc)}")
                 label.setWordWrap(True)
                 layout.addWidget(label)
                 layout.addStretch(1)
             return None
         tab = self._make_tab(name, surface, contour)
-        del self._pages[name]
-        index = self.indexOf(page)
-        current = index == self.currentIndex()
-        blocked = self.blockSignals(True)
-        try:
-            self.removeTab(index)
-            self.insertTab(index, tab, self.title(name))
-            self.setTabToolTip(index, self._about(name))
-            if current:
-                self.setCurrentIndex(index)
-        finally:
-            self.blockSignals(blocked)
-        page.deleteLater()
+        page.put(name, tab).deleteLater()
         dict.__setitem__(self.tabs, name, tab)
         if self._three_d is not None:
             tab.set_mode(self._three_d)
         return tab
 
     def _on_current(self, index: int) -> None:
-        """Opening a tab not built yet builds it."""
+        """Opening a tab builds the source its menu shows, if not built yet."""
         page = self.widget(index)
-        name = next((n for n, p in self._pages.items() if p is page), None)
-        if name is not None:
-            self.tab(name)
+        if isinstance(page, SourcePage):
+            self.tab(page.chosen)
 
     def set_mode(self, three_d: bool) -> None:
         self._three_d = three_d
         for tab in self.tabs.values():
             tab.set_mode(three_d)
 
-    def _open_default_tab(self, registry, space: str | None) -> None:
-        """Open on an atlas, never on the reference geometry.
+    def _open_default(self, registry, space: str | None) -> None:
+        """Open on the glomeruli, showing the brain's own atlas.
 
-        Neuropil and brain shells are added to the scene first so they sit
-        underneath the glomeruli, which also made one of them tab 0. That
-        tab lists whole neuropils, so the panel opened on the one tab that
-        says nothing about glomeruli.
-
-        Which atlas is the space's own choice, `primary_atlas`, so the open
-        tab matches the atlas `show_primary_atlas` leaves drawn. It matters
-        only for JRCFIB2018F, the one space carrying several: it opens on
-        the neuPrint parcellation the Schlegel pair are compared against.
+        Which atlas is the space's own choice, `primary_atlas`, so the table
+        on show matches the atlas `show_primary_atlas` leaves drawn. It
+        matters only for JRCFIB2018F, the one space carrying several: it
+        opens on the neuPrint parcellation the Schlegel pair are compared
+        against. A brain with no atlas opens on its neuropils.
         """
-        atlases = [name for name, tab in self.tabs.items() if tab.is_atlas]
-        if not atlases:
-            return              # a space with reference geometry only
-        target = atlases[0]
-        if registry is not None:
-            # Derivable from any atlas tab, so a caller that did not name
-            # the space still gets the declared choice rather than
-            # whichever atlas happens to be built first.
-            space = space or registry.atlases[target].native_space
+        page = self.pages.get(GLOMERULI) or next(iter(self.pages.values()), None)
+        if page is None:
+            return
+        if registry is not None and page is self.pages.get(GLOMERULI):
+            # Derivable from any atlas, so a caller that did not name the
+            # space still gets the declared choice rather than whichever
+            # atlas comes first.
+            space = space or registry.atlases[page.names[0]].native_space
             primary = registry.primary_atlas(space)
-            if primary is not None and primary.id in self.tabs:
-                target = primary.id
-        self.setCurrentWidget(self.tabs[target])
+            if primary is not None and primary.id in page.names:
+                page.choose(primary.id)
+        self.setCurrentWidget(page)
 
     def highlight(self, layer_name: str, index: int) -> None:
-        tab = self.tabs.get(layer_name)
+        """Show the row of a compartment clicked in the canvas: its tab
+        opened and its source chosen, if another was, then the row selected."""
+        tab = dict.get(self.tabs, layer_name)
         if tab is None:
             return
-        self.setCurrentWidget(tab)
+        self.open(layer_name)
         tab.highlight(index)
 
 
@@ -244,17 +348,21 @@ __all__ = [
     "CHECK_COLUMNS",
     "CHECK_WIDTH",
     "FILL_COL",
+    "GLOMERULI",
     "GLOMERULUS_COLUMNS",
     "INDEX_ROLE",
     "LABEL_COL",
     "NAME_COL",
+    "NEUROPILS",
     "NEUROPIL_COLUMNS",
     "RECEPTOR_COL",
+    "SOURCE",
     "TAB_PADDING",
     "VISIBLE_COL",
     "WIDTH",
     "AtlasTab",
     "CompartmentPanel",
+    "SourcePage",
     "natural_key",
     "plain_reason",
 ]

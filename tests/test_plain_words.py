@@ -73,7 +73,7 @@ def test_no_string_in_any_brain_or_mode_reads_as_code(monkeypatch, allowed, regi
                 if re.search(rf"\b{word}\b", menu.itemText(i)):
                     assert spelled in menu.itemData(i, 3), (menu.itemText(i), word)
     kinds = {item.where.split(" / ")[-1] for item in seen}
-    for kind in ("window title", "dock title", "tab", "tab tooltip", "menu item",
+    for kind in ("window title", "dock title", "tab", "menu item", "menu item tooltip",
                  "button", "column header", "cell", "cell tooltip", "label",
                  "layer name", "colormap", "slider label", "hover"):
         assert kind in kinds, kind
@@ -145,5 +145,6 @@ def test_every_message_reads_as_words(allowed, registry):
             assert U.why_code(text, allowed) == "", text
     for asset in registry.assets.values():
         for exc in (FileNotFoundError(), OSError(), MemoryError(), ValueError()):
-            text = f"{asset.title} could not be opened: {panel.plain_reason(exc)}"
+            title = asset.origin or asset.title      # as the source menu names it
+            text = f"{title} could not be opened: {panel.plain_reason(exc)}"
             assert U.why_code(text, allowed) == "", text

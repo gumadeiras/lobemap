@@ -66,10 +66,13 @@ def _buttons(tab):
 
 
 def _open_tab(panel, name):
-    """Click the tab, as a user does."""
-    panel.setCurrentIndex(panel.index_of(name))
+    """Open the tab that lists the part and choose it in the tab's source
+    menu, as a user does; what the tab then shows."""
+    page = panel.page_of(name)
+    panel.setCurrentWidget(page)
+    page.menu.setCurrentIndex(page.menu.findData(name))
     pump()
-    return panel.currentWidget()
+    return page.stack.currentWidget()
 
 
 @pytest.mark.parametrize(("space", "name"), DEFERRED)
@@ -450,7 +453,7 @@ def test_a_deferred_part_that_cannot_be_read_says_so_in_its_tab(monkeypatch):
         page = _open_tab(sess.panel, "fafb_neuropil")
         from qtpy.QtWidgets import QLabel
 
-        assert any(label.text() == "Neuropils could not be opened: its data could not be read"
+        assert any(label.text() == "FlyWire could not be opened: its data could not be read"
                    for label in page.findChildren(QLabel))
         assert layer_names(viewer) == before
         assert "fafb_neuropil" in sess.pending

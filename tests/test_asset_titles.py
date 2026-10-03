@@ -1,7 +1,9 @@
 """Every asset has one plain title, written once in `assets.toml`.
 
-The panel's tabs read it, and so will layer names and hover text: a title
-written in three places drifts into three names for one thing.
+The panel's source menus read it, and so do layer names and hover text: a
+title written in three places drifts into three names for one thing. A
+neuropil set's menu names its source, its `origin`: the title says only
+"Neuropils", which is the tab it is in.
 """
 
 from __future__ import annotations
@@ -10,7 +12,7 @@ import re
 
 import pytest
 
-#: The tab titles Gustavo approved, by the part each tab is keyed on.
+#: The titles Gustavo approved, by the part each is keyed on.
 APPROVED = {
     "benton2025": "Benton 2025",
     "neuprint_hemibrain": "neuPrint",
@@ -53,3 +55,16 @@ def test_the_schlegel_tabs_say_how_each_was_defined(registry):
     assert registry.asset_of("schlegel2021_s12").about == (
         "Schlegel et al. 2021, eLife, file 12: glomeruli defined from projection neurons"
     )
+
+
+#: What each neuropil set's source menu says: the project its data come from.
+ORIGINS = {
+    "fafb_neuropil": "FlyWire",
+    "neuprint_hemibrain_neuropil": "neuPrint",
+    "neuprint_cns_neuropil": "neuPrint",
+}
+
+
+@pytest.mark.parametrize(("name", "origin"), sorted(ORIGINS.items()))
+def test_a_neuropil_set_names_its_source(registry, name, origin):
+    assert registry.asset_of(name).origin == origin

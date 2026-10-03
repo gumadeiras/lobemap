@@ -35,7 +35,7 @@ def _overflowing(sess) -> dict[str, tuple[int, int]]:
     for name in sess.parts:
         tab = sess.panel.tab(name)
         assert tab is not None, name
-        sess.panel.setCurrentWidget(tab)
+        assert sess.panel.open(name) is tab
         pump(30)
         table = tab.table
         need, have = table.horizontalHeader().length(), table.viewport().width()
