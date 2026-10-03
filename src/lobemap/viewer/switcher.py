@@ -166,7 +166,10 @@ class SpaceSwitcher(QWidget):
         index = self.combo.findData(session.space)
         if index >= 0:
             self.combo.setCurrentIndex(index)
-        self._narrow(self.combo)
+        # As wide as the longest title, which the column then makes room
+        # for: cut short, "Grabe 2015 (live brain, light micro" was shown.
+        self.combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._on_brain_shown()
         self.combo.currentIndexChanged.connect(self._on_change)
 

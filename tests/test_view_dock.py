@@ -95,6 +95,18 @@ def _assert_layout(viewer) -> None:
     assert right_docks == [panel], [d.windowTitle() for d in right_docks]
     assert panel.x() > right
     assert panel.height() >= canvas.height(), (panel.height(), canvas.height())
+    # Every brain's title fits the Brain menu's text field, cut short in none.
+    from qtpy.QtWidgets import QStyle, QStyleOptionComboBox
+
+    combo = switcher(viewer).combo
+    option = QStyleOptionComboBox()
+    combo.initStyleOption(option)
+    field = combo.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
+                                         QStyle.SubControl.SC_ComboBoxEditField, combo)
+    for i in range(combo.count()):
+        title = combo.itemText(i)
+        assert combo.fontMetrics().horizontalAdvance(title) <= field.width(), (
+            title, field.width())
     # Nothing in the left column scrolls sideways.
     for dock in (view, settings, layers):
         for area in dock.findChildren(QAbstractScrollArea):
