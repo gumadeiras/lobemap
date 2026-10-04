@@ -188,3 +188,54 @@ def test_rows_toggled_in_every_brain_add_no_colormap(monkeypatch):
         primary = session(viewer).surfaces[
             session(viewer).registry.primary_atlas(SPACES[0]).id].layer
         assert _menu_items(viewer, primary) == menu
+
+
+@pytest.mark.requires_data
+def test_each_colormap_is_named_after_its_atlas_in_every_brain(monkeypatch):
+    """Through every brain and back, every part built: each surface's entry
+    in the layer settings menu is named after its atlas, or its brain's
+    neuropils, never numbered, one name per atlas, and no wider than leaves
+    the canvas 560 px of a 1440 px window."""
+    import gc
+    import re
+
+    from napari.utils.colormaps import AVAILABLE_COLORMAPS
+    from qtpy.QtCore import Qt
+    from viewer_harness import SPACES, launched, pump, session, switch_to
+
+    # A window closed by an earlier test of this process can still hold its
+    # entries until its surfaces are collected: two windows at once number
+    # theirs. lobemap opens one.
+    gc.collect()
+    with launched(monkeypatch, "view", SPACES[0]) as (code, viewer):
+        assert code == 0
+        window = viewer.window._qt_window
+        window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        window.resize(1440, 900)
+        window.show()
+        pump(300)
+        seen: dict[str, str] = {}
+        for space in (*SPACES, SPACES[0]):
+            if space != SPACES[0] or seen:
+                switch_to(viewer, space)
+                pump(300)
+            sess = session(viewer)
+            brain = sess.registry.spaces[space].title.split(" (")[0]
+            for name in list(sess.parts):
+                assert sess.panel.tab(name) is not None, name
+            pump(300)
+            for name, surface in sess.surfaces.items():
+                menu = _menu(viewer, surface.layer)
+                shown = menu.currentText()
+                assert shown == surface.layer.colormap.name, (space, name, shown)
+                assert not re.search(r"\(\d+\)$", shown), (space, name, shown)
+                if surface.layer.metadata["lobemap"]["role"] == "neuropil":
+                    assert shown == f"{brain} neuropil colors", (space, shown)
+                else:
+                    title = sess.panel.source_title(name)
+                    assert shown in (f"{title} colors", f"{brain} {title} colors"), shown
+                assert seen.setdefault(shown, name) == name, (shown, seen[shown], name)
+            canvas = viewer.window._qt_viewer.canvas.native
+            assert canvas.width() >= 560, (space, canvas.width())
+        # Back in the first brain, its surfaces took back their entries.
+        assert all(name in AVAILABLE_COLORMAPS for name in seen)

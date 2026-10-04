@@ -76,7 +76,8 @@ def test_the_viewer_shows_the_doubt_where_it_names_the_glomerulus(monkeypatch):
         axis = int(viewer.dims.order[0])
         viewer.dims.set_point(axis, float(surface.meshset.centroid(vp2)[axis]))
         pump(300)
-        assert "VP2(L) (VM6?)" in [text for text, _pos, _rgba in rendered_labels(overlay)]
+        # As the table names it: the side is where it is.
+        assert "VP2 (VM6?)" in [text for text, _pos, _rgba in rendered_labels(overlay)]
 
         # The hover status, in 2D and in 3D.
         path = max((loop for owner, loop in contour_loops(overlay) if owner == vp2), key=len)

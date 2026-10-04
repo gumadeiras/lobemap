@@ -69,14 +69,13 @@ def _hsv_to_rgba(h: np.ndarray, s: np.ndarray, v: np.ndarray) -> np.ndarray:
     return np.stack([r, g, b, np.ones_like(r)], axis=1)
 
 
-#: What a surface's colormap is called in napari's layer settings: an
-#: atlas's, and a neuropil set's. napari keeps every colormap it is given
-#: by name, for the session, and its menus are as wide as the longest:
-#: named after their layers, with ids in them, they widened the layer
-#: settings by up to 60 px. Each surface holds an entry of its own,
-#: numbered after the first, "Glomerulus colors (2)"; see `_take_colormap`.
+#: What a surface's colormap is called in napari's layer settings when
+#: nothing names it. A scene names each after its atlas, short
+#: (`parts.colors_title`): napari keeps every colormap it is given by name,
+#: for the session, and its menus are as wide as the longest -- named after
+#: their layers, with ids in them, they widened the layer settings by up to
+#: 60 px. Each surface holds an entry of its own; see `_take_colormap`.
 GLOMERULUS_COLORS = "Glomerulus colors"
-NEUROPIL_COLORS = "Neuropil colors"
 
 #: Every colormap entry a surface has taken, by name, and the surface that
 #: holds it, or None once it is given back.
@@ -256,9 +255,10 @@ class AtlasSurface:
         #: The part's plain title, which its layers and hover text name it by.
         self.name = name
         n = meshset.n_compartments
-        #: What a reader sees for each compartment: its published name, with
-        #: any doubt about it (`Compartment.label`). `meshset.names` stays the
-        #: identity every lookup uses.
+        #: What a reader sees for each compartment: its name as the panel's
+        #: table shows it, without its side and with any doubt about it
+        #: (`rows.side_name`), which the slice writes. `meshset.names` stays
+        #: the identity every lookup uses.
         self.display_names = list(meshset.names if display_names is None
                                   else display_names)
         self.colors = categorical_colors(n) if colors is None else colors

@@ -403,7 +403,7 @@ def test_the_canvas_keeps_its_width_through_every_brain(monkeypatch):
     column, narrow; each surface keeps its own colors under them."""
     from lobemap.viewer.layers import step_colormap
 
-    names = re.compile(r"^(Glomerulus|Neuropil) colors( \(\d+\))?$")
+    names = re.compile(r"^[\w ()]{1,24} colors( \(\d+\))?$")
     with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
         assert code == 0
         _show(viewer)

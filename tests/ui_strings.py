@@ -47,6 +47,11 @@ class Allowed:
     #: Glomerulus, neuropil, receptor, neuron, sensillum, organ and driver
     #: line names, word by word.
     biology: set[str] = field(default_factory=set)
+    #: Each neuropil set's own abbreviations, as its dataset publishes them
+    #: less the side -- `MB_CA` in FlyWire, `CA` in neuPrint -- which the
+    #: table and the slice show, and the asset's `about` cites. Exactly
+    #: these: a name with its side still on, `MB_PED_L`, reads as code.
+    neuropils: set[str] = field(default_factory=set)
     #: Asset and atlas ids, which must never show.
     ids: set[str] = field(default_factory=set)
     #: Published template names the Brain menu's tooltips name.
@@ -74,24 +79,25 @@ class Allowed:
                 for name in (comp.published_name, *comp.canonical, comp.uncertain):
                     add(name)
                     add(parse_roi(name)[0] if name else "")
-        for asset in registry.assets.values():
-            if asset.kind == "meshset" and asset.path.exists():
-                for name in registry.mesh(asset.id).names:
-                    add(name)
-                    add(parse_roi(name)[0])
+        atlas_assets = {atlas.asset for atlas in registry.atlases.values()}
+        neuropils = {parse_roi(name)[0]
+                     for asset in registry.assets.values()
+                     if asset.kind == "meshset" and asset.id not in atlas_assets
+                     and asset.about and asset.path.exists()
+                     for name in registry.mesh(asset.id).names}
         for row in reference.load(registry.root).values():
             for value in row.values():
                 add(value)
         for line in reference.lines(registry.root):
             add(line)
-        for name, (full, source) in reference.neuropil_names(registry.root).items():
-            add(name)
+        for _name, (full, _source) in reference.neuropil_names(registry.root).items():
             add(full)
         templates = {s.flybrains_template for s in registry.spaces.values()
                      if s.flybrains_template}
         sources = {w for asset in registry.assets.values()
                    for w in SPLIT.split(asset.about.partition(":")[0]) if w}
-        return cls(biology=words, ids={*registry.assets, *registry.atlases},
+        return cls(biology=words, neuropils=neuropils,
+                   ids={*registry.assets, *registry.atlases},
                    templates=templates, sources=sources)
 
 
@@ -124,7 +130,8 @@ def why_code(text: str, allowed: Allowed, context: str = "") -> str:
     rest = QUOTED.sub(" ", text)
     words = (w.strip(".:!?*") for w in SPLIT.split(rest))
     rest = " ".join(w for w in words
-                    if w and w not in allowed.biology and w not in allowed.templates
+                    if w and w not in allowed.biology and w not in allowed.neuropils
+                    and w not in allowed.templates
                     and w not in allowed.sources and w not in UNITS)
     if BRACKETED.search(rest):
         return "bracketed tag"

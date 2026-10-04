@@ -42,7 +42,9 @@ def test_the_check_tells_code_from_words(allowed):
         "Orco-GAL4 & GH146-GAL4 (12)", "MB_PED, Left", "Neuropil stain (from synapses)",
         "Grabe 2015 labels this region 'VP2_left_VM6andVC6'.", "Male CNS (EM)",
         ("FAFB (full adult fly brain): female, electron microscopy. "
-         "Shown in the FAFB14 template."), "Glomerulus colors (3)",
+         "Shown in the FAFB14 template."), "Male CNS neuPrint colors",
+        # A neuropil set's own abbreviations, cited: FlyWire's and neuPrint's.
+        "MB_CA", "CA", "MB_PED on the slice",
     ]
     for text in words:
         assert U.why_code(text, allowed) == "", text
@@ -53,6 +55,8 @@ def test_the_check_tells_code_from_words(allowed):
         "receptor_consensus": "snake_case",
         "ROI under the cursor": "unexplained abbreviation ROI",
         "lobemap - GRABE": "unexplained abbreviation GRABE",
+        # A mesh name with its side still on is not what any dataset cites.
+        "MB_PED_L": "snake_case",
     }
     for text, why in code.items():
         assert U.why_code(text, allowed) == why, text

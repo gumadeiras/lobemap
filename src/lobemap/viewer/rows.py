@@ -61,6 +61,14 @@ def natural_key(text: str):
     ]
 
 
+def side_name(published: str, note: str = "") -> str:
+    """A compartment's name as its row shows it: without its side, with any
+    doubt about it. `VP2(L)` in doubt as VM6 is 'VP2 (VM6?)'; `MB_PED_L`
+    is 'MB_PED', the dataset's own abbreviation."""
+    bare = parse_roi(published)[0]
+    return f"{bare} ({note})" if note else bare
+
+
 def _value(text: str | None) -> str:
     return (text or "").strip() or MISSING
 
@@ -275,7 +283,7 @@ def glomerulus_sides(names, compartments, annotation) -> list[Side]:
         comp = by_index.get(index)
         bare, suffix = parse_roi(published)
         note = comp.uncertain if comp else ""
-        name = f"{bare} ({note})" if note else bare
+        name = side_name(published, note)
         where = (comp.side if comp else None) or suffix
         props = _joined(annotation, comp, published)
         standard = ", ".join(comp.canonical) if comp and comp.canonical else ""
@@ -352,5 +360,6 @@ __all__ = [
     "natural_key",
     "neuropil_rows",
     "neuropil_sides",
+    "side_name",
     "sides_text",
 ]

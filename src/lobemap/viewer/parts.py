@@ -11,8 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..core.registry import Registry
+from . import rows
 from .contours import ContourOverlay
-from .layers import GLOMERULUS_COLORS, NEUROPIL_COLORS, AtlasSurface, canonical_colors
+from .layers import AtlasSurface, canonical_colors
 from .request import REFERENCE_ROLES
 
 #: Distinct flat colors for contour overlays, one per atlas, so two atlases
@@ -56,6 +57,31 @@ def part_title(registry: Registry, part: ScenePart) -> str:
     return f"{title} ({asset.origin})" if asset.origin else title
 
 
+def colors_title(registry: Registry, space: str, part: ScenePart) -> str:
+    """What a part's colormap is called in napari's layer settings.
+
+    An atlas's colors are named after the atlas, as the panel's Source menu
+    names it: "Benton 2025 colors". Where another brain has an atlas of the
+    same name -- neuPrint, in the hemibrain and the male CNS -- the brain
+    comes first: "Male CNS neuPrint colors". A brain has one set of
+    neuropils, named after the brain: "Hemibrain neuropil colors". So each
+    part has an entry of napari's colormaps of its own, whichever brains
+    were opened before it; numbered ones, "Glomerulus colors (5)", said
+    nothing. The longest, "Schlegel (projection) colors", leaves the layer
+    settings as narrow as the View dock.
+    """
+    space_title = registry.spaces[space].title if space in registry.spaces else ""
+    brain = space_title.split(" (")[0] or space
+    if part.reference:
+        return f"{brain} {part.asset.role} colors"
+    title = part_title(registry, part)
+    shared = any(
+        atlas.native_space != space
+        and part_title(registry, ScenePart(atlas.id, registry.assets[atlas.asset], atlas)) == title
+        for atlas in registry.atlases.values() if atlas.asset in registry.assets)
+    return f"{brain} {title} colors" if shared else f"{title} colors"
+
+
 def scene_parts(registry: Registry, space: str) -> list[ScenePart]:
     """Every mesh `space` shows that is on disk, reference geometry first."""
     parts = [ScenePart(asset.id, asset)
@@ -94,23 +120,27 @@ def make_surface(viewer, registry: Registry, space: str, part: ScenePart,
     if meshset is None:
         meshset = registry.mesh(part.asset.id)
     title = part_title(registry, part)
+    colormap_name = colors_title(registry, space, part)
     if part.reference:
         # Additive, not translucent: a translucent shell writes depth and so
         # hides the very glomeruli it is meant to give context to.
         surface = AtlasSurface(
             viewer, meshset, name=title, opacity=0.35, blending="additive",
             shading="none", visible=False, layer=layer, mirror=mirror,
-            colormap_name=NEUROPIL_COLORS,
+            colormap_name=colormap_name,
+            display_names=[rows.side_name(name) for name in meshset.names],
         )
     else:
         atlas = part.atlas
         surface = AtlasSurface(
-            viewer, meshset, name=title, colormap_name=GLOMERULUS_COLORS,
+            viewer, meshset, name=title, colormap_name=colormap_name,
             # The SPACE's vocabulary, not a global one: a glomerulus is
             # one color across the atlases it can be compared with, which
             # is exactly the atlases sharing its space.
             colors=canonical_colors(atlas.compartments, registry.vocabulary(space)),
-            display_names=[c.label for c in atlas.compartments] or None,
+            display_names=[rows.side_name(c.published_name, c.uncertain)
+                           for c in atlas.compartments]
+            or [rows.side_name(name) for name in meshset.names],
             visible=False, layer=layer, mirror=mirror,
         )
     surface.layer.metadata["lobemap"].update(
@@ -142,6 +172,7 @@ __all__ = [
     "REFERENCE_CONTOUR_COLOR",
     "REFERENCE_CONTOUR_WIDTH",
     "ScenePart",
+    "colors_title",
     "contour_styles",
     "make_contour",
     "make_surface",
