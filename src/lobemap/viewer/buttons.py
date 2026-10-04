@@ -9,33 +9,44 @@ and says why (`install`):
 - **2D/3D** is the View dock's 3D and Slice, and **home** its Fit to window:
   both are napari's display mode and `viewer.reset_view`, lobemap's Home
   (`view.install_home_orientation`), which keeps the rotation and the flip.
-  **Roll** picks the next sections, and the Sections menu follows it
-  (`switcher.SpaceSwitcher._on_order`). Each control follows the viewer's
-  state, not the other's clicks, so the two stay in step whichever is used.
-  Roll is off in 3D, as Sections is.
+  **Roll**, and its key, pick the next choice of the Sections menu, in the
+  menu's order, and wrap (`switcher.SpaceSwitcher.next_sections`). Each
+  control follows the viewer's state, not the other's clicks, so the two
+  stay in step whichever is used. Roll is off in 3D, as Sections is.
 - **The camera popup**, a right-click on 2D/3D. Its up/down menu is the
   View dock's flip, its zoom and perspective the dock's (`camera_rows`); each
   follows the others while it is open. Its angles turn the camera as a drag
   does, which the dock's rotation boxes do not follow. Left along the
   horizontal, and away along the depth, would mirror the picture with no
-  control to say so: their menus are off (`view.keep_orientation`).
+  control to say so: their menus are off (`view.keep_orientation`). So is
+  "Sync 2D/3D camera", and View > Toggle Synced 2D/3D Camera (⌘U) is
+  refused (`keep_synced`): unsynced, napari keeps a camera for each mode,
+  and a trip between 3D and Slice view changed the zoom the dock showed.
 - **The roll popup**, a right-click on roll, lists the axes to drag. A drag
   that swaps the two axes on screen is undone (`SpaceSwitcher._on_order`),
   and its help says why.
 - **Transpose** and **grid** are off. One mirrors the picture across its
   diagonal, the other splits the outlines from the image they lie on, and
   the View dock would show neither. Transpose's Option-click, which turned
-  every layer 90°, is off with it. Their keys, ⌘T, ⌘⌥T and ⌘G, say why and
-  do nothing (`guard_keys`).
+  every layer 90°, is off with it. Their actions say why and do nothing, by
+  whichever key napari's preferences bind to them -- ⌘T, ⌘⌥T and ⌘G unless
+  rebound (`take_action`).
 - **New layer** buttons add the user's own layers, and **delete** deletes
-  them; lobemap's own are locked and passed by (`chrome.lock_layers`).
+  them; lobemap's own are locked and passed by (`chrome.lock_layers`), and
+  lobemap says why (`guards`).
 
 napari has no public API for its buttons or their popups. They are reached
 through `Window._qt_viewer`, by the names napari gives them, and
-`tests/test_napari_private.py` checks each.
+`tests/test_napari_private.py` checks each. Its actions are napari's action
+manager's, replaced by name.
 """
 
 from __future__ import annotations
+
+import weakref
+
+from .axes import keep_scene_axes_off
+from .guards import guard_layers
 
 TRANSPOSE_OFF = (
     "Off in lobemap: swapping the two axes on screen shows the brain mirrored, "
@@ -54,8 +65,8 @@ GRID_OFF = (
     "too."
 )
 ROLL_TIP = (
-    "Slice along the next axis; the Sections menu follows. Right-click to "
-    "drag the axes into order."
+    "Slice along the next choice of the Sections menu. Right-click to drag "
+    "the axes into order."
 )
 ROLL_3D = "Slice view only: in 3D every axis is shown. In Slice view, this picks the next sections."
 ROLL_POPUP_TIP = (
@@ -78,18 +89,25 @@ DEPTH_OFF = (
     "Off in lobemap: away would show the brain mirrored, with no control to "
     "say so. To see it from behind, turn it 180° about the vertical axis."
 )
+SYNC_OFF = (
+    "Off in lobemap: 3D and Slice view share one camera, so the zoom and "
+    "the view the dock shows hold across a change of mode."
+)
 DELETE_TIP = (
     "Delete the selected layers you added. lobemap's own layers are locked, "
     "and stay: the panel and the View tab draw them. To hide one, click its "
     "eye, or untick its rows in the panel."
 )
 
-#: napari's actions whose keys do nothing in lobemap, and what each says.
-OFF_KEYS = {
+#: napari's actions that do nothing in lobemap, and what each says.
+OFF_ACTIONS = {
     "napari:transpose_axes": TRANSPOSE_OFF,
     "napari:rotate_layers": ROTATE_OFF,
     "napari:toggle_grid": GRID_OFF,
 }
+
+#: Each lobemap viewer's own handlers of napari's actions; see `take_action`.
+_TAKEN: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 def install(viewer) -> None:
@@ -124,32 +142,77 @@ def install(viewer) -> None:
     row.ndisplayButton.customContextMenuRequested.connect(
         lambda _pos: _camera_popup(viewer, row))
     roll.customContextMenuRequested.connect(lambda _pos: _roll_popup(row))
-    guard_keys(viewer)
+    for action, why in OFF_ACTIONS.items():
+        take_action(viewer, action, _saying(why))
+    keep_synced(viewer)
+    keep_scene_axes_off(viewer)
+    guard_layers(viewer)
 
 
-def guard_keys(viewer) -> None:
-    """Bind each key of `OFF_KEYS` to say why it is off, on this viewer only.
+def take_action(viewer, name: str, handler) -> None:
+    """Run `handler(viewer)` for napari's action `name` in this viewer.
 
-    A viewer's own key bindings come before napari's for its class, so the
-    keys napari's preferences give those actions now do nothing else here.
+    By the action rather than by its key: napari's preferences can bind any
+    key to an action, and a key rebound there to grid mode turned it on. So
+    the action itself is replaced, once per process, by one that runs the
+    handler a lobemap viewer gave and napari's own command in any other
+    viewer; every key, button and menu napari binds to the action, now or
+    later, reaches it. napari injects the viewer by the annotation, as it
+    does into its own command.
     """
-    from napari.settings import get_settings
+    from napari.components import ViewerModel
+    from napari.utils.action_manager import action_manager
 
-    shortcuts = get_settings().shortcuts.shortcuts
-    for action, why in OFF_KEYS.items():
-        for key in shortcuts.get(action, ()):
-            viewer.bind_key(key, _saying(why), overwrite=True)
+    _TAKEN.setdefault(viewer, {})[name] = handler
+    action = action_manager._actions[name]
+    if getattr(action.command, "_lobemap", False):
+        return
+    napari_command = action.command
+
+    def command(viewer: ViewerModel) -> None:
+        handler = _TAKEN.get(viewer, {}).get(name)
+        if handler is None:
+            napari_command(viewer)
+        else:
+            handler(viewer)
+
+    command.__annotations__ = {"viewer": ViewerModel, "return": None}
+    command.__name__ = command.__qualname__ = napari_command.__name__
+    command._lobemap = True
+    action_manager.register_action(name, command, action.description,
+                                   action.keymapprovider, action.repeatable)
 
 
 def _saying(why: str):
-    """A key binding that says `why`; a named function, as napari's key
-    handler reads every binding's name."""
+    """An action's handler that says `why` and does nothing else."""
     from napari.utils.notifications import show_info
 
     def off(viewer=None) -> None:
         show_info(why)
 
     return off
+
+
+def keep_synced(viewer) -> None:
+    """Keep napari's 2D and 3D cameras one camera, and say why when asked not to.
+
+    napari's View menu and its camera popup can unsync them, and each mode
+    then keeps its own center, zoom and angles: a trip between 3D and Slice
+    view changed the zoom, and the rotation the dock showed was not the
+    one in view. lobemap shows one camera, so the change is put back.
+    """
+    from napari.utils.notifications import show_info
+
+    camera = viewer.scene.camera
+    ref = weakref.ref(viewer)
+
+    def _synced(event=None) -> None:
+        if ref() is not None and not camera.synced:
+            camera.synced = True
+            show_info(SYNC_OFF)
+
+    camera.events.synced.connect(_synced)
+    _synced()
 
 
 def _camera_popup(viewer, row) -> None:
@@ -167,6 +230,8 @@ def _camera_popup(viewer, row) -> None:
     if three_d:
         row.depth_combo.setEnabled(False)
         row.depth_combo.setToolTip(DEPTH_OFF)
+    row.camera_synced_checkbox.setEnabled(False)
+    row.camera_synced_checkbox.setToolTip(SYNC_OFF)
 
     vertical, zoom = row.vertical_combo, row.zoom
     perspective = row.perspective if three_d else None
@@ -228,13 +293,15 @@ __all__ = [
     "DEPTH_OFF",
     "GRID_OFF",
     "HORIZONTAL_OFF",
-    "OFF_KEYS",
+    "OFF_ACTIONS",
     "ROLL_3D",
     "ROLL_POPUP_TIP",
     "ROLL_TIP",
     "ROTATE_OFF",
+    "SYNC_OFF",
     "TRANSPOSE_OFF",
     "VERTICAL_TIP",
-    "guard_keys",
     "install",
+    "keep_synced",
+    "take_action",
 ]

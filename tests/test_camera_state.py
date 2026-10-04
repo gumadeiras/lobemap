@@ -119,6 +119,40 @@ def test_reset_after_a_trip_gives_the_picture_the_trip_gives_unturned(monkeypatc
         assert not differ.any(), (steps, int(differ.sum()))
 
 
+def test_the_cameras_of_3d_and_slice_view_stay_one(monkeypatch):
+    """Unsynced, from the View menu (⌘U) or the camera popup, a trip through
+    Slice view changed the zoom, and the 3D view stayed turned while every
+    box read 0. The popup's box is off, and the menu's toggle says why and
+    changes nothing."""
+    from chrome_harness import popups_offscreen, right_click, told
+    from napari._app_model import get_app_model
+
+    from lobemap.viewer.buttons import SYNC_OFF
+
+    unturned = _trip(monkeypatch, "GRABE", [SLICE, THREE_D])
+    with launched(monkeypatch, "view", "GRABE") as (code, viewer):
+        sw = switcher(viewer)
+        camera = viewer.scene.camera
+        row = viewer.window._qt_viewer.viewerButtons
+        with popups_offscreen():
+            popups = right_click(row.ndisplayButton)
+            box = row.camera_synced_checkbox
+            assert not box.isEnabled() and box.isChecked() and box.toolTip() == SYNC_OFF
+            for popup in popups:
+                popup.close()
+        with told() as said:
+            get_app_model().commands.execute_command(
+                "napari.scene.toggle_synced_camera").result()
+            pump()
+        assert camera.synced and said == [SYNC_OFF], said
+        for step in (TILT, SLICE, RESET, THREE_D):
+            step(sw)
+            pump(50)
+        assert camera.zoom == unturned["zoom"]
+        assert np.allclose(th.screen_axes(viewer), unturned["screen"], atol=1e-12)
+        assert sw.camera.zoom.value() == pytest.approx(camera.zoom, abs=1e-3)
+
+
 def test_the_light_is_the_cameras_and_the_flips_alone(monkeypatch):
     """With the flip on, any move of the camera lit the surfaces from the top
     left, and the upright picture stayed lit so until its next move: 429,051

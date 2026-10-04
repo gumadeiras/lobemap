@@ -285,12 +285,15 @@ def test_the_camera_popup_is_the_view_docks_flip_zoom_and_perspective(opened):
         sw.camera.zoom.setValue(1.25)
         pump()
         assert camera.zoom == pytest.approx(1.25) and row.zoom.value() == pytest.approx(1.25)
-        # Its sync box is napari's, and moves nothing.
-        for synced in (False, True):
-            row.camera_synced_checkbox.setChecked(synced)
-            pump()
-            assert camera.synced is synced
-            assert_no_hidden_mirror(viewer, sess, sw, signs)
+        # Its sync box is off: one camera for 3D and Slice view, kept so.
+        from lobemap.viewer.buttons import SYNC_OFF
+
+        box = row.camera_synced_checkbox
+        assert not box.isEnabled() and box.toolTip() == SYNC_OFF
+        box.setChecked(False)
+        pump()
+        assert camera.synced
+        assert_no_hidden_mirror(viewer, sess, sw, signs)
         if ndisplay == 3:
             # Perspective.
             row.perspective.setValue(40)

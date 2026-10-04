@@ -1,5 +1,6 @@
 """napari's keys that would leave the window in a state no control of
-lobemap's shows do nothing, and say why; delete passes lobemap's layers by.
+lobemap's shows do nothing, and say why; delete passes lobemap's layers by,
+and says they are part of the brain and can be hidden instead.
 
 Every key goes through Qt to the canvas, or to the layer list, as a key
 pressed there does. What is checked is the viewer: the axis order, every
@@ -102,15 +103,18 @@ def test_delete_passes_lobemaps_layers_by_and_takes_the_users(opened):
         "⌫ in the list": lambda: press(listing, "Backspace"),
         "⌦ in the list": lambda: press(listing, "Delete"),
     }
+    from lobemap.viewer.guards import KEPT
+
     for route, do in routes.items():
-        # lobemap's own, alone: kept, and said why.
+        # lobemap's own, alone: kept, and said why, in lobemap's words, not
+        # napari's "locked and cannot be deleted".
         for layer in (main, ours[0]):
             viewer.layers.selection.active = layer
             with told() as said:
                 do()
                 pump()
             assert list(viewer.layers) == ours, route
-            assert any("locked" in s and layer.name in s for s in said), (route, said)
+            assert said == [KEPT.format(names=repr(layer.name))], (route, said)
         # The user's own: deleted.
         mine = viewer.add_points(ndim=3)
         viewer.layers.selection.active = mine
@@ -125,7 +129,8 @@ def test_delete_passes_lobemaps_layers_by_and_takes_the_users(opened):
             do()
             pump()
         assert mine not in viewer.layers and list(viewer.layers) == ours, route
-        assert any("locked" in s for s in said), (route, said)
+        assert said == [KEPT.format(names=repr(main.name))], (route, said)
+        assert set(viewer.layers.selection) == {main}, route
     # Hover still names what the main layer draws: nothing went away.
     assert set(sess.surfaces) and all(s.layer in viewer.layers for s in sess.surfaces.values())
 

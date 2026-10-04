@@ -140,10 +140,13 @@ def test_a_planted_identifier_is_caught(monkeypatch, allowed):
 def test_every_message_reads_as_words(allowed, registry):
     """The status lines a switch or a tab can show, for every brain and tab,
     and every reason they give, which the walk above never meets."""
-    from lobemap.viewer import buttons, chrome, panel
+    from lobemap.viewer import axes, buttons, chrome, guards, panel
     from lobemap.viewer import switcher as dock
 
-    for text in (dock.SWAPPED, chrome.STAYS_LOCKED, *buttons.OFF_KEYS.values()):
+    named = [said.format(names="'Benton 2025 · 3D'")
+             for said in (guards.KEPT, guards.NOT_COPIED, guards.NOT_LINKED)]
+    for text in (dock.SWAPPED, chrome.STAYS_LOCKED, *buttons.OFF_ACTIONS.values(),
+                 buttons.SYNC_OFF, axes.SCENE_AXES_OFF, *named):
         assert U.why_code(text, allowed) == "", text
     reasons = [dock.plain_reason(exc) for exc in (
         FileNotFoundError(), MemoryError(), PermissionError(), ValueError())]

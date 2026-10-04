@@ -49,6 +49,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from .buttons import take_action
 from .camera_rows import PERSPECTIVE, ZOOM, CameraRows
 from .chrome import CONTROL_HEIGHT, GRID
 from .request import MissingAssets, loadable_spaces
@@ -311,6 +312,7 @@ class SpaceSwitcher(QWidget):
             f"min-height: {CONTROL_HEIGHT - 2 * pad}px; }}")
 
         # The dock outlives every scene, so it is connected once.
+        take_action(viewer, "napari:roll_axes", self.next_sections)
         viewer.dims.events.ndisplay.connect(self._on_mode)
         viewer.dims.events.order.connect(self._on_order)
         viewer.scene.camera.events.orientation.connect(self._on_orientation)
@@ -371,6 +373,20 @@ class SpaceSwitcher(QWidget):
         brain opened first. Only a change of style makes it measure again.
         """
         QApplication.sendEvent(self.slice, QEvent(QEvent.Type.StyleChange))
+
+    def next_sections(self, viewer=None) -> None:
+        """napari's roll, by its button or its key: the next choice of the
+        Sections menu, in the menu's order, after the last the first.
+
+        napari rolls the axis order instead, and its next slice axis was not
+        the menu's next: the hemibrain went Horizontal, Sagittal, Frontal,
+        Sagittal, and FAFB14 only between Sagittal and Horizontal. In 3D, as
+        Sections is, it is off.
+        """
+        count = self.slice.count()
+        if self.viewer.dims.ndisplay != 2 or count < 2:
+            return
+        self.slice.setCurrentIndex((self.slice.currentIndex() + 1) % count)
 
     def _on_slice(self, _index: int) -> None:
         axis = self.slice.currentData()

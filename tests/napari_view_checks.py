@@ -10,6 +10,7 @@ from __future__ import annotations
 CHECKED = {
     "_calc_status_from_cursor": "test_the_status_napari_reckons_for_the_cursor",
     "_view_direction": "test_the_status_napari_reckons_for_the_cursor",
+    "_actions": "test_napari_actions_lobemap_takes_over",
     "_on_view_direction_change": "test_the_light_napari_gives_a_surface",
     "_update_camera_depth": "test_the_fits_and_the_depth_napari_makes",
 }
@@ -53,6 +54,38 @@ def test_the_status_napari_reckons_for_the_cursor(viewer):
     need(viewer.status == "Named" and seen,
          "the viewer's own _calc_status_from_cursor, called through the instance", used)
     viewer.mouse_over_canvas = False
+
+
+def test_napari_actions_lobemap_takes_over(viewer):
+    """`buttons.take_action`: napari's action manager keeps each action's
+    command, description, keymap provider and repeatability in `_actions`,
+    and binds its keys to the action's injected command, again when one is
+    registered anew; napari injects the viewer the key was pressed in."""
+    from napari.components import ViewerModel
+    from napari.settings import get_settings
+    from napari.utils.action_manager import action_manager
+
+    from lobemap.viewer.buttons import take_action
+
+    need, reaching = _helpers()
+    used = "viewer.buttons.take_action"
+    name = "napari:toggle_grid"
+    with reaching("action_manager._actions", used):
+        action = action_manager._actions[name]
+        parts = (action.command, action.description, action.keymapprovider,
+                 action.repeatable)
+    need(callable(parts[0]) and isinstance(parts[1], str) and parts[2] is ViewerModel,
+         "action_manager._actions[name], an Action of command, description, "
+         "keymapprovider and repeatable", used)
+    said = []
+    take_action(viewer, name, said.append)
+    action = action_manager._actions[name]
+    need(any(bound is action.injected for bound in ViewerModel.class_keymap.values()),
+         "ViewerModel.class_keymap bound to the action registered anew", used)
+    action.injected(viewer)
+    need(said == [viewer] and not viewer.canvas.grid.enabled,
+         "the action's injected command, given the viewer", used)
+    need(get_settings().shortcuts.shortcuts.get(name), f"a key for {name}", used)
 
 
 def test_the_light_napari_gives_a_surface(viewer):
@@ -106,3 +139,22 @@ def test_the_fits_and_the_depth_napari_makes(viewer):
     need("self.viewer.layers.extent" in source and not inspect.signature(
         QtViewer._update_camera_depth).parameters.keys() - {"self"},
          "QtViewer._update_camera_depth(), from viewer.layers.extent", used)
+
+
+def test_the_camera_popups_sync_box(viewer):
+    """`buttons._camera_popup`: napari's camera popup keeps its "Sync 2D/3D
+    camera" box as `camera_synced_checkbox`, and the camera its `synced`."""
+    from chrome_harness import popups_offscreen, right_click
+    from qtpy.QtWidgets import QCheckBox
+
+    need, reaching = _helpers()
+    used = "viewer.buttons._camera_popup and keep_synced"
+    row = viewer.window._qt_viewer.viewerButtons
+    with popups_offscreen(), reaching("QtViewerButtons.camera_synced_checkbox", used):
+        popups = right_click(row.ndisplayButton)
+        box = row.camera_synced_checkbox
+        need(isinstance(box, QCheckBox) and box.isChecked() == viewer.scene.camera.synced
+             and hasattr(viewer.scene.camera.events, "synced"),
+             "a Sync 2D/3D camera checkbox, and Camera.synced with its event", used)
+        for popup in popups:
+            popup.close()

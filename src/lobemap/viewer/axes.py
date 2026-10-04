@@ -160,6 +160,34 @@ def _roll_4x4(degrees: float) -> np.ndarray:
     return mat
 
 
+SCENE_AXES_OFF = (
+    "Off in lobemap: napari's scene axes stand at the image's origin, outside "
+    "the brain, and are not turned or mirrored with it. The arrows in the "
+    "corner show the brain's axes, as it is shown."
+)
+
+
+def keep_scene_axes_off(viewer) -> None:
+    """Keep napari's scene axes (View > Scene Axes) off, and say why.
+
+    They are drawn at the world's origin, which is outside the data, and
+    along the world's axes, not the image's as the brain is shown: under the
+    mirror the x arrow pointed the other way, and spun 30 degrees both were
+    30 degrees off. The corner arrows are the ones lobemap keeps true.
+    """
+    from napari.utils.notifications import show_info
+
+    model = viewer.scene.overlays["axes"]
+
+    def _off(event=None) -> None:
+        if model.visible:
+            model.visible = False
+            show_info(SCENE_AXES_OFF)
+
+    model.events.visible.connect(_off)
+    _off()
+
+
 def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
     """Two triads in 3D; only napari's own in 2D. Returns what is shown.
 
@@ -279,7 +307,9 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
 __all__ = [
     "ANATOMY_COLORS",
     "DEPTH_LABEL",
+    "SCENE_AXES_OFF",
     "VOXEL_COLORS",
     "VOXEL_LABELS",
     "apply_axis_mode",
+    "keep_scene_axes_off",
 ]

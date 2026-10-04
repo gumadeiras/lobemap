@@ -159,12 +159,12 @@ def test_the_buttons_popups_and_keys_lobemap_keeps_in_step(viewer):
              "QtDimsSorter named dim_sorter, listing dims.order, with a help_label", used)
         popups[0].close()
 
-    used = "viewer.buttons.guard_keys"
-    from lobemap.viewer.buttons import OFF_KEYS
+    used = "viewer.buttons.take_action"
+    from lobemap.viewer.buttons import OFF_ACTIONS
 
     shortcuts = get_settings().shortcuts.shortcuts
-    need(all(shortcuts.get(action) for action in OFF_KEYS),
-         f"napari's preferences holding keys for {', '.join(OFF_KEYS)}", used)
+    need(all(shortcuts.get(action) for action in (*OFF_ACTIONS, "napari:roll_axes")),
+         f"napari's preferences holding keys for {', '.join(OFF_ACTIONS)} and roll", used)
 
     used = "viewer.chrome.lock_layers"
     layer = viewer.add_points(ndim=3)
