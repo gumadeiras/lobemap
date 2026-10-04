@@ -4,8 +4,10 @@ The window is laid out for real at 1440 x 900, never put on screen. The
 cursor moves over many compartments, in 3D and in 2D, through napari's own
 mouse-move path, and every widget of every dock must be where it was and as
 large as it was, with the same tab open, the same rows selected and every
-table scrolled as it was. Only the status bar's words change. A click that
-does not drag selects; one that drags does not.
+table scrolled as it was. Only the status bar's words change. And it is
+still so `SETTLE_MS` after the cursor stops, with the event loop run, so a
+change that waits for the cursor to rest -- a debounced hover -- is caught
+too. A click that does not drag selects; one that drags does not.
 """
 
 from __future__ import annotations
@@ -25,6 +27,11 @@ from viewer_harness import (
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
+
+#: How long the layout is watched once the cursor stops, in milliseconds,
+#: the event loop running all the while: past any debounce a hover could
+#: hide a change behind.
+SETTLE_MS = 1600
 
 
 def _show(viewer) -> None:
@@ -57,6 +64,7 @@ def _layout(viewer, sess) -> dict:
     panel = sess.panel
     out["tab"] = panel.currentIndex()
     out["sources"] = {kind: page.chosen for kind, page in panel.pages.items()}
+    out["sides"] = {kind: page.sides_menu.currentText() for kind, page in panel.pages.items()}
     for name, tab in panel.tabs.items():
         model = tab.table.selectionModel()
         out[("selected", name)] = sorted(i.row() for i in model.selectedRows())
@@ -106,6 +114,9 @@ def test_hovering_changes_only_the_status_bar(monkeypatch, space):
                 assert _layout(viewer, sess) == before, (space, ndisplay, point)
             # The cursor was over something every time, and named it.
             assert "" not in said and len(said) > 10, (space, ndisplay, sorted(said)[:5])
+            # Nothing moves once it rests, either.
+            pump(SETTLE_MS)
+            assert _layout(viewer, sess) == before, (space, ndisplay, "after the cursor stopped")
 
 
 def test_a_click_selects_and_a_drag_does_not(monkeypatch):
