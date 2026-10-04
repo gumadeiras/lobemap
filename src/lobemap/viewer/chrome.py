@@ -37,6 +37,14 @@ GRID = 8
 #: units, so its rows fall on the grid.
 CONTROL_HEIGHT = 3 * GRID
 
+#: The look of every tab bar of the window: the panel's Glomeruli and
+#: Neuropils, and the View dock's tab beside napari's layer settings. Room
+#: round each title -- napari's 3 x 6 px left the text almost touching the
+#: tab's edges -- and no band of napari's tab color behind the tabs. Qt
+#: centres a title's line in the tab, which centres its capitals: every
+#: title of a bar stands on one line.
+TAB_STYLE = "QTabBar { background: transparent; } QTabBar::tab { padding: 8px 12px; }"
+
 #: napari's own docks, by the names lobemap shows for them.
 LAYER_SETTINGS = "Layer settings"
 LAYERS = "Layers"
@@ -66,9 +74,72 @@ def add_dock(viewer, widget, name: str, area: str):
     window = viewer.window
     dock = QtViewerDockWidget(window._qt_viewer, widget, name=name, area=area,
                               close_btn=False)
+    fit = functools.partial(_fit_title_bar, dock)
+    fit()
+    # napari builds the title bar again when the dock floats or docks.
+    dock.topLevelChanged.connect(fit)
+    dock.dockLocationChanged.connect(fit)
     window._qt_window.addDockWidget(dock.qt_area, dock)
     window.window_menu.addAction(dock.toggleViewAction())
     return dock
+
+
+def _fit_title_bar(dock, *_) -> None:
+    """Keep a dock's title bar to the room the dock gives it.
+
+    napari's title bar tells the dock it is 20 px tall, its size hint, and
+    holds itself to 26, its minimum: the dock put its widget 20 px down
+    and the title bar covered the top 6 px of it -- the top of the panel's
+    tabs, their rounded corners and frame, so each title sat high in what
+    was left. Its title fits 20 px.
+    """
+    from qtpy.QtWidgets import QDockWidget
+
+    bar = dock.titleBarWidget()
+    if bar is None or dock.features() & QDockWidget.DockWidgetFeature.DockWidgetVerticalTitleBar:
+        return
+    room = bar.sizeHint().height()
+    if 0 < room < bar.minimumHeight():
+        bar.setMinimumHeight(room)
+
+
+def tidy_tab_bar(bar) -> None:
+    """Give a tab bar the window's look (`TAB_STYLE`), and let the wheel
+    change its tab only once it has focus, as on a menu (`wheel`): under
+    some styles a scroll passing over the tabs turned them."""
+    from .wheel import guard_wheel
+
+    bar.setStyleSheet(TAB_STYLE)
+    # The line Qt draws under a dock's tabs: the panel's, in a tab widget,
+    # has none.
+    bar.setDrawBase(False)
+    guard_wheel(bar)
+
+
+def _watch_tab_bars(window) -> None:
+    """Tidy each tab bar the main window makes for its docks' tabs, once.
+
+    Qt makes one for a group of tabbed docks when it lays the group out,
+    and can make another when a dock leaves the group and comes back: each
+    is tidied as Qt polishes it, and any there already now.
+    """
+    from qtpy.QtCore import QEvent, QObject, Qt
+    from qtpy.QtWidgets import QTabBar
+
+    def tidy_once(widget) -> None:
+        if isinstance(widget, QTabBar) and not widget.property("lobemap_tidied"):
+            widget.setProperty("lobemap_tidied", True)
+            tidy_tab_bar(widget)
+
+    class Polished(QObject):
+        def eventFilter(self, watched, event) -> bool:
+            if event.type() == QEvent.Type.ChildPolished:
+                tidy_once(event.child())
+            return False
+
+    window.installEventFilter(Polished(window))
+    for bar in window.findChildren(QTabBar, options=Qt.FindChildOption.FindDirectChildrenOnly):
+        tidy_once(bar)
 
 
 def tidy(viewer, view_dock, panel_dock) -> None:
@@ -91,6 +162,7 @@ def tidy(viewer, view_dock, panel_dock) -> None:
     # The list goes under the View dock, then the settings join its tabs:
     # the View tab first, and the one shown.
     window.splitDockWidget(view_dock, layers, Qt.Orientation.Vertical)
+    _watch_tab_bars(window)
     window.tabifyDockWidget(view_dock, controls)
     for dock in (view_dock, controls):
         # The tab names each; a title bar under it named it again. napari
@@ -204,7 +276,9 @@ __all__ = [
     "LEFT_WIDTH",
     "RIGHT_WIDTH",
     "STAYS_LOCKED",
+    "TAB_STYLE",
     "add_dock",
     "lock_layers",
     "tidy",
+    "tidy_tab_bar",
 ]

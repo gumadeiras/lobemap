@@ -22,12 +22,21 @@ class _Guard(QObject):
         return False
 
 
+#: The one guard, watching every guarded widget. A guard of each widget's
+#: own, made its child, lost its Python half with the Python wrapper of a
+#: widget Qt made -- a tab widget's tab bar -- and then let the wheel through.
+_GUARD: _Guard | None = None
+
+
 def guard_wheel(*widgets) -> None:
     """Let the wheel change each of `widgets` only while it has focus."""
+    global _GUARD
+    if _GUARD is None:
+        _GUARD = _Guard()
     for widget in widgets:
         if widget.focusPolicy() == Qt.FocusPolicy.WheelFocus:
             widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        widget.installEventFilter(_Guard(widget))
+        widget.installEventFilter(_GUARD)
 
 
 __all__ = ["guard_wheel"]
