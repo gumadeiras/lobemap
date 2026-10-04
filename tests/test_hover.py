@@ -133,3 +133,80 @@ def test_a_drag_does_not_pick(monkeypatch):
         viewer.window._qt_viewer.canvas._on_mouse_move(event)
         pump()
         assert viewer.status == ""
+
+
+def _cursor(viewer):
+    """Real Qt events for the cursor: entering the window, which starts
+    napari's status thread as it does for a user, then the canvas, which
+    makes napari reckon the status for the cursor; `move(world)` moves it
+    over a world point. napari reckons in its thread, a moment after the
+    move: `rest` waits past that."""
+    from qtpy.QtCore import QEvent, QPointF, Qt
+    from qtpy.QtGui import QEnterEvent, QMouseEvent
+    from qtpy.QtWidgets import QApplication
+
+    window = viewer.window._qt_window
+    native = viewer.window._qt_viewer.canvas.native
+
+    def enter(widget) -> None:
+        here = QPointF(1.0, 1.0)
+        QApplication.sendEvent(widget, QEnterEvent(here, here, QPointF(widget.mapToGlobal(
+            here.toPoint()))))
+
+    def move(world) -> None:
+        enter(native)
+        here = QPointF(*canvas_position(viewer, world))
+        QApplication.sendEvent(native, QMouseEvent(
+            QEvent.Type.MouseMove, here, here, QPointF(native.mapToGlobal(here.toPoint())),
+            Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+
+    def rest() -> str:
+        pump(600)
+        return str(viewer.status)
+
+    enter(window)
+    return window.status_thread, move, rest
+
+
+@pytest.mark.parametrize("space", SPACES)
+def test_the_name_stays_once_the_cursor_rests(monkeypatch, space):
+    """napari's own status for the cursor, reckoned in its thread a moment
+    after each move -- the active layer's name and the value under the
+    cursor -- replaced the name: "neuPrint · 3D [306, 174, 198]: 7, 23185".
+    With the cursor at rest over a compartment, in 3D and in Slice view and
+    whichever layer is active, the name is what stays."""
+    with launched(monkeypatch, "view", space) as (code, viewer):
+        assert code == 0
+        sess = session(viewer)
+        tab = sess.panel.tabs[sess.registry.primary_atlas(space).id]
+        surface = tab.surface
+        index = surface.meshset.n_compartments // 2
+        clear_all(tab)
+        from qtpy.QtCore import Qt
+
+        from lobemap.viewer.panel import VISIBLE_COL
+
+        tab.table.item(tab.table_row(index), VISIBLE_COL).setCheckState(Qt.Checked)
+        pump(300)
+        want = tab.describe(index)
+        thread, move, rest = _cursor(viewer)
+        try:
+            assert thread.isRunning()
+            layers = [surface.layer, tab.contour.layer, *sess.images]
+            for ndisplay, world in ((3, surface.meshset.centroid(index)),
+                                    (2, None), (3, surface.meshset.centroid(index))):
+                viewer.dims.ndisplay = ndisplay
+                pump(300)
+                if world is None:
+                    world = _inside_contour(tab.contour, index)
+                for layer in layers:
+                    viewer.layers.selection.active = layer
+                    move(world)
+                    assert rest() == want, (ndisplay, layer.name)
+                # Away from it, napari's own words, as before.
+                far = np.asarray(world, float) + 1e4
+                move(far)
+                assert rest() != want, ndisplay
+        finally:
+            thread.terminate()
+            thread.wait()

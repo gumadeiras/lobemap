@@ -243,10 +243,23 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
 
     The dicts are read on every move, so a part the session builds later
     (`SceneSession.realize`) is picked too.
+
+    The words stay once the cursor rests. napari works out the status bar's
+    words for the cursor itself, in a thread of its own, once the cursor is
+    over the canvas -- the active layer's name and the value under the
+    cursor -- and they arrived a moment after these and replaced them:
+    "neuPrint · 3D [306, 174, 198]: 7, 23185" where "DA3 (right) — neuPrint"
+    had been, naming the hidden 3D layer in Slice view. So napari's own
+    reckoning names the compartment first (`name_the_cursor`), and gives its
+    own words only where no compartment is.
     """
 
     def _pick(event):
         """(part, compartment, words) under the cursor, or None."""
+        return _pick_at(event.position, getattr(event, "view_direction", None),
+                        getattr(event, "dims_displayed", None) or viewer.dims.displayed)
+
+    def _pick_at(position, view_direction, dims_displayed):
         three_d = viewer.dims.ndisplay == 3
         order = sorted(
             surfaces,
@@ -260,16 +273,14 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
                 if not surface.layer.visible or not three_d:
                     continue
                 index = surface.pick(
-                    event.position,
-                    getattr(event, "view_direction", None),
-                    getattr(event, "dims_displayed", None) or viewer.dims.displayed,
+                    position, view_direction, dims_displayed,
                     from_position=viewer.scene.camera.perspective > 0,
                 )
             else:
                 if not overlay.layer.visible:
                     continue
                 shown = list(viewer.dims.displayed)
-                point = overlay.layer.world_to_data(event.position)
+                point = overlay.layer.world_to_data(position)
                 shape = polygon_at(
                     [np.asarray(path)[:, shown] for path in overlay.paths],
                     np.asarray(point)[shown],
@@ -289,6 +300,15 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
         if picked is not None:
             viewer.status = picked[2]
 
+    def _words(position, view_direction) -> str | None:
+        """What napari's status says for the cursor; see `name_the_cursor`."""
+        picked = _pick_at(position, view_direction, viewer.dims.displayed)
+        return None if picked is None else picked[2]
+
+    # Found through the callback, so a scene torn down names nothing.
+    _on_move.lobemap_words = _words
+    name_the_cursor(viewer)
+
     def _on_press(_viewer, event):
         if getattr(event, "button", 1) != 1:
             return          # not the left button: napari's own, or a menu
@@ -307,6 +327,31 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
     viewer.mouse_move_callbacks.append(_on_move)
     viewer.mouse_drag_callbacks.append(_on_press)
     return [_on_move, _on_press]
+
+
+def name_the_cursor(viewer) -> None:
+    """Give the status bar lobemap's words for what the cursor is over.
+
+    napari reckons the status bar's words for the cursor whenever it moves
+    over the canvas, in a thread, and whenever another layer is made active:
+    the active layer's name, the cursor's position and the value there.
+    Here that reckoning asks the scene's picking first (`install_picking`),
+    and keeps napari's words for where no compartment is. So whichever layer
+    is active, 2D or 3D, the words that stay are the compartment's.
+
+    The scene's picking is found through its mouse callback, which a scene
+    switch removes, so the scene shown is the one asked. Once per viewer.
+    """
+    from .napari_private import status_for_cursor
+
+    def _words(position, view_direction) -> str | None:
+        for callback in reversed(list(viewer.mouse_move_callbacks)):
+            words = getattr(callback, "lobemap_words", None)
+            if words is not None:
+                return words(position, view_direction)
+        return None
+
+    status_for_cursor(viewer, _words)
 
 
 def show_main_layer(viewer, registry: Registry, session: SceneSession) -> None:
@@ -472,6 +517,7 @@ __all__ = [
     "level_for_3d",
     "load_space",
     "maximize",
+    "name_the_cursor",
     "orient_anterior",
     "run",
     "show_main_layer",

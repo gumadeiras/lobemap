@@ -153,6 +153,37 @@ def fit_axis_labels(viewer) -> None:
     qt_dims._resize_axis_labels()
 
 
+def status_for_cursor(viewer, words) -> None:
+    """Let `words(position, view_direction)` say what the cursor is over,
+    before napari's own words for it; once per viewer.
+
+    napari reckons the status bar's words in `_calc_status_from_cursor`:
+    its status thread calls it on every move of the cursor over the canvas,
+    and the viewer on a change of active layer. Wrapped on the viewer
+    instance, as `view.install_home_orientation` wraps `reset_view`, so
+    both go through it. Where `words` gives nothing, napari's words stand.
+    It runs in napari's thread, where the scene can change under it: what
+    fails there leaves napari's words, as napari leaves its own on a
+    failure.
+    """
+    if getattr(viewer.__dict__.get("_calc_status_from_cursor"), "_lobemap", False):
+        return
+    reckon = type(viewer)._calc_status_from_cursor.__get__(viewer)
+
+    def _calc_status_from_cursor():
+        if viewer.mouse_over_canvas:
+            try:
+                said = words(viewer.cursor.position, viewer.cursor._view_direction)
+            except Exception:                       # noqa: BLE001 - napari's words stand
+                said = None
+            if said:
+                return said, said if viewer.tooltip.visible else ""
+        return reckon()
+
+    _calc_status_from_cursor._lobemap = True
+    object.__setattr__(viewer, "_calc_status_from_cursor", _calc_status_from_cursor)
+
+
 def shown_unsliced(layer):
     """A context in which showing `layer`, or changing its data or transform,
     does not slice it or rebuild its visual; the caller slices it after."""
@@ -425,6 +456,7 @@ __all__ = [
     "refresh_extent",
     "shown_unsliced",
     "slice_now",
+    "status_for_cursor",
     "stop_before_slicing",
     "text_visual",
     "triangulate_edge",

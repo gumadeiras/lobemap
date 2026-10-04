@@ -42,6 +42,10 @@ from napari_chrome_checks import (  # noqa: F401 - collected here, with this mod
     test_the_napari_chrome_lobemap_tidies,
     test_the_window_and_canvas_lobemap_reaches,
 )
+from napari_view_checks import CHECKED as VIEW_CHECKED
+from napari_view_checks import (  # noqa: F401 - collected here, as above
+    test_the_status_napari_reckons_for_the_cursor,
+)
 
 napari = pytest.importorskip("napari")
 
@@ -83,6 +87,7 @@ CHECKED = {
     "_data_level": "test_a_turned_image_picks_its_level_as_napari_draws",
     "_slicing_state": "test_a_turned_image_picks_its_level_as_napari_draws",
     "_resize_axis_labels": "test_a_slider_label_is_sized_for_the_text_it_is_given",
+    **VIEW_CHECKED,
 }
 
 #: lobemap's own private names, reached from another of its modules.
