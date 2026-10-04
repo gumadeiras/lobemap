@@ -96,7 +96,7 @@ A light-microscopy template rather than EM, and the one space no bridging regist
 
 The files are reproduced from the paper and its in vivo atlas. The atlas page at the Max Planck Institute for Chemical Ecology (https://www.ice.mpg.de/232714/vivo-3d-atlas) publishes the atlas PDF and the confocal stack; the article is not open access. Neither states terms for the files, and lobemap grants none: the rights stay with the authors and the publisher.
 
-The label volume has no `VM6`. Its Amira material table names `VM6_left` and `VM6_right`, but neither has a voxel in the published "sure ones" volume, so 54 glomeruli per side are meshed rather than 55. The same table names the material read as `VP2` `VP2_left_VM6andVC6` and `VP2_right_VM6andVC6`, and in affine fits to the male CNS and Schlegel S12 it lies at VM6's position rather than VP2's. The viewer therefore names it `VP2(L) (VM6?)` and `VP2(R) (VM6?)`, from the `[uncertain]` table in `registry/atlases/grabe2015.toml`; its nomenclature row stays VP2.
+The label volume has no `VM6`. Its Amira material table names `VM6_left` and `VM6_right`, but neither has a voxel in the published "sure ones" volume, so 54 glomeruli per side are meshed rather than 55. The same table names the material read as `VP2` `VP2_left_VM6andVC6` and `VP2_right_VM6andVC6`, and in affine fits to the male CNS and Schlegel S12 it lies at VM6's position rather than VP2's. The viewer therefore names it `VP2 (VM6?)`, from the `[uncertain]` table in `registry/atlases/grabe2015.toml`; its nomenclature row stays VP2.
 
 - Grabe V, Strutz A, Baschwitz A, Hansson BS, Sachse S. *Journal of Comparative Neurology*, 2015. doi:10.1002/cne.23697
 
