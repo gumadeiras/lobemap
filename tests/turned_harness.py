@@ -323,8 +323,9 @@ def assert_triads_point_where_they_say(viewer, space) -> int:
 
     napari's names the image's axes x, y and z, drawn as the scene's layers
     place them -- turned in the plane, mirrored -- which a layer's own
-    transform says; the second, in 3D, the anatomical poles, reflected with
-    the scene (`core.model.anatomical_triad`).
+    transform says; the second the anatomical poles, reflected with the
+    scene (`core.model.anatomical_triad`), and in 2D carried by the turn the
+    section shows, onto which they are projected.
     """
     from viewer_harness import canvas_position
 
@@ -350,10 +351,12 @@ def assert_triads_point_where_they_say(viewer, space) -> int:
         return (np.asarray(layer.data_to_world(data + step), float)
                 - np.asarray(layer.data_to_world(data), float))
 
+    turn = session.turned.shown_turn if viewer.dims.ndisplay == 2 else None
+    q = np.eye(3) if turn is None else np.asarray(turn.q, float)
     nodes = [(overlay.node.axes, image_axis)]
     anatomy = getattr(overlay, _ANATOMY_ATTR, None)
     if anatomy is not None:
-        nodes.append((anatomy, frame.__getitem__))
+        nodes.append((anatomy, lambda pole: q @ frame[pole]))
     checked = 0
     for node, direction in nodes:
         if not node.visible:

@@ -164,7 +164,8 @@ def test_a_slice_upside_down_in_every_space(registry, space):
                 assert th.contour_vs_trimesh(viewer, sess, to_mesh) > 0
                 assert_renders_loops(contour)
                 checked = th.assert_triads_point_where_they_say(viewer, registry.spaces[space])
-                assert checked == (0 if angles[1] else 2), angles
+                # The poles' arrows on the section; napari's x/y arrows step aside.
+                assert checked >= 2, angles
                 assert [hover(viewer, p) for p in points] == said
                 if mirrored and not any(angles):
                     # The same specimen points: mirrored now, upside down.

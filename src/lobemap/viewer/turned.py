@@ -112,6 +112,12 @@ class TurnedView:
             return ("spin", self.angles[0])
         return ("oblique", None)
 
+    @property
+    def shown_turn(self) -> Turn | None:
+        """The turn the 2D view shows now, or None: what the slice's arrows
+        are turned by (`axes.plane_arrows`)."""
+        return self._applied
+
     def _two_d(self) -> bool:
         return self.viewer.dims.ndisplay == 2 and self.viewer.dims.ndim == 3
 

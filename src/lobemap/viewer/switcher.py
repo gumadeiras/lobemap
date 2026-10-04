@@ -92,11 +92,13 @@ HOME_TIP = (
     "Fit the brain to the window. In 3D, also turn back to the front view, "
     "dorsal side up, with your rotation applied."
 )
-#: What the corner arrows mean; 3D only, where the anatomical ones are drawn.
-ARROWS = (
-    "Arrows: A anterior, P posterior, D dorsal, V ventral, L left, R right. "
-    "x, y, z are the image's own axes."
-)
+#: What the corner arrows mean, in both views. Each letter is bound to its
+#: word, so a line never breaks between them.
+ARROWS = "Arrows: " + ", ".join(
+    f"{letter}\N{NO-BREAK SPACE}{word}" for letter, word in (
+        ("A", "anterior"), ("P", "posterior"), ("D", "dorsal"), ("V", "ventral"),
+        ("L", "left"), ("R", "right"))
+) + ". In 3D, x, y and z are the image's own axes."
 
 #: Said when a swap of the two shown axes is undone (`_on_order`).
 SWAPPED = (
@@ -243,10 +245,6 @@ class SpaceSwitcher(QWidget):
 
         self.legend = QLabel(ARROWS)
         self.legend.setWordWrap(True)
-        # Shown in 3D only, holding its place in 2D, so nothing below moves.
-        policy = self.legend.sizePolicy()
-        policy.setRetainSizeWhenHidden(True)
-        self.legend.setSizePolicy(policy)
         self.status = QLabel("")
         self.status.setWordWrap(True)
 
@@ -259,8 +257,6 @@ class SpaceSwitcher(QWidget):
         sections = QVBoxLayout()
         sections.addWidget(self.slice)
         sections.addWidget(self.align)
-        # In a layout of its own: a form drops the row of a hidden widget,
-        # held place or not, and everything under it moved up in 2D.
         arrows = QVBoxLayout()
         arrows.addWidget(self.legend)
         for row in (show, sections, self.picture, arrows):
@@ -421,7 +417,6 @@ class SpaceSwitcher(QWidget):
         self.slice_view.setChecked(not three_d)
         self.slice.setEnabled(not three_d)
         self.align.setEnabled(not three_d)
-        self.legend.setVisible(three_d)
 
     def _on_order(self, event=None) -> None:
         """Keep napari's roll button, its key and its axis-order popup in

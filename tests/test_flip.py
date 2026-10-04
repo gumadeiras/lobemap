@@ -176,8 +176,8 @@ def test_the_slice_triad_points_where_it_says_upside_down(viewer, registry, mirr
         session.set_rotation(*angles)
         th.settle_canvas(viewer)
         checked = th.assert_triads_point_where_they_say(viewer, registry.spaces[SPACE])
-        # Cut across the grid, napari's x/y/z arrows are hidden.
-        assert checked == (0 if angles[1] else 2), angles
+        # The poles' arrows on the section; napari's x/y arrows step aside.
+        assert checked >= 2, angles
 
 
 def test_fit_to_window_keeps_a_slice_upside_down(viewer, registry):

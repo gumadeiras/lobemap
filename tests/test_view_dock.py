@@ -174,7 +174,8 @@ def test_the_view_controls_drive_the_viewer(monkeypatch):
             # Sections stays in view, disabled in 3D, and its tooltip says why.
             assert sw.slice.isVisible() and sw.slice.isEnabled() is not three_d
             assert sw.slice.toolTip().endswith("Slice view only.")
-            assert sw.legend.isVisible() is three_d
+            # The arrows' legend: both views have arrows.
+            assert sw.legend.isVisible()
 
         mode_shown(True)
         sw.slice_view.click()
@@ -483,9 +484,10 @@ def test_the_view_dock_says_everything_in_words(monkeypatch):
             "Show the brain as its mirror image, to compare a left lobe with a right "
             "one. Display only; the data do not change. The corner arrows follow. "
             "Opening another brain turns it off.")
-        assert sw.legend.text() == (
+        # Each letter bound to its word by a no-break space.
+        assert sw.legend.text().replace("\N{NO-BREAK SPACE}", " ") == (
             "Arrows: A anterior, P posterior, D dorsal, V ventral, L left, R right. "
-            "x, y, z are the image's own axes.")
+            "In 3D, x, y and z are the image's own axes.")
 
         shown = []
         for widget in sw.findChildren(QLabel) + sw.findChildren(QAbstractButton):

@@ -438,12 +438,14 @@ def test_an_axis_without_an_angle_is_rejected(registry_root):
 
 
 @pytest.mark.requires_data
-def test_the_anatomy_gets_a_second_triad_shown_only_in_3d(registry):
-    """Two triads sharing one origin in 3D; napari's alone in 2D.
+def test_the_anatomy_gets_a_second_triad_turned_in_3d_and_flat_in_2d(registry):
+    """Two triads sharing one origin in 3D; the anatomy's alone in 2D.
 
     A slice is cut along ARRAY axes, which are 15-31 degrees off the
-    anatomy in every space here, so an anatomical arrow drawn over a
-    slice would claim an alignment the slice does not have.
+    anatomy in every space here, so 2D does not draw the triad turned in
+    space, which would claim an alignment the slice does not have: it draws
+    each pole's projection onto the section, and napari's x/y arrows step
+    aside (`test_slice_arrows` checks where each points).
 
     It is a vispy visual inside napari's own overlay, not a layer, so it
     shares the origin, the camera and the corner anchoring -- and does
@@ -483,8 +485,10 @@ def test_the_anatomy_gets_a_second_triad_shown_only_in_3d(registry):
             assert np.allclose(recovered[:, i], frame[pole], atol=1e-9), pole
 
         viewer.dims.ndisplay = 2
-        assert node.visible is False
+        assert node.visible is True and overlay.node.axes.visible is False
+        assert set(node.text.text) <= set(labels)
         viewer.dims.ndisplay = 3
-        assert node.visible is True
+        assert node.visible is True and overlay.node.axes.visible is True
+        assert list(node.text.text) == list(labels)[::-1]
     finally:
         viewer.close()
