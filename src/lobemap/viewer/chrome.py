@@ -136,12 +136,14 @@ def tidy_tab_bar(bar, viewer) -> None:
 def tidy_tab_widget(tabs, viewer) -> None:
     """Give a tab widget's bar the window's look, and its page the edge the
     tabs stand on (`EDGE`) in place of napari's frame; the wheel as on a
-    dock's tab bar (`tidy_tab_bar`)."""
+    dock's tab bar (`tidy_tab_bar`). Made without a viewer, it has no theme
+    to take the edge's color from, and no edge."""
     from .wheel import guard_wheel
 
-    tabs.setProperty("lobemap_edge", "pane")
     tabs.tabBar().setStyleSheet(TAB_STYLE)
-    _style_edge(tabs, edge_color(viewer))
+    if viewer is not None:
+        tabs.setProperty("lobemap_edge", "pane")
+        _style_edge(tabs, edge_color(viewer))
     guard_wheel(tabs.tabBar())
 
 
