@@ -34,9 +34,8 @@ import re
 import sys
 import traceback
 
-from qtpy.QtCore import QEvent, Qt
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
-    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -69,7 +68,7 @@ SECTIONS_TIP = (
     "Unless aligned below, the sections follow the image's own grid, at the "
     "angle shown from that axis. Slice view only."
 )
-ALIGN = "Align sections to the anatomical axes"
+ALIGN = "Align to the anatomical axes"
 ALIGN_TIP = (
     "Cut the sections square to the brain's anterior–posterior, dorsal–ventral "
     "and medial–lateral axes, not along the image's grid. Slice view only."
@@ -211,9 +210,7 @@ class SpaceSwitcher(QWidget):
         #: The sections the slider steps through, by array axis.
         self.slice = QComboBox()
         self.slice.setToolTip(SECTIONS_TIP)
-        # As wide as the longest section's name, which says the axis it
-        # steps along: none is cut short.
-        self.slice.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self._size_sections()
         self.slice.currentIndexChanged.connect(self._on_slice)
         self.align = QCheckBox(ALIGN)
         self.align.setToolTip(ALIGN_TIP)
@@ -295,17 +292,27 @@ class SpaceSwitcher(QWidget):
             # One height: the boxes and checkboxes were 20 px, their text a
             # few pixels from their edges, and the Sections menu 26.
             control.setFixedHeight(CONTROL_HEIGHT)
-        guard_wheel(self.combo, self.slice, self.camera.zoom, self.camera.perspective,
-                    *self.rotation.box.values())
+        boxes = (self.camera.zoom, self.camera.perspective, *self.rotation.box.values())
+        for row in range(form.rowCount()):
+            label = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
+            if label is not None and label.widget() is not None:
+                # As tall as a control, at the top of its row, so its text
+                # sits on its control's baseline: "Sections", beside a menu
+                # and a checkbox, sat 3 px below its menu's.
+                label.widget().setFixedHeight(CONTROL_HEIGHT)
+        guard_wheel(self.combo, self.slice, *boxes)
         # napari's theme pads a push button by half a grid unit all round,
         # which left its text touching the sides: a grid unit either side
         # instead. It pads a box's text by 1 px above and below, and holds
         # its height to its own: half a grid unit there too, as on a button.
+        # And it draws a box's text a size smaller than the dock's other
+        # text, a pixel off its label's baseline: one size throughout.
         pad = GRID // 2
         self.setStyleSheet(
             f"QPushButton {{ padding: {pad}px {GRID}px; }}"
             f"QAbstractSpinBox {{ padding: {pad}px 10px; "
-            f"min-height: {CONTROL_HEIGHT - 2 * pad}px; }}")
+            f"min-height: {CONTROL_HEIGHT - 2 * pad}px; "
+            f"font-size: {self.font().pointSizeF():g}pt; }}")
 
         # The dock outlives every scene, so it is connected once.
         take_action(viewer, "napari:roll_axes", self.next_sections)
@@ -356,19 +363,27 @@ class SpaceSwitcher(QWidget):
             self.slice.setCurrentIndex(max(0, self.slice.findData(wanted)))
         finally:
             self.slice.blockSignals(False)
-        self._fit_sections()
         self._anatomy = {c.axis: c.anatomy for c in choices}
         self._choices = choices
         self.session.slice_axis = int(self.slice.currentData())
 
-    def _fit_sections(self) -> None:
-        """Size the Sections menu to the names it holds now.
+    def _size_sections(self) -> None:
+        """Size the Sections menu once, for the longest choice it can hold.
 
-        Qt measures a menu's minimum width once, from the names it held then,
-        and keeps it: the menu stayed as wide as the longest name of the
-        brain opened first. Only a change of style makes it measure again.
+        Every choice of every brain listed, aligned or not, so no choice is
+        ever cut short and the menu never changes width. Sized to the names
+        it held at each moment, it went from 260 to 205 px and back to 258
+        when the alignment was turned on and off in FAFB14, and lost the
+        closing parenthesis.
         """
-        QApplication.sendEvent(self.slice, QEvent(QEvent.Type.StyleChange))
+        names = {section_label(choice, aligned)
+                 for space_id in self.loadable_spaces(self.registry)
+                 for choice in slice_axes(self.registry.spaces[space_id])
+                 for aligned in (False, True)}
+        self.slice.addItems(sorted(names))
+        self.slice.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.slice.setFixedWidth(self.slice.sizeHint().width())
+        self.slice.clear()
 
     def next_sections(self, viewer=None) -> None:
         """napari's roll, by its button or its key: the next choice of the
@@ -395,7 +410,6 @@ class SpaceSwitcher(QWidget):
         """Cut along the anatomy or the grid; the menu says which."""
         for i, choice in enumerate(self._choices):
             self.slice.setItemText(i, section_label(choice, on))
-        self._fit_sections()
         if self._busy:
             return
         try:

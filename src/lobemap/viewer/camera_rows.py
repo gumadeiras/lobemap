@@ -89,7 +89,12 @@ class CameraRows:
         self.viewer.scene.camera.perspective = float(value)
 
     def _on_mode(self, event=None) -> None:
-        self.perspective.setEnabled(self.viewer.dims.ndisplay == 3)
+        three_d = self.viewer.dims.ndisplay == 3
+        if not three_d:
+            # A value typed in 3D leaves its text selected, and a disabled box
+            # drew the selection as an enabled one does.
+            self.perspective.lineEdit().deselect()
+        self.perspective.setEnabled(three_d)
 
 
 def _quietly(box, value) -> None:

@@ -277,6 +277,8 @@ def test_the_view_dock_sits_on_one_grid(monkeypatch):
                     assert button.width() <= text + 2 * GRID + 2, (
                         space, button.text(), button.width(), text)
                 for control in sw.findChildren((QComboBox, QCheckBox, QAbstractSpinBox)):
+                    if control is sw.slice:
+                        continue        # as wide as any brain's choices: test_dock_text
                     assert control.width() == control.sizeHint().width(), (
                         space, type(control).__name__, control.width())
                 # Heights: one for every control, never tight around its text.
@@ -463,7 +465,7 @@ def test_the_view_dock_says_everything_in_words(monkeypatch):
             "Which sections the slider steps through, and the axis it steps along. "
             "Unless aligned below, the sections follow the image's own grid, at the "
             "angle shown from that axis. Slice view only.")
-        assert sw.align.text() == "Align sections to the anatomical axes"
+        assert sw.align.text() == "Align to the anatomical axes"
         assert all(axis in sw.align.toolTip() for axis in (
             "anterior–posterior", "dorsal–ventral", "medial–lateral"))
         # No "true plane" anywhere: each section names the axis it steps along.
