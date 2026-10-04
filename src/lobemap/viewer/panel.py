@@ -31,7 +31,7 @@ from qtpy.QtWidgets import (
 )
 
 from ..core import reference
-from .chrome import tidy_tab_bar
+from .chrome import tidy_tab_widget
 from .panel_grid import (
     GAP,
     GROUP_GAP,
@@ -223,7 +223,7 @@ class CompartmentPanel(QTabWidget):
     def __init__(self, viewer, surfaces: dict, registry=None, contours=None,
                  space: str | None = None, names=None, realize=None) -> None:
         super().__init__()
-        tidy_tab_bar(self.tabBar())
+        tidy_tab_widget(self, viewer)
         self.viewer = viewer
         self.registry = registry
         self.tabs: dict[str, AtlasTab] = _Tabs(self)

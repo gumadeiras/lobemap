@@ -5,7 +5,8 @@ Layer settings tabs, on the left, are one kind of tab bar: as tall, as
 padded, each title in the middle of its tab by its capital letters, every
 title of a bar on one baseline. Each is read off the window as it is drawn,
 so whatever covers a tab counts: a measure of the tab bar alone missed the
-dock's title bar hiding the top of the panel's tabs.
+dock's title bar hiding the top of the panel's tabs. Each bar stands on an
+edge across its section, which its current tab joins.
 
 The wheel over either bar changes no tab.
 """
@@ -16,7 +17,9 @@ import contextlib
 from collections import Counter
 
 import pytest
-from viewer_harness import launched, pump, session, switch_to
+from viewer_harness import docks, launched, pump, session, switch_to
+
+from lobemap.viewer.chrome import EDGE
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
@@ -220,3 +223,77 @@ def test_the_wheel_over_a_tab_bar_changes_no_tab(monkeypatch, style):
                     for dy in (120, -120, 360, -360):
                         wheel(bar, bar.tabRect(i).center(), dy)
                         assert bar.currentIndex() == current, (bar.tabText(i), dy)
+
+
+def _edge(window, bar, section, color) -> dict:
+    """The edge under `bar`, as the window draws it: the rows right under
+    the current tab's drawn shape, which must be `color` across the whole
+    of `section`, and the row above, in which the current tab's foot must
+    be `color` too while what is beside the tabs is not."""
+    from qtpy.QtGui import QColor
+
+    pixmap = window.grab()
+    image = pixmap.toImage()
+    ratio = pixmap.devicePixelRatio()
+    want = QColor(color).getRgb()[:3]
+
+    def near(x, y) -> bool:
+        got = image.pixelColor(x, y).getRgb()[:3]
+        return sum(abs(p - q) for p, q in zip(got, want, strict=True)) <= 30
+
+    tab = drawn_tabs(window, bar)[bar.currentIndex()]
+    left, _top, right, bottom = (round(v * ratio) for v in tab["shape"])
+    corner = section.mapTo(window, section.rect().topLeft())
+    x0, x1 = round(corner.x() * ratio), round((corner.x() + section.width()) * ratio)
+    span = range(x0 + round(2 * ratio), x1 - round(2 * ratio))
+    rows = [y for y in range(bottom, bottom + round(3 * EDGE * ratio))
+            if sum(near(x, y) for x in span) >= 0.98 * len(span)]
+    beside = round((bar.mapTo(window, bar.rect().topLeft()).x()
+                    + bar.tabRect(bar.count() - 1).right() + 4) * ratio)
+    foot = range(left + round(4 * ratio), right - round(4 * ratio))
+    return {"rows": rows, "bottom": bottom, "ratio": ratio,
+            "foot": sum(near(x, bottom - 1) for x in foot) / len(foot),
+            "beside": near(beside, bottom - 1)}
+
+
+@pytest.mark.parametrize("style", [None, "Fusion"], ids=["native", "fusion"])
+def test_each_tab_bar_stands_on_an_edge_across_its_section(monkeypatch, style):
+    """Both bars, in every brain, with each tab current in turn: right under
+    the tabs a line of the theme's selected-tab color runs across the whole
+    section, the View dock's column on the left and the panel on the right,
+    and the current tab's foot joins it, with no gap. In the light theme,
+    the line takes the light theme's color."""
+    from lobemap.viewer.app import VIEW_TITLE
+    from lobemap.viewer.chrome import LAYER_SETTINGS, edge_color
+
+    with launched(monkeypatch, "view", SPACES[0]) as (code, viewer), _style(style):
+        assert code == 0
+        _lay_out(viewer)
+        window = viewer.window._qt_window
+        # The left column's sections: the dock of each of its tabs.
+        column = [docks(viewer, title)[0] for title in (VIEW_TITLE, LAYER_SETTINGS)]
+        for space in SPACES:
+            if space != SPACES[0]:
+                switch_to(viewer, space)
+                pump(100)
+            panel = session(viewer).panel
+            themes = ("dark", "light") if space == SPACES[-1] and style is None else ("dark",)
+            for theme in themes:
+                viewer.theme = theme
+                pump(100)
+                color = edge_color(viewer)
+                for bar, sections in ((panel.tabBar(), [panel, panel]),
+                                      (left_bar(viewer), column)):
+                    for current in range(bar.count()):
+                        bar.setCurrentIndex(current)
+                        pump(50)
+                        edge = _edge(window, bar, sections[current], color)
+                        said = (space, theme, bar.tabText(current), edge)
+                        # Right under the tab, and as thick as it is meant to be.
+                        assert edge["rows"] and edge["rows"][0] == edge["bottom"], said
+                        assert len(edge["rows"]) == round(EDGE * edge["ratio"]), said
+                        assert edge["foot"] >= 0.95 and not edge["beside"], said
+                    bar.setCurrentIndex(0)
+                    pump(50)
+            viewer.theme = "dark"
+            pump(100)

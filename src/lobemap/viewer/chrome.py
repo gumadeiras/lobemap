@@ -45,6 +45,15 @@ CONTROL_HEIGHT = 3 * GRID
 #: title of a bar stands on one line.
 TAB_STYLE = "QTabBar { background: transparent; } QTabBar::tab { padding: 8px 12px; }"
 
+#: The edge each tab bar stands on, in pixels: a line across its column,
+#: right under the tabs, in the theme's color of a selected tab. The
+#: selected tab joins it, so the tab and the section under the line read as
+#: one piece; without it the tabs floated over their section. The left
+#: column's tabs are a bar of the window's, as wide as the column, and draw
+#: it under themselves; the panel's are a tab widget's, as wide as their
+#: tabs, and its page draws it on top.
+EDGE = 2
+
 #: napari's own docks, by the names lobemap shows for them.
 LAYER_SETTINGS = "Layer settings"
 LAYERS = "Layers"
@@ -103,20 +112,61 @@ def _fit_title_bar(dock, *_) -> None:
         bar.setMinimumHeight(room)
 
 
-def tidy_tab_bar(bar) -> None:
-    """Give a tab bar the window's look (`TAB_STYLE`), and let the wheel
-    change its tab only once it has focus, as on a menu (`wheel`): under
-    some styles a scroll passing over the tabs turned them."""
+def edge_color(viewer) -> str:
+    """The theme's color of a selected tab, which the edge under tabs is."""
+    from napari.utils.theme import get_theme
+
+    return get_theme(viewer.theme).current.as_hex()
+
+
+def tidy_tab_bar(bar, viewer) -> None:
+    """Give a dock's tab bar the window's look (`TAB_STYLE`) on its edge
+    (`EDGE`), and let the wheel change its tab only once it has focus, as
+    on a menu (`wheel`): under some styles a scroll passing over the tabs
+    turned them."""
     from .wheel import guard_wheel
 
-    bar.setStyleSheet(TAB_STYLE)
-    # The line Qt draws under a dock's tabs: the panel's, in a tab widget,
-    # has none.
+    bar.setProperty("lobemap_edge", "bar")
+    _style_edge(bar, edge_color(viewer))
+    # The line Qt draws under a dock's tabs: the edge replaces it.
     bar.setDrawBase(False)
     guard_wheel(bar)
 
 
-def _watch_tab_bars(window) -> None:
+def tidy_tab_widget(tabs, viewer) -> None:
+    """Give a tab widget's bar the window's look, and its page the edge the
+    tabs stand on (`EDGE`) in place of napari's frame; the wheel as on a
+    dock's tab bar (`tidy_tab_bar`)."""
+    from .wheel import guard_wheel
+
+    tabs.setProperty("lobemap_edge", "pane")
+    tabs.tabBar().setStyleSheet(TAB_STYLE)
+    _style_edge(tabs, edge_color(viewer))
+    guard_wheel(tabs.tabBar())
+
+
+def _style_edge(widget, color: str) -> None:
+    if widget.property("lobemap_edge") == "bar":
+        # The tabs end above the edge, which the bar draws along its foot.
+        widget.setStyleSheet(
+            TAB_STYLE + f" QTabBar {{ border-bottom: {EDGE}px solid {color}; }}"
+            f" QTabBar::tab {{ margin-bottom: {EDGE}px; }}")
+    else:
+        widget.setStyleSheet(
+            f"QTabWidget::pane {{ border: none; border-top: {EDGE}px solid {color}; }}")
+
+
+def _restyle_edges(window, viewer, *_) -> None:
+    """Draw every edge in the theme's color again: the theme changed."""
+    from qtpy.QtWidgets import QWidget
+
+    color = edge_color(viewer)
+    for widget in window.findChildren(QWidget):
+        if widget.property("lobemap_edge"):
+            _style_edge(widget, color)
+
+
+def _watch_tab_bars(window, viewer) -> None:
     """Tidy each tab bar the main window makes for its docks' tabs, once.
 
     Qt makes one for a group of tabbed docks when it lays the group out,
@@ -129,7 +179,7 @@ def _watch_tab_bars(window) -> None:
     def tidy_once(widget) -> None:
         if isinstance(widget, QTabBar) and not widget.property("lobemap_tidied"):
             widget.setProperty("lobemap_tidied", True)
-            tidy_tab_bar(widget)
+            tidy_tab_bar(widget, viewer)
 
     class Polished(QObject):
         def eventFilter(self, watched, event) -> bool:
@@ -162,7 +212,8 @@ def tidy(viewer, view_dock, panel_dock) -> None:
     # The list goes under the View dock, then the settings join its tabs:
     # the View tab first, and the one shown.
     window.splitDockWidget(view_dock, layers, Qt.Orientation.Vertical)
-    _watch_tab_bars(window)
+    _watch_tab_bars(window, viewer)
+    viewer.events.theme.connect(functools.partial(_restyle_edges, window, viewer))
     window.tabifyDockWidget(view_dock, controls)
     for dock in (view_dock, controls):
         # The tab names each; a title bar under it named it again. napari
@@ -270,6 +321,7 @@ def _relock(layer) -> None:
 
 __all__ = [
     "CONTROL_HEIGHT",
+    "EDGE",
     "GRID",
     "LAYERS",
     "LAYER_SETTINGS",
@@ -278,7 +330,9 @@ __all__ = [
     "STAYS_LOCKED",
     "TAB_STYLE",
     "add_dock",
+    "edge_color",
     "lock_layers",
     "tidy",
     "tidy_tab_bar",
+    "tidy_tab_widget",
 ]
