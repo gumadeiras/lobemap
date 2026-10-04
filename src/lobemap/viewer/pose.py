@@ -101,9 +101,16 @@ class ScenePose:
         mirrored data would name the wrong side, which is the single
         error this project has had to correct most often.
 
-        A turned view is turned again about the same specimen point.
+        A turned view is turned again about the same specimen point. In 3D
+        the camera then faces Home turned by the angles, as a new angle puts
+        it, and from Slice view the next entry into 3D does: the mirror is
+        about the image's x axis, 1 to 5.5 degrees off the screen's
+        horizontal at Home, so the camera left where it was faced 11 degrees
+        off the mirrored Home in GRABE, and the mirror and the flip together
+        were no 180-degree turn until Fit to window.
         """
         self.turned.around(lambda: self._set_mirror(on))
+        self.turned.face_home()
 
     def _set_mirror(self, on: bool) -> None:
         if on and not self.mirrored:

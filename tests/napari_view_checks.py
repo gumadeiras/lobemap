@@ -10,6 +10,7 @@ from __future__ import annotations
 CHECKED = {
     "_calc_status_from_cursor": "test_the_status_napari_reckons_for_the_cursor",
     "_view_direction": "test_the_status_napari_reckons_for_the_cursor",
+    "_on_view_direction_change": "test_the_light_napari_gives_a_surface",
     "_update_camera_depth": "test_the_fits_and_the_depth_napari_makes",
 }
 
@@ -52,6 +53,31 @@ def test_the_status_napari_reckons_for_the_cursor(viewer):
     need(viewer.status == "Named" and seen,
          "the viewer's own _calc_status_from_cursor, called through the instance", used)
     viewer.mouse_over_canvas = False
+
+
+def test_the_light_napari_gives_a_surface(viewer):
+    """`napari_private.light_surface`: napari's surface visual takes a view
+    and an up, in vispy's order, lights the mesh from up - view + up x view,
+    and keeps that light for its next change of data or shading."""
+    import numpy as np
+
+    from lobemap.viewer.napari_private import layer_visual, light_surface
+
+    need, reaching = _helpers()
+    used = "viewer.view.light_from_the_camera"
+    viewer.dims.ndisplay = 3
+    layer = viewer.add_surface((np.eye(3), np.array([[0, 1, 2]])), shading="smooth")
+    view, up = np.array([0.0, 0.0, -1.0]), np.array([0.0, -1.0, 0.0])
+    with reaching("the surface visual's _on_view_direction_change(view, up)", used):
+        light_surface(viewer, layer, view, up)
+        light = np.asarray(layer_visual(viewer, layer).node.shading_filter.light_dir, float)
+    want = up - view + np.cross(up, view)
+    need(np.allclose(light / np.linalg.norm(light), want / np.linalg.norm(want)),
+         "the shading filter lit from up - view + up x view", used)
+    layer.shading = "flat"
+    light = np.asarray(layer_visual(viewer, layer).node.shading_filter.light_dir, float)
+    need(np.allclose(light / np.linalg.norm(light), want / np.linalg.norm(want)),
+         "the light kept through a change of shading", used)
 
 
 def test_the_fits_and_the_depth_napari_makes(viewer):

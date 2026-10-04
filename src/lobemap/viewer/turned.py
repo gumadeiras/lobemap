@@ -182,6 +182,13 @@ class TurnedView:
         # The next entry into 3D faces Home turned by these angles.
         self.session.oriented = False
 
+    def face_home(self) -> None:
+        """Face Home turned by the angles: now in 3D, from 2D on the next entry."""
+        if self._two_d():
+            self.session.oriented = False
+        else:
+            self._orient()
+
     def _orient(self) -> None:
         space = self._space()
         if space is not None:

@@ -416,6 +416,13 @@ def front_face(viewer, layer, clockwise: bool) -> None:
     node.update()
 
 
+def light_surface(viewer, layer, view, up) -> None:
+    """Light `layer` as napari lights a surface for a camera looking along
+    `view` with `up` up, both in vispy's axis order; napari keeps it, and
+    lights it so again when its data or shading change."""
+    layer_visual(viewer, layer)._on_view_direction_change(np.asarray(view), np.asarray(up))
+
+
 def data_from_world(layer):
     """`layer.world_to_data` as it is now, as a function any thread can call.
 
@@ -458,6 +465,7 @@ __all__ = [
     "layer_visual",
     "level_as_unturned",
     "level_of",
+    "light_surface",
     "no_scene_update",
     "put_level",
     "refresh_extent",

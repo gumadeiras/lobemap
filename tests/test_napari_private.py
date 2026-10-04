@@ -45,6 +45,7 @@ from napari_chrome_checks import (  # noqa: F401 - collected here, with this mod
 from napari_view_checks import CHECKED as VIEW_CHECKED
 from napari_view_checks import (  # noqa: F401 - collected here, as above
     test_the_fits_and_the_depth_napari_makes,
+    test_the_light_napari_gives_a_surface,
     test_the_status_napari_reckons_for_the_cursor,
 )
 

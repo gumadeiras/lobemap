@@ -142,6 +142,13 @@ def keep_orientation(viewer) -> None:
     ones (`face_front`), and is lit from outside. The light turns over with
     the picture, so in 3D too the picture is the upright one upside down.
 
+    And the light, which napari puts behind the camera, above and to the
+    right of the picture, is put there as the picture is shown: under the
+    flip, napari reckoned its right from a camera turned the other way, so
+    any move of the camera with the flip on lit the surfaces from the top
+    left, and that light stayed on the upright picture until the next move
+    (`light_from_the_camera`).
+
     Connected after napari's own handlers, so they have turned the camera
     first. Installed once per viewer; later calls do nothing.
     """
@@ -167,6 +174,48 @@ def keep_orientation(viewer) -> None:
     depth, vertical, horizontal = (str(o) for o in camera.orientation)
     if (depth, horizontal) != (TOWARD, RIGHT):
         camera.orientation = (TOWARD, vertical, RIGHT)
+
+    def _light(event=None) -> None:
+        live = ref()
+        if live is not None:
+            light_from_the_camera(live)
+
+    # After napari's own, which light every surface on these, from its
+    # reckoning; a layer added is lit by napari as it is added.
+    for event in (camera.events.view_direction, camera.events.orientation,
+                  viewer.dims.events.ndisplay, viewer.layers.events.inserted):
+        event.connect(_light, position="last")
+    _light()
+
+
+def light_from_the_camera(viewer, layers=None) -> None:
+    """Light every surface (or `layers`) from behind the camera, above and to
+    the right of the picture as it is shown; in 3D, where they are drawn.
+
+    napari's light is its camera's up, minus its view, plus its right, and
+    it takes the camera's right to be the view crossed with the up. Upside
+    down the picture's right is the other way, so its light came from the
+    left. Handing it the camera's up turned over puts the upright picture's
+    light where the flip turns it, on the right and below: the picture is
+    the upright one upside down, light and all. A function of the camera
+    and the flip alone, whatever moves came before.
+    """
+    from napari.layers import Surface
+
+    from .napari_private import light_surface
+
+    if viewer.dims.ndisplay != 3:
+        return
+    camera = viewer.scene.camera
+    # vispy's axis order, the reverse of napari's.
+    view = np.asarray(camera.view_direction, float)[::-1]
+    up = np.asarray(camera.up_direction, float)[::-1]
+    if upside_down(viewer):
+        up = -up
+    for layer in viewer.layers if layers is None else layers:
+        if isinstance(layer, Surface):
+            with contextlib.suppress(Exception):
+                light_surface(viewer, layer, view, up)
 
 
 def face_front(viewer, layers=None) -> None:
@@ -619,6 +668,7 @@ __all__ = [
     "install_home_orientation",
     "install_initial_fit",
     "keep_orientation",
+    "light_from_the_camera",
     "maximize",
     "mirror_center",
     "mirror_matrix",
