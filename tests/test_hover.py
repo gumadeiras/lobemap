@@ -210,3 +210,46 @@ def test_the_name_stays_once_the_cursor_rests(monkeypatch, space):
         finally:
             thread.terminate()
             thread.wait()
+
+
+def test_a_switch_never_shows_a_numbered_layer_name(monkeypatch):
+    """The next brain is built beside the open one, so napari numbers the
+    names both have, "neuPrint · 3D [1]", until the open one is gone; its
+    status thread kept reckoning the status bar's words from them meanwhile.
+    With the thread running and the cursor over the canvas, nothing napari
+    reckons during the switch, nor anything the status bar shows after it,
+    carries a numbered name."""
+    import re
+
+    numbered = re.compile(r" \[\d+\]")
+    with launched(monkeypatch, "view", "JRCFIB2018F") as (code, viewer):
+        sess = session(viewer)
+        tab = sess.panel.tabs[sess.registry.primary_atlas("JRCFIB2018F").id]
+        thread, move, rest = _cursor(viewer)
+        try:
+            move(np.asarray(tab.surface.meshset.centroid(0), float) + 1e4)
+            rest()
+            shown, reckoned = [], []
+            viewer.events.status.connect(lambda event: shown.append(str(event.value)))
+
+            def reckon(event=None) -> None:
+                # What napari's thread would reckon at this moment of the build.
+                reckoned.append(viewer._calc_status_from_cursor())
+                reckoned.append([layer.name for layer in viewer.layers])
+
+            viewer.layers.events.inserted.connect(reckon)
+            from viewer_harness import switch_to
+
+            switch_to(viewer, "JRCFIB2022M")
+            viewer.layers.events.inserted.disconnect(reckon)
+            assert any(numbered.search(name) for names in reckoned[1::2] for name in names), (
+                "nothing was numbered: the switch no longer builds beside the open brain")
+            assert all(status is None for status in reckoned[0::2]), reckoned[0::2]
+            rest()
+            move(np.asarray(viewer.scene.camera.center, float))
+            shown.append(rest())
+            assert not any(numbered.search(text) for text in shown), shown
+            assert not any(numbered.search(layer.name) for layer in viewer.layers)
+        finally:
+            thread.terminate()
+            thread.wait()

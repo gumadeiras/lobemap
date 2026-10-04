@@ -153,9 +153,10 @@ def fit_axis_labels(viewer) -> None:
     qt_dims._resize_axis_labels()
 
 
-def status_for_cursor(viewer, words) -> None:
+def status_for_cursor(viewer, words, held=lambda: False) -> None:
     """Let `words(position, view_direction)` say what the cursor is over,
-    before napari's own words for it; once per viewer.
+    before napari's own words for it; once per viewer. While `held()`,
+    napari's words are left as they are.
 
     napari reckons the status bar's words in `_calc_status_from_cursor`:
     its status thread calls it on every move of the cursor over the canvas,
@@ -171,6 +172,8 @@ def status_for_cursor(viewer, words) -> None:
     reckon = type(viewer)._calc_status_from_cursor.__get__(viewer)
 
     def _calc_status_from_cursor():
+        if held():
+            return None
         if viewer.mouse_over_canvas:
             try:
                 said = words(viewer.cursor.position, viewer.cursor._view_direction)

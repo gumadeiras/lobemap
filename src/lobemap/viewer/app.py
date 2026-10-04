@@ -8,6 +8,7 @@ from here as well.
 
 from __future__ import annotations
 
+import contextlib
 import weakref
 
 import numpy as np
@@ -341,6 +342,8 @@ def name_the_cursor(viewer) -> None:
 
     The scene's picking is found through its mouse callback, which a scene
     switch removes, so the scene shown is the one asked. Once per viewer.
+    While a switch builds the next scene (`hold_status`), the words are left
+    as they are.
     """
     from .napari_private import status_for_cursor
 
@@ -351,7 +354,30 @@ def name_the_cursor(viewer) -> None:
                 return words(position, view_direction)
         return None
 
-    status_for_cursor(viewer, _words)
+    status_for_cursor(viewer, _words, held=lambda: viewer in _HELD)
+
+
+#: The viewers building a scene beside the one shown; see `hold_status`.
+_HELD: weakref.WeakSet = weakref.WeakSet()
+
+
+@contextlib.contextmanager
+def hold_status(viewer):
+    """Leave the status bar's words as they are while a switch builds the
+    next scene, and reckon them anew once it is done.
+
+    napari keeps layer names unique, so the next scene's layers are named
+    "neuPrint · 3D [1]" until the scene they were built beside is gone
+    (`SceneSession.take_names`). napari's status thread kept reckoning the
+    status bar's words meanwhile, from the active layer's name, and the
+    status bar could show the numbered name after the switch.
+    """
+    _HELD.add(viewer)
+    try:
+        yield
+    finally:
+        _HELD.discard(viewer)
+        viewer.update_status_from_cursor()
 
 
 def show_main_layer(viewer, registry: Registry, session: SceneSession) -> None:
@@ -510,6 +536,7 @@ __all__ = [
     "default_colormap",
     "display_for",
     "fit_view",
+    "hold_status",
     "install_display_mode",
     "install_home_orientation",
     "install_initial_fit",

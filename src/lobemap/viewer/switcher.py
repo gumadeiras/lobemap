@@ -504,6 +504,14 @@ class SpaceSwitcher(QWidget):
             self._busy = False
 
     def _switch(self, want: str) -> None:
+        """Build `want` beside the open scene, and only then drop the open
+        one; the status bar holds its words meanwhile (`app.hold_status`)."""
+        from .app import hold_status
+
+        with hold_status(self.viewer):
+            self._build(want)
+
+    def _build(self, want: str) -> None:
         """Build `want` beside the open scene, and only then drop the open one.
 
         A failed build is undone and the open scene was never touched, so the
