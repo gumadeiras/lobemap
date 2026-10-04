@@ -19,7 +19,7 @@ from .napari_private import keep_extent_while_slicing, keep_volume_texture
 #: Per-role display defaults for image layers.
 #:
 #: Gray for the stains and the Grabe stack: they are reference imagery under
-#: colored glomeruli, and additive blending composites gray over them cleanly.
+#: colored glomeruli.
 #:
 #: `gamma` below 1 lifts the dim end, which a synapse-density map needs: the
 #: distribution is long-tailed, so a linear ramp leaves most of the neuropil
@@ -43,9 +43,18 @@ ROLE_DISPLAY = {
 DEFAULT_DISPLAY = {"colormap": "magma"}
 
 #: Applied to every image layer unless a role overrides it.
+#:
+#: Translucent, drawn without depth (`translucent_no_depth`): the brain maps
+#: are the bottom of the stack (`scene.scene_ranks`), and the neuropils and
+#: glomeruli are laid over them. In 3D a volume writes the depth of the
+#: voxel it shows, its brightest along the ray, and a glomerulus behind
+#: that voxel failed the depth test and was not drawn. Under either
+#: translucent blending napari also drops the voxels below the contrast
+#: limits from a 3D render, so the space round the brain stays empty.
+#: Opaque at full opacity: nothing is under them but the canvas.
 BASE_DISPLAY = {
     "colormap": "magma",
-    "blending": "additive",
+    "blending": "translucent_no_depth",
     "rendering": "attenuated_mip",
 }
 
@@ -321,12 +330,14 @@ def add_images(viewer, registry, space: str) -> list:
         if asset.kind == "labels":
             # A segmentation, not an intensity image: napari colors it by id
             # and picks values rather than interpolating them, so none of the
-            # colormap/gamma/rendering defaults apply.
+            # colormap/gamma/rendering defaults apply. Blended as the images
+            # are, and over them, at 0.6 so the image shows through.
             layer = viewer.add_labels(
                 np.asarray(volume.data),
                 name=asset.title or asset.id,
                 visible=False,
                 opacity=0.6,
+                blending=BASE_DISPLAY["blending"],
                 **volume.napari_kwargs(),
             )
             keep_extent_while_slicing(layer)

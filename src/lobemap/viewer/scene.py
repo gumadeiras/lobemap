@@ -73,6 +73,58 @@ USE_SLICE_CONTOURS = True
 _NUMBERED = re.compile(r" \[\d+\]$")
 
 
+def scene_ranks(parts: dict, primary, surfaces: dict, contours: dict, images,
+                standins=None) -> dict[int, tuple]:
+    """Each layer's place in a scene's stack, by `id`: higher is drawn later,
+    over the lower, and listed higher in the layer list.
+
+    Bottom first: the brain maps -- the stain or the confocal image, then
+    the label volume, which under the confocal image could not be seen --
+    then each neuropil set, then each glomerulus atlas, the primary one on
+    top. Each part's outlines sit right over its 3D layer, so the two are
+    one entry in the list: 2D draws the one and 3D the other. A stand-in
+    (`deferred`) holds the place of the 3D layer it becomes. `primary` is
+    the primary atlas's scene key, or None.
+    """
+    shells = [name for name, part in parts.items() if part.reference]
+    atlases = sorted((name for name, part in parts.items() if not part.reference),
+                     key=lambda name: name != primary)
+    place = {}
+    for group, names in ((1, shells), (2, atlases)):
+        for i, name in enumerate(names):
+            place[name] = (group, len(names) - i)       # the first listed on top
+    maps = sorted(images, key=lambda layer: layer.metadata.get(
+        "lobemap", {}).get("kind") == "labels")
+    ranks = {id(layer): (0, i, 0) for i, layer in enumerate(maps)}
+    for name, surface in surfaces.items():
+        ranks[id(surface.layer)] = (*place[name], 0)
+    for name, overlay in contours.items():
+        ranks[id(overlay.layer)] = (*place[name], 1)
+    for name, layer in (standins or {}).items():
+        ranks[id(layer)] = (*place[name], 0)
+    return ranks
+
+
+def stack(viewer, ranks: dict[int, tuple]) -> None:
+    """Put a scene's layers in the order of their `ranks`, under every other
+    layer: one the user added stays on top, where napari put it.
+
+    Beside the scene a switch replaces, the new one goes under it until it
+    is gone. napari redraws the stack once, after the last move, as its own
+    `move_multiple` has it do; that method is not used because its plan of
+    moves lost track of the indices for some orders, and moved past the end.
+    """
+    layers = viewer.layers
+    ours = sorted((layer for layer in layers if id(layer) in ranks),
+                  key=lambda layer: ranks[id(layer)])
+    if [layers.index(layer) for layer in ours] == list(range(len(ours))):
+        return
+    with layers.events.reordered.blocker():
+        for place, layer in enumerate(ours):
+            layers.move(layers.index(layer), place)
+    layers.events.reordered(value=layers)
+
+
 def build_scene(
     viewer,
     registry: Registry,
@@ -143,7 +195,7 @@ def build_scene(
         except (FileNotFoundError, KeyError):
             pass                    # unreadable: left out, as a missing file is
 
-    # Reference geometry first, so it sits underneath.
+    # Added in any order: `stack` puts them in theirs once all are made.
     for part in parts:
         if part.reference:
             _add(part)
@@ -207,6 +259,10 @@ def build_scene(
             into.sliders = (*extent.world, extent.step)
         if len(viewer.layers) == len(into.all_layers()):
             into.open_sliders()
+
+    standins = into.deferred.standins if into is not None and into.deferred else None
+    stack(viewer, scene_ranks(by_name, primary.id if primary is not None else None,
+                              surfaces, contours, images, standins))
 
     # Anatomical names for the dimension sliders and napari's own axis
     # overlay. No layer of our own: see `viewer/axes.py`. It shows the
@@ -359,9 +415,7 @@ class SceneSession(ScenePose):
                 contour.handlers = self.contour_handlers
                 surface.pair(contour)
             surface.sync()          # nothing selected: both layers off
-            self._stack(surface.layer, self._rank(name))
-            if contour is not None:
-                self._stack(contour.layer, self._rank(name, contour=True))
+            self._put_in_place(name, surface, contour)
             if self.mirrored and contour is not None:
                 apply_mirror([contour.layer], True, self.mirror_center)
             if contour is not None:
@@ -383,27 +437,31 @@ class SceneSession(ScenePose):
                 layers.selection.active = active
         return surface, contour
 
-    def _rank(self, name: str, contour: bool = False) -> int:
-        """Where a part's layer sits, bottom first, as `build_scene` adds them:
-        shells, images, atlases, then every contour layer."""
-        position = list(self.parts).index(name)
-        if contour:
-            return 30_000 + position
-        return position if self.parts[name].reference else 20_000 + position
+    def _put_in_place(self, name: str, surface, contour) -> None:
+        """Move a part just built into its place in the stack (`scene_ranks`).
 
-    def _stack(self, layer, rank: int) -> None:
-        """Move `layer` under this scene's layers ranked above it, or on top.
-
-        Just added, it is on top; a stand-in taken over is at the bottom.
+        Each of its layers goes right under this scene's lowest layer ranked
+        above it, or else right over its highest ranked below, wherever the
+        user has put them: a layer the user added stays on top. Just added,
+        a layer is on top; a stand-in taken over is in its place already.
         """
-        ranks = {id(image): 10_000 + i for i, image in enumerate(self.images)}
-        for key, surface in self.surfaces.items():
-            ranks[id(surface.layer)] = self._rank(key)
-        for key, overlay in self.contours.items():
-            ranks[id(overlay.layer)] = self._rank(key, contour=True)
+        primary = self.registry.primary_atlas(self.space)
+        ranks = scene_ranks(
+            self.parts, primary.id if primary is not None else None,
+            {**self.surfaces, name: surface},
+            {**self.contours, **({name: contour} if contour is not None else {})},
+            self.images, self.deferred.standins if self.deferred is not None else None)
         layers = self.viewer.layers
-        above = [i for i, other in enumerate(layers) if ranks.get(id(other), -1) > rank]
-        layers.move(layers.index(layer), min(above) if above else len(layers))
+        for layer in (surface.layer, contour.layer if contour is not None else None):
+            if layer is None:
+                continue
+            rank = ranks[id(layer)]
+            others = [(i, ranks[id(other)]) for i, other in enumerate(layers)
+                      if other is not layer and id(other) in ranks]
+            above = [i for i, other in others if other > rank]
+            below = [i for i, other in others if other < rank]
+            if above or below:
+                layers.move(layers.index(layer), min(above) if above else max(below) + 1)
 
     def _atlas_order(self) -> list[str]:
         primary = self.registry.primary_atlas(self.space)
@@ -622,5 +680,7 @@ __all__ = [
     "make_contour",
     "make_surface",
     "scene_parts",
+    "scene_ranks",
     "show_primary_atlas",
+    "stack",
 ]

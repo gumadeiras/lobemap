@@ -30,6 +30,32 @@ ATLAS_CONTOUR_COLORS = [
 REFERENCE_CONTOUR_COLOR = "#9aa0a6"
 REFERENCE_CONTOUR_WIDTH = 0.2
 
+#: How a part's 3D layer is drawn: its opacity and napari blending.
+#:
+#: Translucent, as every layer of a scene is: each is laid over what is
+#: drawn before it, glomeruli over neuropils over the brain maps
+#: (`scene.scene_ranks`), so a glomerulus keeps its own color rather than
+#: having the stain's gray and the shells' colors added to it.
+#:
+#: A shell is drawn without depth (`translucent_no_depth`): one that wrote
+#: its depth hid every glomerulus inside it, since the glomeruli are drawn
+#: after it and fail the depth test there. So every face of it is laid on,
+#: back faces too, and with all of a brain's neuropils shown many lie on one
+#: pixel. At 0.1 each, the stain still shows through them, 54-62% of it on
+#: average over the brain and 22-28% or more on 95% of it; at 0.35, the
+#: opacity they had when additive, 17-23% on average, and nothing at all
+#: through the thickest 5%. A glomerulus keeps the 0.75 it always had: three quarters
+#: or more of each of its pixels is its own color, and 81-96% on average,
+#: as its faces overlap. Measured in `tests/test_layer_stack.py`.
+SHELL_STYLE = {"opacity": 0.1, "blending": "translucent_no_depth"}
+ATLAS_STYLE = {"opacity": 0.75, "blending": "translucent"}
+
+
+def surface_style(part) -> dict:
+    """The opacity and blending a part's 3D layer opens with (`SHELL_STYLE`,
+    `ATLAS_STYLE`): its stand-in's too, which becomes that layer."""
+    return dict(SHELL_STYLE if part.reference else ATLAS_STYLE)
+
 
 @dataclass(frozen=True)
 class ScenePart:
@@ -122,10 +148,8 @@ def make_surface(viewer, registry: Registry, space: str, part: ScenePart,
     title = part_title(registry, part)
     colormap_name = colors_title(registry, space, part)
     if part.reference:
-        # Additive, not translucent: a translucent shell writes depth and so
-        # hides the very glomeruli it is meant to give context to.
         surface = AtlasSurface(
-            viewer, meshset, name=title, opacity=0.35, blending="additive",
+            viewer, meshset, name=title, **surface_style(part),
             shading="none", visible=False, layer=layer, mirror=mirror,
             colormap_name=colormap_name,
             display_names=[rows.side_name(name) for name in meshset.names],
@@ -141,7 +165,7 @@ def make_surface(viewer, registry: Registry, space: str, part: ScenePart,
             display_names=[rows.side_name(c.published_name, c.uncertain)
                            for c in atlas.compartments]
             or [rows.side_name(name) for name in meshset.names],
-            visible=False, layer=layer, mirror=mirror,
+            visible=False, layer=layer, mirror=mirror, **surface_style(part),
         )
     surface.layer.metadata["lobemap"].update(
         id=part.name, asset=part.asset.id, role=part.asset.role
@@ -169,8 +193,10 @@ def make_contour(viewer, surface: AtlasSurface, style, reference: bool) -> Conto
 
 __all__ = [
     "ATLAS_CONTOUR_COLORS",
+    "ATLAS_STYLE",
     "REFERENCE_CONTOUR_COLOR",
     "REFERENCE_CONTOUR_WIDTH",
+    "SHELL_STYLE",
     "ScenePart",
     "colors_title",
     "contour_styles",
@@ -178,4 +204,5 @@ __all__ = [
     "make_surface",
     "part_title",
     "scene_parts",
+    "surface_style",
 ]

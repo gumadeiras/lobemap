@@ -247,9 +247,10 @@ class AtlasSurface:
         """`name` is the part's plain title; the layer is `MESH_NAME` of it.
         `layer` is a hidden Surface layer to take over rather than add one:
         a stand-in a scene added for this mesh before it was read
-        (`deferred`). It is given everything a new layer would be.
-        `mirror` is (axis, center) for a surface built while the view is
-        reflected (`set_mirror`)."""
+        (`deferred`). It is given everything a new layer would be but its
+        opacity and blending: it was made with the part's, and a change the
+        user made to them since is kept. `mirror` is (axis, center) for a
+        surface built while the view is reflected (`set_mirror`)."""
         self.viewer = viewer
         self.meshset = meshset
         #: The part's plain title, which its layers and hover text name it by.
@@ -311,6 +312,8 @@ class AtlasSurface:
             layer.shading = settings.pop("shading")
             layer.data = (v, f, vals)
             layer.name = MESH_NAME.format(name)
+            for key in ("opacity", "blending"):
+                del settings[key]
             for key, value in settings.items():
                 setattr(layer, key, value)
             layer.visible = visible

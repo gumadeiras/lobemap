@@ -87,7 +87,7 @@ def test_stain_defaults():
     assert spec["gamma"] == 0.7
     assert spec["rendering"] == "attenuated_mip"
     assert spec["attenuation"] == 0.1
-    assert spec["blending"] == "additive"
+    assert spec["blending"] == "translucent_no_depth"
 
 
 def test_a_role_override_does_not_lose_the_base_defaults():

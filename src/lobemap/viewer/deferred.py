@@ -43,7 +43,7 @@ import threading
 import numpy as np
 
 from . import napari_private
-from .parts import part_title
+from .parts import part_title, surface_style
 from .view import reflect_vertices
 
 #: What a stand-in is called: its part's plain title, and that it is not built.
@@ -131,8 +131,9 @@ class Deferred:
         """Add a stand-in for each part reaching outside the layers `built`.
 
         A part inside them moves nothing when it is built, and gets none.
-        Added under every layer, and the layer selection is left as it was.
-        Waits for the corners, and not for the meshes.
+        Added on top, for `scene.stack` to put in the place of the layer it
+        becomes; the layer selection is left as it was. Waits for the
+        corners, and not for the meshes.
         """
         self._bounded.wait()
         layers = self.viewer.layers
@@ -144,10 +145,9 @@ class Deferred:
             layer = self.viewer.add_surface(
                 (np.stack([lo, hi]), np.zeros((0, 3), dtype=int)),
                 name=STANDIN_NAME.format(title=part_title(self.registry, self.parts[name])),
-                visible=False, shading="none",
+                visible=False, shading="none", **surface_style(self.parts[name]),
             )
             layer.metadata["lobemap"] = {"kind": "stand-in", "part": name}
-            layers.move(layers.index(layer), 0)
             self._eyes[name] = lambda event, name=name: self._on_eye(name)
             layer.events.visible.connect(self._eyes[name])
             self.standins[name] = layer
