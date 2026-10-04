@@ -44,7 +44,7 @@ import numpy as np
 from . import images, napari_private, rotation
 from .rotation import ZERO, Turn, turn_matrix
 from .sections import PlaneFrame
-from .view import mirror_matrix, orient_anterior
+from .view import fit_view, mirror_matrix, orient_anterior
 
 
 class TurnedView:
@@ -165,6 +165,10 @@ class TurnedView:
         if self.at_rest:
             if not was_rest:
                 self._come_to_rest()
+            elif not self._two_d():
+                # At rest already, as after a drag: 3D faces the front view
+                # again, as any setting of the angles does.
+                self._orient()
             return
         if not self._two_d():
             # The 2D turn is pivoted afresh about where 3D looks, on entry.
@@ -588,8 +592,6 @@ class TurnedView:
         if two_d and rest["axis"] != self.session.slice_axis:
             # As `set_slice_axis` leaves it, which ran while turned.
             self.session.populate_plane()
-            from .view import fit_view
-
             fit_view(viewer)
         elif not rest["trips"]:
             camera.center = rest["center"]
@@ -598,12 +600,17 @@ class TurnedView:
             # napari fitted 2D as it was entered, about the turned scene's
             # middle; unturned it fits it about the middle.
             viewer.fit_to_view()
-        # The 3D camera's angles, which napari keeps through 2D.
-        if two_d or rest["oriented"]:
+        if two_d:
+            # The 3D camera's angles, which napari keeps through 2D.
             camera.angles = rest["angles"]
             self.session.oriented = rest["oriented"]
         else:
+            # The front view, whatever a drag had made of it. A change of
+            # mode fitted the turned view as 3D was entered; the same trip
+            # unturned fits the front view.
             self._orient()
+            if rest["trips"]:
+                fit_view(viewer)
         if not two_d:
             # napari will put back the plane 2D left on, which was turned.
             axis = self.session.slice_axis

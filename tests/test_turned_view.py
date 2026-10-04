@@ -169,6 +169,9 @@ def test_3d_turns_the_camera_from_home_and_moves_no_layer(viewer, registry):
                    (180, 0, 0), (0, 180, 0)]:
         session.set_rotation(*angles)
         th.settle_canvas(viewer)
+        # Home below fits the brain as the turned view shows it, which can
+        # change the zoom: the turn is read at the zoom the camera has.
+        zoom = camera.zoom
         rel = points - center
         home = np.column_stack([rel @ right0, rel @ up0, rel @ -view0])
         turned = home @ screen_matrix(angles).T

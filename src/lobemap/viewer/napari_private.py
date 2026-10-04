@@ -244,6 +244,13 @@ def hook_extent(viewer, ranges=None, fit=None) -> None:
         for name in ("_lobemap_base", "_lobemap_ranges", "_lobemap_fit"):
             layers.__dict__.pop(name, None)
     refresh_extent(viewer)
+    # napari sizes the 3D camera's depth range from the same extent, on a
+    # change of mode only: entered while turned, it kept the turned scene's
+    # depth after Reset rotation, and drew a few thousand edge pixels other
+    # than the same trip unturned did.
+    qt_viewer = getattr(viewer.window, "_qt_viewer", None)
+    if qt_viewer is not None:
+        qt_viewer._update_camera_depth()
 
 
 def augmented_extent(layer):

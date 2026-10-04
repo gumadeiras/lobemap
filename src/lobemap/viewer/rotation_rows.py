@@ -35,7 +35,7 @@ ROWS = (
      "Turn about the screen's horizontal axis. Positive brings the top toward you."),
 )
 RESET = "Reset rotation"
-RESET_TIP = "Set all three angles to 0°."
+RESET_TIP = "Set all three angles to 0°. In 3D, also turn back to the front view."
 
 
 class RotationRows(QObject):
@@ -92,9 +92,12 @@ class RotationRows(QObject):
         self.changed.emit(*self.angles())
 
     def _on_reset(self) -> None:
-        """All three to zero, as one change rather than three."""
-        if not any(self.angles()):
-            return
+        """All three to zero, as one change rather than three.
+
+        Announced even when they are zero already: in 3D a drag turns the
+        camera and leaves the angles alone, and Reset puts the camera back
+        at the front view.
+        """
         for box in self.box.values():
             box.blockSignals(True)
             box.setValue(0.0)

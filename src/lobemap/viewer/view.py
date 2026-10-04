@@ -218,20 +218,102 @@ def maximize(viewer) -> bool:
     return True
 
 
-def fit_view(viewer, margin: float = 0.02) -> None:
+#: The share of the canvas a fit leaves empty around the brain: a hundredth
+#: on either side, at open, on Fit to window and on napari's home alike.
+FIT_MARGIN = 0.02
+
+
+def fit_view(viewer, margin: float = FIT_MARGIN) -> None:
     """Fill the canvas with the data, without disturbing the orientation.
 
     `reset_view` resets the camera angles by default, which would undo
-    `orient_anterior`.
+    `orient_anterior`. In 3D the fit is `fit_3d`'s.
     """
-    try:
+    if getattr(getattr(viewer, "dims", None), "ndisplay", 2) == 3:
+        fit_3d(viewer, margin)
+    else:
         viewer.reset_view(margin=margin, reset_camera_angle=False)
-    except TypeError:                     # older napari: neither keyword
-        viewer.reset_view()
+
+
+def fit_3d(viewer, margin: float = FIT_MARGIN, layers=None) -> None:
+    """Frame the brain in 3D as the camera shows it, with `margin` to spare.
+
+    The brain is the box around every layer (or `layers`), built or not --
+    the stand-ins of the parts not built yet span them (`deferred`). Each of
+    its corners is put inside the canvas as the camera draws it: its
+    distance from the box's middle along the screen's right and up, and,
+    under perspective, its depth, which draws a near corner larger. The
+    camera is centered on the box's middle, its angles kept.
+
+    napari's own fit sized the box for a flat camera, so under perspective
+    its near corners ran off the canvas; and its home fitted the box seen
+    down the image's axes, before lobemap turned the camera to the front:
+    FAFB14 went from 0.68 to 1.97 pixels per micrometer and lost its sides.
+    """
+    layers = list(viewer.layers if layers is None else layers)
+    if not layers:
+        return
+    camera = viewer.scene.camera
+    box = np.asarray(viewer.layers.get_extent(layers).world, float)
+    box = box[:, list(viewer.dims.displayed)]
+    if not np.all(np.isfinite(box)):
+        return
+    corners = np.array([np.where(bits, box[1], box[0]) for bits in np.ndindex(2, 2, 2)])
+    view = np.asarray(camera.view_direction, float)
+    up = np.asarray(camera.up_direction, float)
+    # Screen right and up, and toward the viewer.
+    screen = np.array([np.cross(view, up), up, -view])
+    height, width = _drawn_size(viewer)
+    half = (1 - margin) * np.array([width, height]) / 2
+    fov = float(camera.perspective)
+    # The camera's distance times the zoom: a corner `near` nearer than the
+    # middle is drawn `eye / (eye - near * zoom)` times larger.
+    eye = height / (2.0 * np.tan(np.radians(fov) / 2.0)) if fov > 0 else np.inf
+    middle = box.mean(axis=0)
+    zoom = np.inf
+    # Flat, the box's middle is the middle of the picture. Under perspective
+    # its near side is drawn larger, so the middle is moved across the
+    # screen until the picture of the box is centered: a few rounds settle it.
+    rounds = 1 if fov <= 0 else 6
+    for round_ in range(rounds):
+        right, upward, near = (screen @ (corners - middle).T)
+        zoom = np.inf
+        for limit, reach in zip(half, (np.abs(right), np.abs(upward)), strict=True):
+            # zoom * reach * eye / (eye - near * zoom) <= limit, every corner.
+            spread = reach + (limit * near / eye if np.isfinite(eye) else 0.0)
+            held = spread > 1e-12
+            if held.any():
+                zoom = min(zoom, float(np.min(limit / spread[held])))
+        if not np.isfinite(zoom) or zoom <= 0 or round_ == rounds - 1:
+            break
+        grow = eye / (eye - near * zoom)
+        drawn = np.array([right * grow, upward * grow])
+        offset = (drawn.min(axis=1) + drawn.max(axis=1)) / 2
+        middle = middle + offset @ screen[:2]
+    if not np.isfinite(zoom) or zoom <= 0:
+        return
+    camera.center = tuple(float(c) for c in middle)
+    camera.zoom = zoom
+
+
+def _drawn_size(viewer) -> tuple[float, float]:
+    """The canvas's (height, width) as vispy draws the view.
+
+    napari turns a zoom into vispy's scale by this size, which can move
+    before napari's own `canvas.size` does, as the window settles: a fit by
+    napari's was drawn at the other size until the next one.
+    """
+    canvas = getattr(getattr(viewer, "window", None), "_qt_viewer", None)
+    rect = getattr(getattr(getattr(canvas, "canvas", None), "view", None), "rect", None)
+    if rect is not None and min(rect.size) > 0:
+        width, height = rect.size
+        return float(height), float(width)
+    return tuple(float(s) for s in viewer.canvas.size)
 
 
 def install_home_orientation(viewer, space, reflect_axis=None) -> bool:
-    """Make the home button restore the anatomical view, not napari's.
+    """Make the home button restore the anatomical view, not napari's, and
+    every fit napari makes frame the brain as lobemap's fit does.
 
     `ViewerModel.reset_view` sets the camera angles to (0, 0, 0) before
     fitting, which is a view down the ARRAY axes. Those are not the
@@ -251,11 +333,20 @@ def install_home_orientation(viewer, space, reflect_axis=None) -> bool:
     found in the instance dict still wins over the class, which is what
     makes the button -- verified -- go through this.
 
-    Re-orienting only when napari reset the angles, so `fit_view`, which
+    Re-orienting only when asked to reset the angles, so `fit_view`, which
     asks it not to, keeps preserving whatever the user is looking at. Home
-    faces the scene turned by its angles (`orient_anterior`); in 2D it fits
-    the view, as napari's own does, and a turned 2D view is fitted as it
-    would be unturned (`turned.TurnedView`).
+    faces the scene turned by its angles (`orient_anterior`) and then fits
+    the brain as it is seen from there: napari's own fitted it seen down the
+    image's axes, before the camera turned.
+
+    `fit_to_view` is wrapped the same way, and napari calls it through the
+    instance as well: View > Fit to View, and the fit napari makes whenever
+    the axis order changes, as it does on entering 3D. In 3D it is `fit_3d`,
+    which frames the brain as the camera shows it, perspective included; in
+    2D napari's, and a turned 2D view is fitted as it would be unturned
+    (`turned.TurnedView`). Every fit takes lobemap's margin unless its caller
+    gives one, so the brain is framed alike at open, on Home and after a
+    change of mode.
     """
     existing = viewer.__dict__.get("reset_view")
     if getattr(existing, "_lobemap_home", False):
@@ -265,25 +356,37 @@ def install_home_orientation(viewer, space, reflect_axis=None) -> bool:
         return True
 
     original = type(viewer).reset_view.__get__(viewer)
+    fit_original = type(viewer).fit_to_view.__get__(viewer)
 
-    def reset(*args, **kwargs):
-        original(*args, **kwargs)
-        if kwargs.get("reset_camera_angle", True):
+    def fit_to_view(*, layers=None, margin: float = FIT_MARGIN) -> None:
+        if viewer.dims.ndisplay == 3:
+            fit_3d(viewer, margin, layers)
+        else:
+            fit_original(layers=layers, margin=margin)
+
+    def reset(*, layers=None, margin: float = FIT_MARGIN, reset_camera_angle: bool = True):
+        if viewer.dims.ndisplay != 3:
+            original(layers=layers, margin=margin, reset_camera_angle=reset_camera_angle)
+            return
+        if reset_camera_angle:
             axis = reset._lobemap_reflect
-            orient_anterior(viewer, reset._lobemap_space,
-                            reflect_axis=axis() if callable(axis) else axis)
+            if not orient_anterior(viewer, reset._lobemap_space,
+                                   reflect_axis=axis() if callable(axis) else axis):
+                viewer.scene.camera.angles = (0.0, 0.0, 0.0)
+        fit_3d(viewer, margin, layers)
 
     reset._lobemap_home = True
     reset._lobemap_space = space
     reset._lobemap_reflect = reflect_axis
     try:
         object.__setattr__(viewer, "reset_view", reset)
+        object.__setattr__(viewer, "fit_to_view", fit_to_view)
     except Exception:                       # noqa: BLE001 - cosmetic
         return False
     return True
 
 
-def install_initial_fit(viewer, margin: float = 0.02) -> bool:
+def install_initial_fit(viewer, margin: float = FIT_MARGIN) -> bool:
     """Keep refitting until the window settles, then stop at the first touch.
 
     Maximizing is asynchronous, and the canvas can still report a zero width
@@ -318,8 +421,17 @@ def install_initial_fit(viewer, margin: float = 0.02) -> bool:
         # resize callbacks run -- so the widget can already read 987x944 while
         # a fit still computes against 900x700. Watching the widget is how
         # FAFB kept its startup zoom while Grabe happened to refit correctly.
+        #
+        # And the size vispy draws the view at, which can move after napari's:
+        # napari turns a zoom into vispy's scale by it, so a fit made while
+        # the two disagreed was drawn at the other size. GRABE once opened at
+        # 4.30 pixels per micrometer, its lobes cut, where it fits at 2.98.
         got = getattr(getattr(viewer, "canvas", None), "size", None)
-        return tuple(got) if got is not None else None
+        if got is None:
+            return None
+        drawn = getattr(getattr(canvas, "view", None), "rect", None)
+        return (*(float(s) for s in got),
+                *(float(s) for s in (drawn.size if drawn is not None else ())))
 
     def _refit(event=None):
         # Driven by draws, not only by resize: the resize arrives while
@@ -492,6 +604,7 @@ def apply_mirror(layers, on: bool, center: float,
 
 
 __all__ = [
+    "FIT_MARGIN",
     "MIRROR_AXIS",
     "RIGHT",
     "TOWARD",
@@ -501,6 +614,7 @@ __all__ = [
     "capture_view",
     "center_sliders",
     "face_front",
+    "fit_3d",
     "fit_view",
     "install_home_orientation",
     "install_initial_fit",
