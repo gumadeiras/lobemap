@@ -55,11 +55,23 @@ from __future__ import annotations
 
 import functools
 import ipaddress
+import os
 import socket
+import sys
+import tempfile
 import tomllib
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+# napari's settings live in a file per environment, which napari writes back
+# whenever a setting changes -- binding a key through its action manager
+# among them. A test that rebound grid to ⌘J left it there: the next run
+# found ⌘T and ⌘G doing nothing, and so did the viewer launched from that
+# environment. So the suite reads and writes a file of its own, set before
+# napari reads the variable on import, which subprocesses inherit too.
+assert "napari.settings" not in sys.modules, "napari's settings were read before conftest"
+os.environ["NAPARI_CONFIG"] = str(Path(tempfile.mkdtemp(prefix="lobemap-napari-")) / "settings.yaml")
 
 import pytest
 
