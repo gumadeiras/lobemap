@@ -130,7 +130,7 @@ def test_a_planted_identifier_is_caught(monkeypatch, allowed):
                   for item, why in U.problems(U.collect(viewer), allowed)}
         assert caught == {
             ("layer name", "grabe2015 [contours]"): "id grabe2015",
-            ("Glomeruli and neuropils / tab tooltip", "Every row of schlegel2021_s11"):
+            ("Brain regions / tab tooltip", "Every row of schlegel2021_s11"):
                 "id schlegel2021_s11",
             ("View / label", "ROI not loaded"): "unexplained abbreviation ROI",
             ("status bar status", "VP2_left_VM6andVC6 under the cursor"): "snake_case",

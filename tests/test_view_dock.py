@@ -36,7 +36,7 @@ TITLES = {
     "JRCFIB2022M": "Male CNS (EM)",
     "GRABE": "Grabe 2015 (live, light microscopy)",
 }
-PANEL = "Glomeruli and neuropils"
+PANEL = "Brain regions"
 #: The narrowest canvas the layout may leave at 1440 px. The left column
 #: can be no narrower than napari's layer settings, whose colormap menus
 #: list every colormap a session has registered. Named after their layers,

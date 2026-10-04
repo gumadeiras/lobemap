@@ -27,7 +27,7 @@ pytest.importorskip("napari")
 def _snapshot(viewer):
     return {
         "layers": layer_names(viewer),
-        "docks": len(docks(viewer, "Glomeruli and neuropils")),
+        "docks": len(docks(viewer, "Brain regions")),
         "handlers": handler_counts(viewer),
         "space": session(viewer).space,
     }
@@ -109,7 +109,7 @@ def test_handlers_stay_flat_across_repeated_switches(monkeypatch):
             seen.append(handler_counts(viewer))
         assert seen[-1] == first, (first, seen[-1])
         assert all(counts == seen[0] for counts in seen), seen
-        assert len(docks(viewer, "Glomeruli and neuropils")) == 1
+        assert len(docks(viewer, "Brain regions")) == 1
 
 
 def test_layers_are_named_by_title_and_say_whose_they_are(monkeypatch):

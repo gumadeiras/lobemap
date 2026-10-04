@@ -54,7 +54,7 @@ from .view import (
 )
 
 #: The compartment panel's dock, on the right.
-PANEL_TITLE = "Glomeruli and neuropils"
+PANEL_TITLE = "Brain regions"
 
 #: The View dock, on the left; see `switcher`.
 VIEW_TITLE = "View"

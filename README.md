@@ -171,7 +171,7 @@ CC BY and CC BY-NC require attribution, so cite the paper behind each atlas you 
 
 ## In the viewer
 
-The window has three columns. On the left, the **View** dock, tabbed with napari's **Layer settings**, sits above napari's **Layers** list, with napari's two rows of buttons above and below the list. The canvas is in the middle. On the right, **Glomeruli and neuropils** has a **Glomeruli** tab and a **Neuropils** tab, each with a source menu and a sides menu over its table. The tabs of both columns look alike. The docks have no close button; the Window menu shows a hidden one again.
+The window has three columns. On the left, the **View** dock, tabbed with napari's **Layer settings**, sits above napari's **Layers** list, with napari's two rows of buttons above and below the list. The canvas is in the middle. On the right, **Brain regions** has a **Glomeruli** tab and, in every brain but GRABE, a **Neuropils** tab, each with a source menu and a sides menu over its table. The tabs of both columns look alike. The docks have no close button; the Window menu shows a hidden one again.
 
 ### The View dock
 

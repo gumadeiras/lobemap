@@ -175,7 +175,7 @@ def _rendered(viewer) -> dict:
         "visible": sorted(layer.name for layer in viewer.layers if layer.visible),
         "affines": {layer.name: np.round(layer.affine.affine_matrix, 6).tolist()
                     for layer in viewer.layers},
-        "docks": len(docks(viewer, "Glomeruli and neuropils")),
+        "docks": len(docks(viewer, "Brain regions")),
         "handlers": handler_counts(viewer),
         # Building the next scene turns both triads onto its space.
         "triads": _triads(viewer),
@@ -364,7 +364,7 @@ def test_a_switch_that_succeeds_still_replaces_the_scene(monkeypatch):
         assert switcher(viewer).status.text() == ""
         # Only the open scene's layers are left.
         assert set(viewer.layers) == set(session(viewer).all_layers()), layer_names(viewer)
-        assert len(docks(viewer, "Glomeruli and neuropils")) == 1
+        assert len(docks(viewer, "Brain regions")) == 1
         # The mirror does not carry over, or the new space would come up
         # reflected with nothing clicked; the anatomy chosen for the slice
         # does.
