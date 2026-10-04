@@ -43,9 +43,11 @@ STANDARD_NAME = "Standard name"
 #: The details of a glomerulus, in the order they are listed.
 GLOMERULUS_DETAILS = (SIDES_FIELD, STANDARD_NAME, *reference.FIELDS)
 FULL_NAME = "Full name"
-SOURCE = "Source"
+#: Where the full name is from. Not "Source", which names the atlas the
+#: table shows, in the menu above it.
+NAME_FROM = "Name from"
 #: The details of a neuropil, in the order they are listed.
-NEUROPIL_DETAILS = (SIDES_FIELD, FULL_NAME, SOURCE)
+NEUROPIL_DETAILS = (SIDES_FIELD, FULL_NAME, NAME_FROM)
 
 RECEPTOR = "Receptor"
 
@@ -315,7 +317,7 @@ def neuropil_sides(names, full_names) -> list[Side]:
     for index, published in enumerate(names):
         bare, where = parse_roi(published)
         full, source = full_names.get(bare, ("", ""))
-        details = {FULL_NAME: _value(full), SOURCE: _value(source)}
+        details = {FULL_NAME: _value(full), NAME_FROM: _value(source)}
         out.append(Side(
             index=index,
             name=bare,
@@ -344,12 +346,12 @@ __all__ = [
     "MIDLINE",
     "MISSING",
     "MISSING_TIP",
+    "NAME_FROM",
     "NEUROPIL_DETAILS",
     "RECEPTOR",
     "RENAMED_MARK",
     "SIDES",
     "SIDES_FIELD",
-    "SOURCE",
     "STANDARD_NAME",
     "Row",
     "Side",

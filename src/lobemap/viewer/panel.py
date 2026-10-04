@@ -22,7 +22,7 @@ from __future__ import annotations
 from qtpy.QtCore import QSize, Qt
 from qtpy.QtWidgets import (
     QComboBox,
-    QFormLayout,
+    QHBoxLayout,
     QLabel,
     QStackedLayout,
     QTabWidget,
@@ -32,23 +32,30 @@ from qtpy.QtWidgets import (
 
 from ..core import reference
 from .chrome import tidy_tab_bar
+from .panel_grid import (
+    GAP,
+    GROUP_GAP,
+    MARGIN,
+    SOURCE,
+    ColumnLabel,
+    SteadyLabel,
+    fit_control,
+    form_layout,
+)
 from .panel_tab import (
     CHECK_COLUMNS,
     FILL_COL,
-    GAP,
     GLOMERULUS_COLUMNS,
-    GROUP_GAP,
     INDEX_ROLE,
     LABEL_COL,
-    MARGIN,
     NAME_COL,
     NEUROPIL_COLUMNS,
     RECEPTOR_COL,
-    SOURCE,
+    SIDE_CHOICES,
+    SIDES,
+    SIDES_TIP,
     VISIBLE_COL,
     AtlasTab,
-    ColumnLabel,
-    SteadyLabel,
 )
 from .rows import natural_key
 from .wheel import guard_wheel
@@ -92,7 +99,8 @@ class _Tabs(dict):
 
 class SourcePage(QWidget):
     """One tab: its source menu and the citation under it, over one table
-    per source, of which the menu's choice is shown.
+    per source, of which the menu's choice is shown. Beside the source
+    menu, the Sides menu chooses which sides every table of the tab acts on.
 
     A source not built yet has a blank page standing in until it is chosen
     with its tab open (`CompartmentPanel.tab`). The tables are stacked in a
@@ -109,21 +117,23 @@ class SourcePage(QWidget):
         layout.setContentsMargins(MARGIN, MARGIN, MARGIN, MARGIN)
         layout.setSpacing(0)
 
-        head = QFormLayout()
-        head.setContentsMargins(0, 0, 0, 0)
-        head.setHorizontalSpacing(2 * GAP)
-        head.setVerticalSpacing(GAP)
-        # Left and full width, whatever the texts: macOS centres a form and
-        # sizes its fields to their contents, so each brain and each choice
-        # put the menu somewhere else.
-        head.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        head.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        #: Which source's table the tab shows.
+        # On the label column, at the left whatever the texts: macOS
+        # centres a form, so each brain put the menu somewhere else.
+        head = form_layout()
+        #: Which source's table the tab shows: as wide as its longest name.
         self.menu = QComboBox()
-        guard_wheel(self.menu)
         for i, name in enumerate(self.names):
             self.menu.addItem(panel.source_title(name), name)
             self.menu.setItemData(i, panel.about(name), Qt.ItemDataRole.ToolTipRole)
+        #: Which sides the tables' boxes act on (`AtlasTab.set_sides`).
+        self.sides_menu = QComboBox()
+        self.sides_menu.setToolTip(SIDES_TIP)
+        for text, sides in SIDE_CHOICES.items():
+            self.sides_menu.addItem(text, sides)
+        for menu in (self.menu, self.sides_menu):
+            menu.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+            fit_control(menu)
+            guard_wheel(menu)
         #: The chosen source's citation, as tall as the longest of
         #: `citations` needs, so no choice and no brain moves the table.
         self.citation = SteadyLabel(lambda: citations)
@@ -135,7 +145,17 @@ class SourcePage(QWidget):
 
             size = get_theme(panel.viewer.theme).font_size
             self.citation.setStyleSheet(f"font-size: {size};")
-        head.addRow(ColumnLabel(SOURCE), self.menu)
+        menus = QHBoxLayout()
+        menus.setContentsMargins(0, 0, 0, 0)
+        menus.setSpacing(GAP)
+        menus.addWidget(self.menu)
+        # Against the right edge, so a longer source name in another tab or
+        # brain never moves it.
+        menus.addStretch(1)
+        menus.addSpacing(GROUP_GAP - GAP)
+        menus.addWidget(QLabel(SIDES))
+        menus.addWidget(self.sides_menu)
+        head.addRow(ColumnLabel(SOURCE), menus)
         head.addRow(ColumnLabel(), self.citation)
         layout.addLayout(head)
         layout.addSpacing(GROUP_GAP)
@@ -148,7 +168,19 @@ class SourcePage(QWidget):
             self.stack.addWidget(dict.get(panel.tabs, name) or QWidget())
         layout.addWidget(self.body, stretch=1)
         self.menu.currentIndexChanged.connect(self._chosen)
+        self.sides_menu.currentIndexChanged.connect(self._sides_chosen)
         self._chosen(self.menu.currentIndex())
+
+    @property
+    def sides(self) -> tuple[str, ...]:
+        """The sides the Sides menu chose: a value of `SIDE_CHOICES`."""
+        return tuple(self.sides_menu.currentData())
+
+    def _sides_chosen(self, _index: int) -> None:
+        for name in self.names:
+            tab = dict.get(self._panel.tabs, name)
+            if tab is not None:
+                tab.set_sides(self.sides)
 
     @property
     def chosen(self) -> str:
@@ -312,6 +344,7 @@ class CompartmentPanel(QTabWidget):
                 layout.addStretch(1)
             return None
         tab = self._make_tab(name, surface, contour)
+        tab.set_sides(page.sides)
         page.put(name, tab).deleteLater()
         dict.__setitem__(self.tabs, name, tab)
         if self._three_d is not None:

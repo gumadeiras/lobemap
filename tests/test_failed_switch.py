@@ -132,6 +132,9 @@ def _user_scene(viewer) -> None:
     if two_d:
         tick_all(secondary, FILL_COL)
     secondary.filter.setText("DA")
+    # Each tab's Sides menu off its default.
+    for page, sides in zip(panel.pages.values(), ("Right", "Left"), strict=False):
+        page.sides_menu.setCurrentIndex(page.sides_menu.findText(sides))
 
     camera = viewer.scene.camera
     camera.zoom = camera.zoom * 1.7
@@ -167,6 +170,7 @@ def _rendered(viewer) -> dict:
         "upside down": sess.flipped,
         "open tab": sess.panel.tabText(sess.panel.currentIndex()),
         "sources": {kind: page.chosen for kind, page in sess.panel.pages.items()},
+        "sides": {kind: page.sides_menu.currentText() for kind, page in sess.panel.pages.items()},
         "layers": layer_names(viewer),
         "visible": sorted(layer.name for layer in viewer.layers if layer.visible),
         "affines": {layer.name: np.round(layer.affine.affine_matrix, 6).tolist()
@@ -314,6 +318,7 @@ def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, capfd, where, n
         assert before[NEUROPIL]["drawn"]
         assert before["open tab"] == "Glomeruli"
         assert before["sources"] == {"Glomeruli": SECONDARY, "Neuropils": NEUROPIL}
+        assert before["sides"] == {"Glomeruli": "Right", "Neuropils": "Left"}
         if ndisplay == "2":
             assert before["order"][0] == 1
             assert before[PRIMARY]["labels drawn"]

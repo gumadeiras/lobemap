@@ -17,17 +17,15 @@ from __future__ import annotations
 
 import webbrowser
 
-from qtpy.QtCore import QSize, Qt
+from qtpy.QtCore import Qt
 from qtpy.QtGui import QColor, QFont
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QComboBox,
-    QFormLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
-    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -36,6 +34,16 @@ from qtpy.QtWidgets import (
 
 from . import rows as R
 from .check_header import CheckHeader
+from .chrome import CONTROL_HEIGHT, GRID
+from .panel_grid import (
+    DRIVER_LINE,
+    GAP,
+    GROUP_GAP,
+    ColumnLabel,
+    SteadyLabel,
+    fit_control,
+    form_layout,
+)
 from .wheel import guard_wheel
 
 #: The columns, by position. The first four mean the same in both kinds of
@@ -52,57 +60,28 @@ CHECK_COLUMNS = (VISIBLE_COL, LABEL_COL, FILL_COL)
 LABEL_TIP = "Write the name on the slice (Slice view only)"
 FILL_TIP = "Fill the outline on the slice (Slice view only)"
 
+#: What labels the menu of which sides a row's boxes act on, and its
+#: choices, each with the sides it takes in. A side not left or right -- a
+#: neuropil across the midline -- is on every side.
+SIDES = "Sides"
+SIDE_CHOICES = {"Both": ("Left", "Right"), "Left": ("Left",), "Right": ("Right",)}
+SIDES_TIP = ("Which sides Show, Label and Fill act on. A box is half ticked "
+             "when its row's sides differ there.")
+
 #: Cells carry their row's key here (`Row.key`). Once the table can be
 #: sorted, the visual row is no longer the row's place and nothing may
 #: assume it; nor is a row one compartment, but all its sides.
 INDEX_ROLE = Qt.UserRole
 
-#: First entry of the driver-line menu, which applies nothing.
-LINE_PROMPT = "Driver line: none"
-LINE_TIP = ("Show the glomeruli that a driver line labels, "
+#: What the driver-line menu says while no line is what is shown. "None"
+#: is not an item: choosing a line shows exactly its glomeruli, and there
+#: was nothing for choosing none to do.
+LINE_NONE = "None"
+LINE_TIP = ("Show only the glomeruli that a driver line labels, "
             "from lobemap's reference table")
 
 VFB_TEXT = "Open in Virtual Fly Brain"
 VFB_NONE = "Select a glomerulus with a Virtual Fly Brain term to open it"
-
-#: The panel's spacing grid, in pixels. The parts of one group -- a search
-#: and its driver lines, a table and its count, a value and the next -- sit
-#: `GAP` apart; groups sit `GROUP_GAP` apart, a tab's contents `MARGIN`
-#: inside its frame, and a label `2 * GAP` before what it labels.
-GAP, GROUP_GAP, MARGIN = 4, 12, 8
-#: What labels the source menu at the top of each tab.
-SOURCE = "Source"
-
-
-#: Every label of the panel's label column, in either kind of tab.
-COLUMN_LABELS = (SOURCE, *R.GLOMERULUS_DETAILS, *R.NEUROPIL_DETAILS)
-
-
-class ColumnLabel(QLabel):
-    """A label of the panel's label column, its text against the right.
-
-    As wide as the widest of `COLUMN_LABELS` in the font and padding it is
-    drawn with, so every label of the column ends at one edge, and the menu
-    and the values beside them start at one. Measured when laid out, once
-    napari's style has set the font, not when built, before it has. No
-    indent: napari's style gives a label a frame, and a framed label with
-    none set keeps half an x clear of its right edge, which pushed the
-    widest label's first letter out of its box.
-    """
-
-    def __init__(self, text: str = "") -> None:
-        super().__init__(text)
-        self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.setIndent(0)
-
-    def sizeHint(self) -> QSize:
-        metrics, margins = self.fontMetrics(), self.contentsMargins()
-        widest = max(metrics.horizontalAdvance(text) for text in COLUMN_LABELS)
-        return QSize(widest + margins.left() + margins.right(), super().sizeHint().height())
-
-    def minimumSizeHint(self) -> QSize:
-        return self.sizeHint()
-
 
 def _word(is_atlas: bool) -> str:
     """What one row is in this kind of tab."""
@@ -139,57 +118,20 @@ class _Cell(QTableWidgetItem):
         return super().__lt__(other)
 
 
-class SteadyLabel(QLabel):
-    """A label as tall as the longest of the texts it can show needs.
-
-    Sized again whenever its width changes, so selecting another row changes
-    its text and nothing else. Measured on a plain label with its font and
-    margins: this one can be selected with the mouse, so Qt lays its text
-    out in a text document, whose height for a width the macOS style gave
-    as a line per word -- 66 px held for a value that takes 18.
-    """
-
-    def __init__(self, values) -> None:
-        super().__init__()
-        self.setWordWrap(True)
-        self.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        #: Every text this value can show.
-        self._values = values
-        self._width = None
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        if self.width() != self._width:
-            self._width = self.width()
-            self.setFixedHeight(self.needed())
-
-    def needed(self) -> int:
-        """The height the longest of its values takes at its width."""
-        probe = QLabel()
-        probe.setWordWrap(True)
-        probe.setFont(self.font())
-        margins = self.contentsMargins()
-        inner = max(1, self.width() - margins.left() - margins.right())
-        heights = []
-        for text in self._values():
-            probe.setText(text)
-            heights.append(probe.heightForWidth(inner))
-        tallest = max(heights, default=probe.sizeHint().height())
-        return tallest + margins.top() + margins.bottom()
-
-
 class AtlasTab(QWidget):
     """The table of one mesh: an atlas's glomeruli, or a neuropil set.
 
-    A row is one compartment with all its sides (`rows.Row`), so its Show,
-    Label and Fill boxes act on every side, and a box is half ticked when
-    only some sides are: never by the panel's own controls, which act on
-    whole rows, but by a selection set in code (`select`).
+    A row is one compartment with all its sides (`rows.Row`). Its Show,
+    Label and Fill boxes act on the sides the tab's Sides menu chooses
+    (`set_sides`), every side by default, and each box shows its state
+    there: ticked when every chosen side is on, half when some are. A row
+    with none of the chosen sides -- the right of an atlas of the left lobe
+    -- has its boxes disabled.
 
     Each checkbox column's header has a checkbox for the rows listed, those
     the search keeps: ticked when every one is ticked, half when some are.
-    A click ticks every listed row, or clears them all when all are ticked
-    (`_toggle`).
+    A click ticks every listed row's chosen sides, or clears them all when
+    all are ticked (`_toggle`).
     """
 
     def __init__(self, surface, compartments=None, contour=None,
@@ -215,6 +157,12 @@ class AtlasTab(QWidget):
         self.detail_fields = R.GLOMERULUS_DETAILS if is_atlas else R.NEUROPIL_DETAILS
         self._updating = False
         self._three_d: bool | None = None
+        #: The sides the boxes act on; see `set_sides`.
+        self._sides = frozenset(SIDE_CHOICES["Both"])
+        #: What Label and Fill have on with no slice to draw them on.
+        self._marks: dict[int, set[int]] = {LABEL_COL: set(), FILL_COL: set()}
+        #: What the driver line chosen in the menu showed, while it shows it.
+        self._line_shows: set[int] | None = None
         one = _word(is_atlas)
 
         # Three groups, top to bottom: finding rows, the table with its
@@ -229,16 +177,21 @@ class AtlasTab(QWidget):
             else "Search neuropils…"
         )
         self.filter.textChanged.connect(self._apply_filter)
+        self.filter.setFixedHeight(CONTROL_HEIGHT)
         layout.addWidget(self.filter)
 
         #: Driver-line presets: the glomeruli each line labels, by the
-        #: reference table.
+        #: reference table. Its label stays beside it, whichever is shown.
         self.lines = QComboBox()
         self.lines.setToolTip(LINE_TIP)
-        self.lines.addItem(LINE_PROMPT, ())
-        self.lines.currentIndexChanged.connect(self._apply_line)
+        self.lines.setPlaceholderText(LINE_NONE)
+        fit_control(self.lines)
         guard_wheel(self.lines)
-        layout.addWidget(self.lines)
+        #: The driver-line menu and its label, on the label column.
+        self.line_row = QWidget()
+        row = form_layout(self.line_row)
+        row.addRow(ColumnLabel(DRIVER_LINE), self.lines)
+        layout.addWidget(self.line_row)
 
         # The details first, though they sit below the table: selecting a
         # row fills them, and the table can select one as it is built.
@@ -252,7 +205,8 @@ class AtlasTab(QWidget):
         self.setLayout(layout)
 
         self._fill_lines(lines or {})
-        self.lines.setVisible(is_atlas and self.lines.count() > 1)
+        self.lines.currentIndexChanged.connect(self._apply_line)
+        self.line_row.setVisible(is_atlas and self.lines.count() > 0)
         self.vfb.setVisible(is_atlas)
         self._on_row_selected()
         self._sync_header()
@@ -287,6 +241,10 @@ class AtlasTab(QWidget):
         # what is left, shortening a long receptor list rather than widening
         # the table. The tooltip has it in full.
         header = self.header
+        # Every name at the left of its column, as the cells under it are:
+        # the checkbox columns' names follow their checkbox, and a centred
+        # Receptor sat far from its values.
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setMinimumSectionSize(24)
         header.setStretchLastSection(False)
         header.setSectionsClickable(True)
@@ -320,11 +278,18 @@ class AtlasTab(QWidget):
         table.itemSelectionChanged.connect(self._on_row_selected)
         return table
 
-    @staticmethod
-    def _state(row: R.Row, held) -> Qt.CheckState:
-        """Ticked if every side is in `held`, half if some are, else not."""
-        n = sum(i in held for i in row.indices)
-        if n == len(row.indices):
+    def chosen(self, row: R.Row) -> tuple[int, ...]:
+        """The sides of `row` its boxes act on: those the Sides menu chose,
+        and one on the midline, which is on every side."""
+        return tuple(side.index for side in row.sides
+                     if side.where in self._sides or side.where not in R.SIDES.values())
+
+    def _state(self, row: R.Row, held) -> Qt.CheckState:
+        """Ticked if every chosen side is in `held`, half if some are, else
+        not; and not, with no side chosen."""
+        sides = self.chosen(row)
+        n = sum(i in held for i in sides)
+        if n and n == len(sides):
             return Qt.Checked
         return Qt.PartiallyChecked if n else Qt.Unchecked
 
@@ -360,15 +325,7 @@ class AtlasTab(QWidget):
         the table up.
         """
         box = QWidget()
-        form = QFormLayout(box)
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setVerticalSpacing(GAP)
-        form.setHorizontalSpacing(2 * GAP)
-        # The values take the width there is, whatever their text: on macOS
-        # they kept their own, so each row selected moved them. And the form
-        # starts at the left: macOS centred it.
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        form = form_layout(box)
         self.detail_title = QLabel()
         bold = QFont(self.detail_title.font())
         bold.setBold(True)
@@ -384,7 +341,13 @@ class AtlasTab(QWidget):
         #: Opens the Virtual Fly Brain term page of the selected glomerulus,
         #: under the values and as wide as its words.
         self.vfb = QPushButton(VFB_TEXT)
-        self.vfb.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        fit_control(self.vfb)
+        # A grid unit either side of its words, as the View dock's buttons;
+        # a pixel less inside the border napari draws round it disabled, or
+        # it grew 2 px each time a row without a term was selected.
+        pad, thin = f"{GRID // 2}px {GRID}px", f"{GRID // 2 - 1}px {GRID - 1}px"
+        self.vfb.setStyleSheet(f"QPushButton {{ padding: {pad}; }} "
+                               f"QPushButton:disabled {{ padding: {thin}; }}")
         self.vfb.clicked.connect(self._open_vfb)
         form.addRow(ColumnLabel(), self.vfb)
         return box
@@ -430,10 +393,9 @@ class AtlasTab(QWidget):
     def _selection_changed(self) -> None:
         self._update_count()
         # A driver line stays named only while it is what is shown.
-        wanted = self.lines.currentData()
-        if self.lines.currentIndex() > 0 and set(wanted or ()) != self.surface.selection:
+        if self.lines.currentIndex() >= 0 and self.surface.selection != self._line_shows:
             self.lines.blockSignals(True)
-            self.lines.setCurrentIndex(0)
+            self.lines.setCurrentIndex(-1)
             self.lines.blockSignals(False)
 
     def _sync_rows(self) -> None:
@@ -452,29 +414,53 @@ class AtlasTab(QWidget):
         shown = sum(any(i in selection for i in row.indices)
                     for row in self.rows.values())
         if shown and not self.surface.mode_layer().visible:
-            self.count.setText(
-                f"None shown: the layer is off in the layer list ({shown} checked)"
-            )
+            said = f"None shown: the layer is off in the layer list ({shown} checked)"
         else:
-            self.count.setText(f"{shown} of {len(self.rows)} shown")
+            said = f"{shown} of {len(self.rows)} shown"
+        # While a search hides rows, how many it lists, beside what is shown
+        # of all of them.
+        listed = sum(not self.table.isRowHidden(r) for r in range(self.table.rowCount()))
+        if listed < len(self.rows):
+            said = f"{listed} listed · {said}"
+        self.count.setText(said)
 
     def set_mode(self, three_d: bool) -> None:
         """Disable the slice-only columns in 3D, where they draw nothing."""
         if three_d == self._three_d:
             return
         self._three_d = three_d
-        self._updating = True
-        try:
-            for row in range(self.table.rowCount()):
-                for col in (LABEL_COL, FILL_COL):
-                    item = self.table.item(row, col)
-                    flags = item.flags()
-                    item.setFlags(flags & ~Qt.ItemIsEnabled if three_d
-                                  else flags | Qt.ItemIsEnabled)
-        finally:
-            self._updating = False
+        self._enable_boxes()
         self._sync_header()
         self._update_count()
+
+    def set_sides(self, sides) -> None:
+        """Have the boxes act on `sides`, a value of `SIDE_CHOICES`, and
+        show each row's state there."""
+        sides = frozenset(sides)
+        if sides == self._sides:
+            return
+        self._sides = sides
+        for column in CHECK_COLUMNS:
+            self._set_checks(column, self._held(column))
+        self._enable_boxes()
+        self._sync_header()
+
+    def _enable_boxes(self) -> None:
+        """A box can act on a row with a side chosen; Label and Fill only on
+        the slice, as they draw nothing in 3D."""
+        self._updating = True
+        try:
+            for r in range(self.table.rowCount()):
+                some = bool(self.chosen(self.row_at(r)))
+                for col in CHECK_COLUMNS:
+                    item = self.table.item(r, col)
+                    on = some and (col == VISIBLE_COL or not self._three_d)
+                    flags = item.flags()
+                    if bool(flags & Qt.ItemIsEnabled) != on:
+                        item.setFlags(flags | Qt.ItemIsEnabled if on
+                                      else flags & ~Qt.ItemIsEnabled)
+        finally:
+            self._updating = False
 
     # -- driver lines, details and VFB -----------------------------------
 
@@ -491,11 +477,17 @@ class AtlasTab(QWidget):
             ))
             if members:
                 self.lines.addItem(f"{line} ({len(rows)})", members)
+        self.lines.setCurrentIndex(-1)
 
     def _apply_line(self, index: int) -> None:
-        if index <= 0:
+        """Show only the line's glomeruli, on the chosen sides; the other
+        sides keep what they show."""
+        if index < 0:
             return
-        self._set_indices(self.lines.itemData(index) or ())
+        sides = {i for row in self.rows.values() for i in self.chosen(row)}
+        members = {int(i) for i in self.lines.itemData(index) or ()}
+        self._line_shows = (self.surface.selection - sides) | (members & sides)
+        self._push(self._line_shows)
 
     def selected(self) -> R.Row | None:
         """The row the details describe: the first selected, if any."""
@@ -533,18 +525,15 @@ class AtlasTab(QWidget):
         if row is None:
             return
         on = item.checkState() == Qt.Checked
-        held = self._held(item.column())
-        self._apply(item.column(), held | set(row.indices) if on
-                    else held - set(row.indices))
+        held, sides = self._held(item.column()), set(self.chosen(row))
+        self._apply(item.column(), held | sides if on else held - sides)
 
     def _held(self, column: int) -> set[int]:
         """The compartments `column` has on: shown, named or filled."""
         if column == VISIBLE_COL:
             return set(self.surface.selection)
         if self.contour is None:
-            return {i for r in range(self.table.rowCount())
-                    if self.table.item(r, column).checkState() == Qt.Checked
-                    for i in self.row_at(r).indices}
+            return set(self._marks[column])
         return set(self.contour.labels if column == LABEL_COL else self.contour.filled)
 
     def _apply(self, column: int, indices) -> None:
@@ -562,9 +551,10 @@ class AtlasTab(QWidget):
                 if not self.table.isRowHidden(r)]
 
     def _toggle(self, column: int) -> None:
-        """Tick `column` on every listed row, every side of each; or clear
-        them all if all are ticked. The rows the search hides keep theirs."""
-        listed = {i for row in self.listed() for i in row.indices}
+        """Tick `column` on every listed row, on its chosen sides; or clear
+        them all if all are ticked. The rows the search hides, and the
+        sides not chosen, keep theirs."""
+        listed = {i for row in self.listed() for i in self.chosen(row)}
         held = self._held(column)
         clear = self.header.state(column) == Qt.Checked
         self._apply(column, held - listed if clear else held | listed)
@@ -572,8 +562,9 @@ class AtlasTab(QWidget):
     def _sync_header(self) -> None:
         """Each header checkbox as its listed rows have theirs. Label and
         Fill cannot act in 3D, where they draw nothing, nor any of them
-        while the search lists nothing."""
-        rows = [r for r in range(self.table.rowCount()) if not self.table.isRowHidden(r)]
+        while the search lists no row with a chosen side."""
+        rows = [r for r in range(self.table.rowCount())
+                if not self.table.isRowHidden(r) and self.chosen(self.row_at(r))]
         for column in CHECK_COLUMNS:
             states = {self.table.item(r, column).checkState() for r in rows}
             if states == {Qt.Checked}:
@@ -605,11 +596,13 @@ class AtlasTab(QWidget):
 
     def _set_labels(self, indices) -> None:
         wanted = self._set_checks(LABEL_COL, indices)
+        self._marks[LABEL_COL] = wanted
         if self.contour is not None:
             self.contour.set_labels(wanted)
 
     def _set_fills(self, indices) -> None:
         wanted = self._set_checks(FILL_COL, indices)
+        self._marks[FILL_COL] = wanted
         if self.contour is not None:
             self.contour.set_fills(wanted)
 
@@ -629,6 +622,7 @@ class AtlasTab(QWidget):
             row = self.row_at(r)
             self.table.setRowHidden(r, row is None or not row.matches(text))
         self._sync_header()
+        self._update_count()
 
     # -- picking ---------------------------------------------------------
 
@@ -653,22 +647,18 @@ class AtlasTab(QWidget):
 
 __all__ = [
     "CHECK_COLUMNS",
-    "COLUMN_LABELS",
     "FILL_COL",
-    "GAP",
     "GLOMERULUS_COLUMNS",
-    "GROUP_GAP",
     "INDEX_ROLE",
     "LABEL_COL",
-    "LINE_PROMPT",
-    "MARGIN",
+    "LINE_NONE",
     "NAME_COL",
     "NEUROPIL_COLUMNS",
     "RECEPTOR_COL",
-    "SOURCE",
+    "SIDES",
+    "SIDES_TIP",
+    "SIDE_CHOICES",
     "VISIBLE_COL",
     "AtlasTab",
-    "ColumnLabel",
-    "SteadyLabel",
     "toggle_tips",
 ]

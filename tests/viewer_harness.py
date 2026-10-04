@@ -383,8 +383,9 @@ def drawn(surface, contour=None) -> set[int]:
 
 
 def ticked(tab, column=None) -> set[int]:
-    """Every side of the rows whose box in `column`, Show by default, is
-    ticked in full: the compartments the table says are on."""
+    """The chosen sides (`AtlasTab.chosen`) of the rows whose box in
+    `column`, Show by default, is ticked in full: the compartments the
+    table says are on."""
     from qtpy.QtCore import Qt
 
     from lobemap.viewer.panel import VISIBLE_COL
@@ -392,7 +393,7 @@ def ticked(tab, column=None) -> set[int]:
     column = VISIBLE_COL if column is None else column
     return {i for r in range(tab.table.rowCount())
             if tab.table.item(r, column).checkState() == Qt.CheckState.Checked
-            for i in tab.row_at(r).indices}
+            for i in tab.chosen(tab.row_at(r))}
 
 
 def checked(tab) -> set[int]:
@@ -465,7 +466,9 @@ def planes_cut(surface) -> set[int]:
 def assert_rows_match_drawing(sess) -> None:
     """Every tab: checked rows, count text and rendered geometry agree.
 
-    A row is every side of a compartment; the count counts rows.
+    A row is every side of a compartment, and ticked in full when every side
+    the tab's Sides menu chose is shown; the count counts rows with any side
+    shown.
 
     Call it once the scene has settled (`pump(300)`): a compartment checked
     after compaction reaches the mesh with the next compaction. In 2D only
@@ -476,14 +479,23 @@ def assert_rows_match_drawing(sess) -> None:
     for name, tab in sess.panel.tabs.items():
         contour = sess.contours.get(name)
         rows = checked(tab)
+        selection = set(tab.surface.selection)
         got = drawn(tab.surface, contour)
-        want = planes_cut(tab.surface) if two_d else rows
+        want = planes_cut(tab.surface) if two_d else selection
         n = tab.table.rowCount()
-        on = sum(bool(set(row.indices) & rows) for row in tab.rows.values())
-        assert rows == tab.surface.selection, (name, "rows != selection")
+        on = sum(bool(set(row.indices) & selection) for row in tab.rows.values())
+        # A row is ticked in full when every side the Sides menu chose is
+        # shown; with every side chosen, the default, those are the selection.
+        whole = {i for row in tab.rows.values() if tab.chosen(row)
+                 and set(tab.chosen(row)) <= selection for i in tab.chosen(row)}
+        assert rows == whole, (name, "rows != selection")
+        if all(len(tab.chosen(row)) == len(row.indices) for row in tab.rows.values()):
+            assert rows == selection, (name, "rows != selection")
         assert got == want, (name, sorted(got ^ want)[:8])
-        assert tab.count.text() == f"{on} of {n} shown", (name, tab.count.text())
-        if not rows:
+        listed = len(tab.listed())
+        said = f"{on} of {n} shown" if listed == n else f"{listed} listed · {on} of {n} shown"
+        assert tab.count.text() == said, (name, tab.count.text())
+        if not selection:
             assert not tab.surface.layer.visible, name
             if contour is not None:
                 assert not contour.layer.visible, name

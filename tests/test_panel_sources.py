@@ -162,17 +162,22 @@ def test_a_click_on_another_sources_compartment_chooses_that_source(monkeypatch,
 
 
 def _places(page, panel) -> dict:
-    """Where the menu, its citation and the table sit, in the panel."""
+    """Where the menus, the citation and the table sit, in the panel. The
+    source menu by its corner and height: it is as wide as its longest
+    source's name, which differs between tabs and brains."""
     def rect(widget):
         corner = widget.mapTo(panel, widget.rect().topLeft())
         return (corner.x(), corner.y(), widget.width(), widget.height())
 
-    return {"menu": rect(page.menu), "citation": rect(page.citation),
-            "tables": rect(page.body)}
+    menu = rect(page.menu)
+    assert menu[2] == page.menu.sizeHint().width(), menu
+    return {"menu": (menu[0], menu[1], menu[3]), "sides": rect(page.sides_menu),
+            "citation": rect(page.citation), "tables": rect(page.body)}
 
 
 def test_the_menu_sits_in_the_same_place_in_every_tab_and_brain(monkeypatch):
-    """One source or three, glomeruli or neuropils: the same rectangles."""
+    """One source or three, glomeruli or neuropils: the same places, and the
+    Sides menu at the same place beside it."""
     with launched(monkeypatch, "view", SPACES[0]) as (code, viewer):
         assert code == 0
         _show(viewer)

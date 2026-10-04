@@ -138,9 +138,9 @@ def test_a_neuropil_without_a_side_is_on_the_midline():
     al, eb, xx = R.neuropil_rows(["AL_L", "EB", "XX(R)", "AL_R"], full)
     assert (al.name, al.indices) == ("AL", (0, 3))
     assert al.details == {"Sides": "Left and right", "Full name": "antennal lobe",
-                          "Source": "Ito et al. 2014, Neuron"}
+                          "Name from": "Ito et al. 2014, Neuron"}
     assert eb.details["Sides"] == "Midline"
-    assert xx.details == {"Sides": "Right", "Full name": R.MISSING, "Source": R.MISSING}
+    assert xx.details == {"Sides": "Right", "Full name": R.MISSING, "Name from": R.MISSING}
     assert al.matches("antennal") and al.matches("AL_R") and not al.matches("ito")
     assert R.hover_line(al.side(3), "Neuropils (FlyWire)") == (
         "AL, antennal lobe (right) — Neuropils (FlyWire)")

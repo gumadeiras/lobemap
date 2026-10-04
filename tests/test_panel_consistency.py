@@ -44,7 +44,7 @@ GLOMERULUS = {
 }
 NEUROPIL = {
     "headers": ("Show", "Neuropil", "Label", "Fill"),
-    "details": ("Sides", "Full name", "Source"),
+    "details": ("Sides", "Full name", "Name from"),
     "placeholder": "Search neuropils…",
     "searched": frozenset({"name", "published", "Full name"}),
 }
@@ -77,7 +77,7 @@ def _side(tab, index, annotation, neuropils) -> dict:
         full, source = neuropils.get(bare, ("", ""))
         return {"bare": bare, "published": published, "note": "", "renamed": False,
                 "side": {"L": "Left", "R": "Right"}.get(suffix, "Midline"),
-                "Full name": full or "—", "Source": source or "—"}
+                "Full name": full or "—", "Name from": source or "—"}
     comp = next(c for c in tab.compartments if c.local_id == index)
     props = _joined(annotation, comp, published)
     out = {"bare": bare, "published": published, "note": comp.uncertain,
@@ -157,7 +157,7 @@ def _describe(registry, panel, name, annotation, neuropils) -> dict:
     blank = 0
 
     # The details, in the order the form lays them out.
-    form = tab.details["Source" if not tab.is_atlas else "Organ"].parentWidget().layout()
+    form = tab.details["Name from" if not tab.is_atlas else "Organ"].parentWidget().layout()
     assert isinstance(form, QFormLayout)
     detail_labels = tuple(
         form.itemAt(i, QFormLayout.LabelRole).widget().text()
@@ -289,7 +289,7 @@ def _chrome(panel, name, tab) -> tuple[str, ...]:
     values = set(map(id, tab.details.values()))
     out = [panel.tabText(panel.indexOf(page)), panel.tabToolTip(panel.indexOf(page)),
            *_title_about(panel, name),
-           tab.filter.placeholderText(), tab.lines.itemText(0), tab.lines.toolTip()]
+           tab.filter.placeholderText(), tab.lines.placeholderText(), tab.lines.toolTip()]
     out += [label.text() for label in page.findChildren(QLabel)
             if not page.body.isAncestorOf(label)]
     out += [label.text() for label in tab.findChildren(QLabel) if id(label) not in values]

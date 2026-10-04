@@ -83,63 +83,82 @@ def test_the_panel_asks_for_the_column_width(monkeypatch):
         assert session(viewer).panel.sizeHint().width() == WIDTH == 440
 
 
-# -- heights and the spacing grid -----------------------------------------
+# -- heights, widths and the spacing grid --------------------------------
+#
+# The panel is on the View dock's grid (`chrome.GRID`, `chrome.CONTROL_HEIGHT`),
+# measured here in its own units, not the panel's constants: a grid unit
+# between the parts of a group and between a label and its control, two
+# between groups, one at the tab's edges, and every menu, button and the
+# search as tall as the dock's controls and as wide as their content.
 
 
-def _rooms(panel, sess) -> dict[str, tuple[int, int]]:
-    """Each kind of control's least (height, its text's line height), over
-    every table now: the tabs, the table's rows and header, the search, the
-    menus and the buttons."""
-    from qtpy.QtWidgets import QPushButton
-
-    least: dict[str, tuple[int, int]] = {}
-
-    def note(kind: str, height: int, metrics) -> None:
-        room = (height, metrics.height())
-        if kind not in least or room[0] - room[1] < least[kind][0] - least[kind][1]:
-            least[kind] = room
-
-    bar = panel.tabBar()
-    for i in range(bar.count()):
-        note("tab", bar.tabRect(i).height(), bar.fontMetrics())
-    for name in list(sess.parts):
-        tab = panel.open(name)
-        pump(50)
-        table = tab.table
-        note("table row", table.rowHeight(0), table.fontMetrics())
-        note("table header", table.horizontalHeader().height(),
-             table.horizontalHeader().fontMetrics())
-        note("search", tab.filter.height(), tab.filter.fontMetrics())
-        if tab.lines.isVisible():
-            note("driver line", tab.lines.height(), tab.lines.fontMetrics())
-        for button in tab.findChildren(QPushButton):
-            if button.isVisible():
-                note("button", button.height(), button.fontMetrics())
-        menu = panel.page_of(name).menu
-        note("source menu", menu.height(), menu.fontMetrics())
-    return least
+def _controls(tab, page) -> dict[str, object]:
+    """The panel's menus, search and button of one table, where shown."""
+    out = {"source menu": page.menu, "sides menu": page.sides_menu, "search": tab.filter}
+    if tab.lines.isVisible():
+        out["driver line"] = tab.lines
+    if tab.vfb.isVisible():
+        out["button"] = tab.vfb
+    return out
 
 
 @pytest.mark.parametrize("ndisplay", ["3", "2"])
-def test_every_control_keeps_the_grids_room_around_its_text(monkeypatch, ndisplay):
-    """Sized to its words across, never squeezed down to them: every
-    control's height leaves at least `GAP` above and below its line of
-    text, in every tab of every brain."""
-    from lobemap.viewer.panel_tab import GAP
+def test_every_control_is_as_tall_as_the_view_docks_and_as_wide_as_its_content(
+        monkeypatch, ndisplay):
+    """In every tab of every brain: each menu, the search and the button as
+    tall as the View dock's controls, never tight round its text; each menu
+    and the button as wide as its content, the search across the column;
+    the tabs, the table's rows and its header with room round their text."""
+    from qtpy.QtWidgets import QComboBox
+
+    from lobemap.viewer.chrome import CONTROL_HEIGHT, GRID
 
     with launched(monkeypatch, "view", SPACES[0], "--ndisplay", ndisplay) as (code, viewer):
         assert code == 0
         _lay_out(viewer)
+        kinds = set()
         for space in SPACES:
             if space != SPACES[0]:
                 switch_to(viewer, space)
                 pump(100)
-            rooms = _rooms(session(viewer).panel, session(viewer))
-            assert {"tab", "table row", "table header", "search", "button",
-                    "source menu"} <= set(rooms), rooms
-            tight = {kind: room for kind, room in rooms.items()
-                     if room[0] < room[1] + 2 * GAP}
-            assert not tight, (space, tight)
+            sess = session(viewer)
+            bar = sess.panel.tabBar()
+            for i in range(bar.count()):
+                assert bar.tabRect(i).height() >= bar.fontMetrics().height() + 2 * GRID, space
+            for name in list(sess.parts):
+                tab = sess.panel.open(name)
+                pump(50)
+                page = sess.panel.page_of(name)
+                header = tab.table.horizontalHeader()
+                for kind, height, metrics in (
+                        ("table row", tab.table.rowHeight(0), tab.table.fontMetrics()),
+                        ("table header", header.height(), header.fontMetrics())):
+                    assert height >= metrics.height() + GRID, (space, name, kind, height)
+                for kind, control in _controls(tab, page).items():
+                    kinds.add(kind)
+                    said = (space, name, kind, control.width(), control.height())
+                    assert control.height() == CONTROL_HEIGHT, said
+                    assert control.height() >= control.fontMetrics().height() + GRID, said
+                    if kind == "search":
+                        assert control.width() == page.width() - 2 * GRID, said
+                    else:
+                        assert control.width() == control.sizeHint().width(), said
+                    if isinstance(control, QComboBox):
+                        longest = max(control.fontMetrics().horizontalAdvance(control.itemText(i))
+                                      for i in range(control.count()))
+                        assert longest < control.width() <= longest + 6 * GRID, said
+                    elif kind == "button":
+                        text = control.fontMetrics().horizontalAdvance(control.text())
+                        assert control.width() <= text + 2 * GRID + 2, said
+                        # As large enabled, a row with a term selected, as not.
+                        row = next(r for r in range(tab.table.rowCount())
+                                   if tab.row_at(r).vfb)
+                        tab.table.selectRow(row)
+                        pump(50)
+                        assert control.isEnabled(), said
+                        assert (control.width(), control.height()) == said[3:], said
+                        tab.table.clearSelection()
+        assert kinds == {"source menu", "sides menu", "search", "driver line", "button"}
 
 
 def _box(widget, page) -> tuple[int, int, int, int]:
@@ -147,21 +166,28 @@ def _box(widget, page) -> tuple[int, int, int, int]:
     return corner.x(), corner.y(), widget.width(), widget.height()
 
 
+def _below(upper, lower) -> int:
+    """The room between the bottom of one box and the top of the next."""
+    return lower[1] - (upper[1] + upper[3])
+
+
 @pytest.mark.parametrize("ndisplay", ["3", "2"])
-def test_the_panel_sits_on_one_grid(monkeypatch, ndisplay):
+def test_the_panel_sits_on_the_view_docks_grid(monkeypatch, ndisplay):
     """Measured on the laid-out widgets, in every tab of every brain.
 
-    One edge for every label's text and one for every control beside a
-    label, the source menu, its citation, the values and Open in Virtual
-    Fly Brain; `MARGIN` around a tab's contents; `GAP` between the parts of
-    a group and `GROUP_GAP` between groups; and each label's text in full.
+    One edge for every label's text and one, a grid unit after it, for
+    every control and value beside a label: the source menu, its citation,
+    the driver line, the values and Open in Virtual Fly Brain. A grid unit
+    round a tab's contents, between the parts of a group, and two between
+    groups. Each label's text in full.
     """
-    from lobemap.viewer.panel_tab import GAP, GROUP_GAP, MARGIN
+    from lobemap.viewer.chrome import GRID
+    from lobemap.viewer.panel_grid import ColumnLabel
 
     with launched(monkeypatch, "view", SPACES[0], "--ndisplay", ndisplay) as (code, viewer):
         assert code == 0
         _lay_out(viewer)
-        edges, ends = set(), set()
+        edges, ends, boxes = set(), set(), set()
         for space in SPACES:
             if space != SPACES[0]:
                 switch_to(viewer, space)
@@ -172,41 +198,94 @@ def test_the_panel_sits_on_one_grid(monkeypatch, ndisplay):
                 pump(50)
                 page = sess.panel.page_of(name)
                 box = {k: _box(w, page) for k, w in (
-                    ("menu", page.menu), ("citation", page.citation),
-                    ("search", tab.filter), ("lines", tab.lines), ("table", tab.table),
+                    ("menu", page.menu), ("sides", page.sides_menu),
+                    ("citation", page.citation), ("search", tab.filter),
+                    ("lines", tab.lines), ("table", tab.table),
                     ("count", tab.count), ("title", tab.detail_title))}
                 form = tab.detail_title.parentWidget().layout()
                 values = list(tab.details.values())
-                # One edge for the controls, one for the end of the labels.
-                edges |= {box["menu"][0], box["citation"][0],
-                          *(_box(v, page)[0] for v in values)}
+                fields = [page.menu, page.citation, *values]
                 if tab.vfb.isVisible():
-                    edges.add(_box(tab.vfb, page)[0])
-                labels = [page.layout().itemAt(0).layout().labelForField(page.menu),
+                    fields.append(tab.vfb)
+                if tab.lines.isVisible():
+                    fields.append(tab.lines)
+                edges |= {_box(f, page)[0] for f in fields}
+                labels = [*(label for label in page.findChildren(ColumnLabel)
+                            if label.text() == "Source"),
                           *(form.labelForField(v) for v in values)]
+                if tab.lines.isVisible():
+                    labels.append(tab.line_row.layout().labelForField(tab.lines))
                 for label in labels:
                     margins = label.contentsMargins()
                     ends.add(_box(label, page)[0] + label.width() - margins.right()
                              - max(label.indent(), 0))
+                    boxes.add(_box(label, page)[0] + label.width())
                     # Its text in full, from the left of its box.
                     assert label.indent() == 0, (space, name, label.text())
                     room = label.width() - margins.left() - margins.right()
                     assert label.fontMetrics().horizontalAdvance(label.text()) <= room, (
                         space, name, label.text(), room)
-                # The margin, and the gaps within and between groups.
-                assert box["menu"][1] == MARGIN, (space, name, box["menu"])
-                assert box["search"][0] == MARGIN, (space, name, box["search"])
-                assert page.width() - sum(box["menu"][0::2]) == MARGIN, (space, name)
-                assert box["citation"][1] - sum(box["menu"][1::2]) == GAP
-                assert box["search"][1] - sum(box["citation"][1::2]) == GROUP_GAP
-                above = box["lines"] if tab.lines.isVisible() else box["search"]
+                said = (space, name, box)
+                # A grid unit round the tab's contents.
+                assert box["menu"][1] == GRID, said
+                assert box["search"][0] == box["table"][0] == GRID, said
+                assert page.width() - (box["sides"][0] + box["sides"][2]) == GRID, said
+                assert box["sides"][1] == box["menu"][1], said
+                # A grid unit within a group, two between groups.
+                assert _below(box["menu"], box["citation"]) == GRID, said
+                assert _below(box["citation"], box["search"]) == 2 * GRID, said
+                above = box["search"]
                 if tab.lines.isVisible():
-                    assert box["lines"][1] - sum(box["search"][1::2]) == GAP
-                assert box["table"][1] - sum(above[1::2]) == GROUP_GAP, (space, name)
-                assert box["table"][0] == MARGIN, (space, name, box["table"])
-                assert box["count"][1] - sum(box["table"][1::2]) == GAP
-                assert box["title"][1] - sum(box["count"][1::2]) == GROUP_GAP
+                    assert _below(box["search"], box["lines"]) == GRID, said
+                    above = box["lines"]
+                assert _below(above, box["table"]) == 2 * GRID, said
+                assert _below(box["table"], box["count"]) == GRID, said
+                assert _below(box["count"], box["title"]) == 2 * GRID, said
                 tops = [box["title"], *(_box(v, page) for v in values)]
-                assert {b[1] - sum(a[1::2]) for a, b in itertools.pairwise(tops)} == {GAP}
-        assert len(edges) == 1, edges
-        assert len(ends) == 1, ends
+                assert {_below(a, b) for a, b in itertools.pairwise(tops)} == {GRID}, said
+        assert len(edges) == 1 and len(ends) == 1, (edges, ends)
+        # As in the View dock: a grid unit from a label's box to its control.
+        assert len(boxes) == 1 and edges == {boxes.pop() + GRID}, (edges, boxes)
+
+
+def _ink_left(image, ratio, x0, y0, x1, y1) -> float | None:
+    """The left edge of what is drawn in a box of `image` unlike the box's
+    commonest color, in logical pixels from the box's left; None if nothing."""
+    from collections import Counter
+
+    box = [(x, image.pixelColor(x, y).getRgb()[:3])
+           for y in range(round(y0 * ratio), round(y1 * ratio))
+           for x in range(round(x0 * ratio), round(x1 * ratio))]
+    fill = Counter(c for _x, c in box).most_common(1)[0][0]
+    xs = [x for x, c in box if sum(abs(a - b) for a, b in zip(c, fill, strict=True)) > 90]
+    return min(xs) / ratio - x0 if xs else None
+
+
+def test_every_header_name_starts_where_its_column_does(monkeypatch):
+    """As drawn: a text column's name starts where its cells' text does, at
+    the left, as a checkbox column's starts after the checkbox at its left.
+    A centred Receptor sat far from its values."""
+    from lobemap.viewer.panel import NAME_COL, RECEPTOR_COL
+
+    with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
+        assert code == 0
+        _lay_out(viewer)
+        for name in ("benton2025", "fafb_neuropil"):
+            tab = session(viewer).panel.open(name)
+            pump(100)
+            table, header = tab.table, tab.table.horizontalHeader()
+            pixmap = table.grab()
+            image, ratio = pixmap.toImage(), pixmap.devicePixelRatio()
+            top = header.mapTo(table, header.rect().topLeft())
+            cells = table.viewport().mapTo(table, table.viewport().rect().topLeft())
+            columns = (NAME_COL, RECEPTOR_COL) if tab.is_atlas else (NAME_COL,)
+            for col in columns:
+                left = top.x() + header.sectionViewportPosition(col)
+                width = header.sectionSize(col)
+                title = _ink_left(image, ratio, left + 1, top.y() + 2, left + width - 1,
+                                  top.y() + header.height() - 2)
+                row = table.visualItemRect(table.item(0, col))
+                text = _ink_left(image, ratio, left + 1, cells.y() + row.top() + 2,
+                                 left + width - 1, cells.y() + row.bottom() - 1)
+                assert title is not None and text is not None, (name, col)
+                assert abs(title - text) <= 3, (name, col, title, text)

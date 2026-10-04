@@ -227,7 +227,7 @@ def test_a_neuropil_layer_is_not_described_as_glomeruli(fafb_tabs):
     tab = fafb_tabs["fafb_neuropil"]
     assert tab.is_atlas is False
     assert _visible_headers(tab) == ["Show", "Neuropil", "Label", "Fill"]
-    assert tab.detail_fields == ("Sides", "Full name", "Source")
+    assert tab.detail_fields == ("Sides", "Full name", "Name from")
 
 
 def test_an_atlas_layer_keeps_its_columns(fafb_tabs):
