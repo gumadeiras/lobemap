@@ -90,7 +90,7 @@ class Allowed:
                 add(value)
         for line in reference.lines(registry.root):
             add(line)
-        for _name, (full, _source) in reference.neuropil_names(registry.root).items():
+        for full, _source in reference.neuropil_names(registry.root).values():
             add(full)
         templates = {s.flybrains_template for s in registry.spaces.values()
                      if s.flybrains_template}
