@@ -70,13 +70,15 @@ def form_layout(widget=None) -> QFormLayout:
     right edge, `GAP` before its value, and `GAP` between rows. The values
     take the width there is, whatever their text -- on macOS they kept
     their own, so each row selected moved them -- but for a control of a
-    fixed size, and the form starts at the left: macOS centred it."""
+    fixed size, and the form starts at the left: macOS centred it. Every
+    alignment is set, not left to the style: each style has its own."""
     form = QFormLayout(widget) if widget is not None else QFormLayout()
     form.setContentsMargins(0, 0, 0, 0)
     form.setVerticalSpacing(GAP)
     form.setHorizontalSpacing(GAP)
     form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
     form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
     return form
 
 

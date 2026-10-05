@@ -22,7 +22,6 @@ from __future__ import annotations
 from qtpy.QtCore import QSize, Qt
 from qtpy.QtWidgets import (
     QComboBox,
-    QHBoxLayout,
     QLabel,
     QStackedLayout,
     QTabWidget,
@@ -33,7 +32,6 @@ from qtpy.QtWidgets import (
 from ..core import reference
 from .chrome import tidy_tab_widget
 from .panel_grid import (
-    GAP,
     GROUP_GAP,
     MARGIN,
     SOURCE,
@@ -99,8 +97,8 @@ class _Tabs(dict):
 
 class SourcePage(QWidget):
     """One tab: its source menu and the citation under it, over one table
-    per source, of which the menu's choice is shown. Beside the source
-    menu, the Sides menu chooses which sides every table of the tab acts on.
+    per source, of which the menu's choice is shown. Under the citation,
+    the Sides menu chooses which sides every table of the tab acts on.
 
     A source not built yet has a blank page standing in until it is chosen
     with its tab open (`CompartmentPanel.tab`). The tables are stacked in a
@@ -145,18 +143,13 @@ class SourcePage(QWidget):
 
             size = get_theme(panel.viewer.theme).font_size
             self.citation.setStyleSheet(f"font-size: {size};")
-        menus = QHBoxLayout()
-        menus.setContentsMargins(0, 0, 0, 0)
-        menus.setSpacing(GAP)
-        menus.addWidget(self.menu)
-        # Against the right edge, so a longer source name in another tab or
-        # brain never moves it.
-        menus.addStretch(1)
-        menus.addSpacing(GROUP_GAP - GAP)
-        menus.addWidget(QLabel(SIDES))
-        menus.addWidget(self.sides_menu)
-        head.addRow(ColumnLabel(SOURCE), menus)
+        head.addRow(ColumnLabel(SOURCE), self.menu)
         head.addRow(ColumnLabel(), self.citation)
+        # A row of its own, on the label column: beside the source menu, at
+        # the column's right edge, the two menus needed 457 px of a 440 px
+        # column in Linux's font, and the hemibrain's pushed the canvas
+        # under its 560 px.
+        head.addRow(ColumnLabel(SIDES), self.sides_menu)
         layout.addLayout(head)
         layout.addSpacing(GROUP_GAP)
 

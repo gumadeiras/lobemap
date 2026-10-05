@@ -177,7 +177,7 @@ def _places(page, panel) -> dict:
 
 def test_the_menu_sits_in_the_same_place_in_every_tab_and_brain(monkeypatch):
     """One source or three, glomeruli or neuropils: the same places, and the
-    Sides menu at the same place beside it."""
+    Sides menu at the same place under it."""
     with launched(monkeypatch, "view", SPACES[0]) as (code, viewer):
         assert code == 0
         _show(viewer)

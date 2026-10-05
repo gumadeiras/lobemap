@@ -177,7 +177,8 @@ def test_the_panel_sits_on_the_view_docks_grid(monkeypatch, ndisplay):
 
     One edge for every label's text and one, a grid unit after it, for
     every control and value beside a label: the source menu, its citation,
-    the driver line, the values and Open in Virtual Fly Brain. A grid unit
+    the Sides menu, the driver line, the values and Open in Virtual Fly
+    Brain. A grid unit
     round a tab's contents, between the parts of a group, and two between
     groups. Each label's text in full.
     """
@@ -204,15 +205,17 @@ def test_the_panel_sits_on_the_view_docks_grid(monkeypatch, ndisplay):
                     ("count", tab.count), ("title", tab.detail_title))}
                 form = tab.detail_title.parentWidget().layout()
                 values = list(tab.details.values())
-                fields = [page.menu, page.citation, *values]
+                fields = [page.menu, page.citation, page.sides_menu, *values]
                 if tab.vfb.isVisible():
                     fields.append(tab.vfb)
                 if tab.lines.isVisible():
                     fields.append(tab.lines)
                 edges |= {_box(f, page)[0] for f in fields}
-                labels = [*(label for label in page.findChildren(ColumnLabel)
-                            if label.text() == "Source"),
+                head = page.layout().itemAt(0).layout()
+                labels = [head.labelForField(page.menu), head.labelForField(page.sides_menu),
                           *(form.labelForField(v) for v in values)]
+                assert [label.text() for label in labels[:2]] == ["Source", "Sides"], name
+                assert all(isinstance(label, ColumnLabel) for label in labels), name
                 if tab.lines.isVisible():
                     labels.append(tab.line_row.layout().labelForField(tab.lines))
                 for label in labels:
@@ -229,11 +232,10 @@ def test_the_panel_sits_on_the_view_docks_grid(monkeypatch, ndisplay):
                 # A grid unit round the tab's contents.
                 assert box["menu"][1] == GRID, said
                 assert box["search"][0] == box["table"][0] == GRID, said
-                assert page.width() - (box["sides"][0] + box["sides"][2]) == GRID, said
-                assert box["sides"][1] == box["menu"][1], said
                 # A grid unit within a group, two between groups.
                 assert _below(box["menu"], box["citation"]) == GRID, said
-                assert _below(box["citation"], box["search"]) == 2 * GRID, said
+                assert _below(box["citation"], box["sides"]) == GRID, said
+                assert _below(box["sides"], box["search"]) == 2 * GRID, said
                 above = box["search"]
                 if tab.lines.isVisible():
                     assert _below(box["search"], box["lines"]) == GRID, said
