@@ -22,3 +22,6 @@ data/cache/
 # 76 MB it saved was not worth two answers to one question.
 registry/data/*
 !registry/data/README.md
+
+# Local git worktrees.
+/.worktrees
