@@ -9,6 +9,7 @@ from here as well.
 from __future__ import annotations
 
 import contextlib
+import traceback
 import weakref
 
 import numpy as np
@@ -394,6 +395,70 @@ def show_main_layer(viewer, registry: Registry, session: SceneSession) -> None:
         viewer.layers.selection.active = surface.layer
 
 
+#: Each viewer's scenes, held weakly; see `tear_down_on_close`.
+_SCENES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def tear_down_on_close(viewer, session: SceneSession) -> None:
+    """Tear `session` down when the viewer closes, before napari closes it.
+
+    A closed window's scene stayed in memory. Qt deletes a closed window's
+    widgets only as its event loop turns, and they held the scene until
+    then, with its colormap entries: a window opened meanwhile numbered its
+    own (`layers._take_colormap`). And the window's own close -- its close
+    button, File > Close Window -- never closed the viewer: napari keeps
+    such a window's `Window` for the life of the process, by a handler of
+    its theme, and with it the viewer and the scene.
+
+    So `viewer.close` first tears down each scene still loaded in the
+    viewer, while the canvas is there -- its threads and timers stopped,
+    its colormap entries given back, its handlers gone -- and then napari's
+    close removes the layers and closes the window. The window's own close
+    goes through `viewer.close` too, as napari's quit does, once napari has
+    accepted it: a close the user cancels closes nothing. Installed once
+    per viewer; the scenes are held weakly.
+    """
+    scenes = _SCENES.get(viewer)
+    if scenes is None:
+        scenes = _SCENES[viewer] = weakref.WeakSet()
+        _close_scenes_first(viewer, scenes)
+    scenes.add(session)
+
+
+def _close_scenes_first(viewer, scenes: weakref.WeakSet) -> None:
+    close = type(viewer).close.__get__(viewer)
+    closing = [False]
+
+    def _close() -> None:
+        closing[0] = True
+        try:
+            for session in list(scenes):
+                session.teardown(closing=True)
+        finally:
+            close()
+
+    # A pydantic model: see `view.install_home_orientation`.
+    object.__setattr__(viewer, "close", _close)
+    window = getattr(viewer.window, "_qt_window", None)
+    if window is None:
+        return
+    # Weakly: the window holds this in its own dictionary, where PyQt finds it
+    # before the class's handler.
+    window_ref, viewer_ref = weakref.ref(window), weakref.ref(viewer)
+    close_event = type(window).closeEvent
+
+    def closeEvent(event) -> None:
+        close_event(window_ref(), event)
+        live = viewer_ref()
+        if event.isAccepted() and live is not None and not closing[0]:
+            try:
+                live.close()
+            except Exception:                   # noqa: BLE001 - raised in a Qt handler, it aborts
+                traceback.print_exc()
+
+    window.closeEvent = closeEvent
+
+
 def window_title(registry: Registry, space: str) -> str:
     """'lobemap — Hemibrain (female, EM)': the brain open, by its title."""
     return f"lobemap — {registry.spaces[space].title or space}"
@@ -421,9 +486,11 @@ def load_space(
     done before this returns. In a switch it can still be reading then, and
     is done by the end of the switch, or within 45 ms of it. The images are
     shown once the plane and the 3D pyramid level are set, so a space
-    opened alone reads each once. See `build_scene`.
+    opened alone reads each once. See `build_scene`. Closing the viewer
+    tears the scene down (`tear_down_on_close`).
     """
     session = SceneSession(viewer, registry, space)
+    tear_down_on_close(viewer, session)
     try:
         build_scene(viewer, registry, space, into=session, defer=True)
 
@@ -550,5 +617,6 @@ __all__ = [
     "show_main_layer",
     "show_primary_atlas",
     "show_targets",
+    "tear_down_on_close",
     "window_title",
 ]

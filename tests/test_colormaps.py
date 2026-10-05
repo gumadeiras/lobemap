@@ -203,9 +203,9 @@ def test_each_colormap_is_named_after_its_atlas_in_every_brain(monkeypatch):
     from qtpy.QtCore import Qt
     from viewer_harness import SPACES, launched, pump, session, switch_to
 
-    # A window closed by an earlier test of this process can still hold its
-    # entries until its surfaces are collected: two windows at once number
-    # theirs. lobemap opens one.
+    # A closed window gives its entries back as it closes, but a scene an
+    # earlier test built by `build_scene` alone holds them until collected:
+    # two scenes at once number theirs. lobemap opens one.
     gc.collect()
     with launched(monkeypatch, "view", SPACES[0]) as (code, viewer):
         assert code == 0

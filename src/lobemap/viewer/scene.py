@@ -607,16 +607,23 @@ class SceneSession(ScenePose):
         if dims.ndisplay == 3:
             fit_view(self.viewer)
 
-    def teardown(self) -> None:
+    def teardown(self, closing: bool = False) -> None:
+        """Undo what this session made, and nothing else.
+
+        With `closing`, the viewer is closing (`app.tear_down_on_close`):
+        napari's close removes every layer once it has stopped slicing, and
+        the window takes the dock with it, so neither is touched here.
+        """
         self.turned.close()
         for event, handler in self.handlers:
             with contextlib.suppress(Exception):
                 event.disconnect(handler)
         self.handlers = []
-        for overlay in self.contours.values():
-            for event, handler in getattr(overlay, "handlers", ()) or ():
-                with contextlib.suppress(Exception):
-                    event.disconnect(handler)
+        # Every overlay's: they share them. Dropped, as they hold the overlays.
+        for event, handler in self.contour_handlers:
+            with contextlib.suppress(Exception):
+                event.disconnect(handler)
+        self.contour_handlers = []
         for callback in self.callbacks:
             for callbacks in (self.viewer.mouse_move_callbacks,
                               self.viewer.mouse_drag_callbacks):
@@ -652,11 +659,11 @@ class SceneSession(ScenePose):
         # Only this session's layers. A switch builds the next scene before
         # tearing this one down, and a failed build tears down only itself,
         # so clearing the whole list would take the other scene with it.
-        for layer in self.all_layers():
+        for layer in [] if closing else self.all_layers():
             with contextlib.suppress(Exception):
                 if layer in self.viewer.layers:
                     self.viewer.layers.remove(layer)
-        if self.dock is not None:
+        if self.dock is not None and not closing:
             with contextlib.suppress(Exception):
                 self.viewer.window.remove_dock_widget(self.dock)
             # Removing it undocks it but leaves it a child of the window, so

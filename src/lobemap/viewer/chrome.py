@@ -83,7 +83,15 @@ def add_dock(viewer, widget, name: str, area: str):
     window = viewer.window
     dock = QtViewerDockWidget(window._qt_viewer, widget, name=name, area=area,
                               close_btn=False)
-    fit = functools.partial(_fit_title_bar, dock)
+    ref = weakref.ref(dock)
+
+    def fit(*_) -> None:
+        # Weakly: Qt holds this until a pass of its event loop after it has
+        # deleted the dock, and the dock holds the panel and its scene.
+        live = ref()
+        if live is not None:
+            _fit_title_bar(live)
+
     fit()
     # napari builds the title bar again when the dock floats or docks.
     dock.topLevelChanged.connect(fit)
@@ -93,7 +101,7 @@ def add_dock(viewer, widget, name: str, area: str):
     return dock
 
 
-def _fit_title_bar(dock, *_) -> None:
+def _fit_title_bar(dock) -> None:
     """Keep a dock's title bar to the room the dock gives it.
 
     napari's title bar tells the dock it is 20 px tall, its size hint, and
