@@ -51,7 +51,12 @@ jobs:
       - name: Fetch the core data
         run: uv run lobemap fetch --nostains
 
+      # One Mesa (llvmpipe) render thread per test worker: by default each
+      # worker's software renderer spreads over every core, and the workers
+      # then compete for the same CPUs.
       - name: Run tests
+        env:
+          LP_NUM_THREADS: "1"
         run: uv run pytest -q -rs -n auto --dist loadfile --durations=25
 
       - name: Build the wheel
