@@ -95,7 +95,3 @@ The lobemap code is under the [MIT License](https://github.com/gumadeiras/lobema
 - **No published terms:** the Grabe 2015 files. The rights stay with the authors and the publisher.
 
 [Data licenses](https://github.com/gumadeiras/lobemap/blob/main/docs/data.md#data-licenses) has the full table.
-
-## Authors
-
-Gustavo Madeira Santana created lobemap and its 0.1 viewer, and assembled the source data and the reference table it builds on. David Zimmerman rewrote it around coordinate spaces for 0.2.
