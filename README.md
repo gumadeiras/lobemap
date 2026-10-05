@@ -1,263 +1,100 @@
 # lobemap
 
-A [napari](https://napari.org) viewer for *Drosophila* antennal lobe
-(AL) glomerular atlases.
+lobemap shows the published maps of the *Drosophila* antennal lobe side by side, in one viewer.
 
-Several groups have published glomerular parcellations of the AL, each
-from a different volume and each using its own names. lobemap puts them
-in one viewer so they can be looked at side by side: as 3D meshes, or as
-exact cross-sections on a slice through the underlying image.
+The antennal lobe is the first olfactory center of the fly brain. It is made of small, round compartments called *glomeruli* (one: *glomerulus*). Several groups have published a *glomerular atlas*: a 3D shape and a name for each glomerulus. The atlases come from different brains, and each one uses its own names. lobemap puts these atlases in one window, so you can compare them in 3D or one section at a time. It is built on the [napari](https://napari.org) image viewer.
 
-The viewer opens a **coordinate space** — FAFB, the hemibrain, the male
-CNS, or the Grabe light-microscopy template. A space holds every atlas
-native to it at once, together with its reference image and, in the three
-EM spaces, its neuropil geometry, so the parcellations of one volume can be
-drawn over each other.
+## Demo
 
-## Installing
+![Colored glomeruli of an antennal lobe atlas, turning in 3D](https://raw.githubusercontent.com/gumadeiras/lobemap/main/docs/images/turntable.gif)
 
-Python 3.11 or 3.12. From PyPI:
+*The glomeruli of one atlas in 3D. Each glomerulus has its own color.*
+
+![A section through the antennal lobe, with the outline, fill and name of each glomerulus on the image](https://raw.githubusercontent.com/gumadeiras/lobemap/main/docs/images/slice-outlines.png)
+
+*Slice view: each glomerulus is an exact outline on the image, with an optional fill and name.*
+
+![The hemibrain in 3D, with its neuropil stain, its neuropils, and the panel that lists the glomeruli](https://raw.githubusercontent.com/gumadeiras/lobemap/main/docs/images/hemibrain-3d.png)
+
+*The hemibrain in 3D, with its stain and neuropils. The panel on the right lists the glomeruli.*
+
+## Install
+
+lobemap needs Python 3.11 or 3.12.
 
 ```bash
 pip install lobemap
 lobemap fetch
 ```
 
-`fetch` downloads the data, which is published separately rather than shipped in the package. An installed lobemap keeps it in the user cache directory (`~/Library/Caches/lobemap/data` on macOS, `~/.cache/lobemap/data` on Linux); `fetch` prints the location. Set `LOBEMAP_DATA`, or pass `--data-root`, to keep it somewhere else.
+The first command installs the viewer. The second downloads the data, 2.5 GB, into your user cache folder, and prints where it put it. [Data](https://github.com/gumadeiras/lobemap/blob/main/docs/data.md#where-the-data-goes) explains how to keep it somewhere else.
 
-Upgrading from 0.1: the data no longer ships in the package, and `lobemap view <space>` replaces `lobemap --atlas <name>`. [CHANGELOG.md](CHANGELOG.md) lists what changed and what was removed.
-
-From a source checkout, with [uv](https://docs.astral.sh/uv/), from the repository root:
-
-```bash
-uv sync
-uv run lobemap fetch
-```
-
-A checkout keeps its data in `registry/data`.
-
-Viewing needs nothing more. Rebuilding data from source (`build`, `stain`, `ingest`) and moving geometry between spaces (`bridge`, and `check` or `reconcile` on an atlas outside its own space) need about 100 more packages, which `pip install "lobemap[ingest]"` adds. In a checkout, `uv sync` and `uv run` install them too, because the `ingest` group is a default; pass `--no-group ingest` to both to leave them out, as in `uv run --no-group ingest lobemap`.
-
-A full `fetch` is 2.5 GB and gets everything: the atlases, the neuropil sets, the Grabe confocal stack and label volume, and the three virtual stains described under [Data](#data) below. The stains are 2.4 GB of that, so if you would rather not wait for them:
-
-```bash
-uv run lobemap fetch --nostains
-```
-
-leaves them out and takes 76 MB. Every space still opens; the three EM spaces just open without their reference image, and running the full `fetch` later fills them in.
+To download only 76 MB, use `lobemap fetch --nostains`. All four brains still open, but the three electron microscopy (EM) brains open without their background image. Run `lobemap fetch` later to add it.
 
 ## Quick start
 
-```bash
-uv run lobemap
-```
-
-That opens FAFB, after fetching the 76 MB of core data if it is not on disk yet. To list the spaces and what each will put on screen:
+List the brains and what each one shows:
 
 ```bash
-uv run lobemap spaces
+lobemap spaces
 ```
+
+Open one brain, here the hemibrain:
 
 ```bash
-uv run lobemap view JRCFIB2018F
+lobemap view JRCFIB2018F
 ```
 
-`lobemap --help` lists the rest, including tools for checking the data
-against its own geometry (`check`), comparing atlases (`reconcile`) and
-moving geometry between spaces (`bridge`).
+`lobemap` alone opens FAFB. If the data is not on your computer yet, `lobemap view` first downloads the 76 MB it needs.
 
-`lobemap` is installed into the project's virtual environment, so `uv run`
-is the simplest way to reach it. Activating the environment
-(`.venv/Scripts/Activate.ps1` on Windows, `source .venv/bin/activate`
-elsewhere) lets you drop the prefix. The commands work from any directory: a checkout reads its own `registry/`, and a package installed from PyPI carries a copy of the registry metadata. `--registry` or `LOBEMAP_REGISTRY` points at a different one.
+The window shows the **View** controls on the left, the brain in the middle, and the **Brain regions** panel on the right. Things to try first:
 
-## What is included
+- **Turn the brain.** In 3D, drag the brain with the mouse. To set exact angles, use **Rotate around**.
+- **Look at sections.** Set **Show** to **Slice**, then move the slider under the image. Each glomerulus is an outline on the image. Tick its `Label` or `Fill` box to name or fill it. In **Rotate around**, a turn about the **Vertical axis** or the **Horizontal axis** cuts an *oblique section*: a section at an angle to the image's own planes.
+- **Show or hide glomeruli.** In **Brain regions**, tick or clear the `Show` box of each glomerulus. Search by name or receptor, or choose a **Driver line** to show only the glomeruli that a GAL4 or QF2 line labels. Click a glomerulus to see its receptor, sensillum and other details.
+- **Compare atlases.** The hemibrain has three atlases of the same lobe. Choose one in **Source**, then tick its glomeruli. All the atlases you tick are drawn together, and a glomerulus has the same color in each. To see an atlas of another brain, choose that brain in **Brain**.
+- **Mirror or flip.** **Mirror the brain left to right** helps you compare a left lobe with a right one. **Flip the picture upside down** turns the picture over. Both change the display only, not the data.
 
-| space | atlas | glomeruli |
-|---|---|---|
-| FAFB14 | [Benton 2025](https://doi.org/10.1038/s44319-025-00476-8) (Dataset EV2) | 58 |
-| JRCFIB2018F (hemibrain) | neuPrint [hemibrain](https://doi.org/10.7554/eLife.57443) | 58 + 19 |
-| JRCFIB2018F | [Schlegel 2021](https://doi.org/10.7554/eLife.66018) S11, from receptor neurons | 59 |
-| JRCFIB2018F | [Schlegel 2021](https://doi.org/10.7554/eLife.66018) S12, from projection neurons | 58 |
-| JRCFIB2022M (male CNS) | neuPrint [male CNS](https://doi.org/10.1016/j.cell.2026.08.015) | 58 + 58 |
-| GRABE | [Grabe 2015](https://doi.org/10.1002/cne.23697) | 54 + 54 |
+## What's inside
 
-Three gaps in the published data are worth knowing before comparing atlases:
+Each atlas was drawn in one brain volume. lobemap calls that volume a *coordinate space*: all its atlases share the same coordinates, so they line up and can be drawn over each other. The viewer calls a space a *brain*, and commands name it by its id.
 
-- The neuPrint hemibrain `VM2(R)` is counted above but is effectively missing: it is a 14 µm³ fragment, where VM2 is 1,342–3,259 µm³ in every other atlas that has one. Schlegel S12 has a complete VM2 in the same volume. `lobemap check` lists it as a known defect ([`registry/checks.toml`](registry/checks.toml)).
-- Grabe 2015 has no `VM6`. Its Amira material table names VM6 on both sides, but the published label volume ("sure ones" only) has no voxels for either, so 54 glomeruli per side are meshed rather than 55. The same table names the material lobemap reads as `VP2` `VP2_left_VM6andVC6` and `VP2_right_VM6andVC6`, and in affine fits to the male CNS and to Schlegel S12 it lies at VM6's position rather than VP2's. So Grabe's `VP2` may be VM6: the viewer names it `VP2 (VM6?)` in the table and on the slice, with each side's reason in the name's tooltip, while `registry/nomenclature.csv` still maps it to VP2.
-- In the male CNS neuropil set, `AME(L)` is about a quarter of the volume of `AME(R)` (4,172 against 16,608 µm³) after the watertight repair. Treat it as incomplete; the source mesh is not kept, so it is not known whether the ROI or the repair lost the rest.
+| Brain | Id | Atlas | Glomeruli |
+|---|---|---|---|
+| FAFB: a whole female brain, EM | `FAFB14` | [Benton et al. 2025](https://doi.org/10.1038/s44319-025-00476-8) | 58, left lobe |
+| Hemibrain: part of a female brain, EM | `JRCFIB2018F` | neuPrint hemibrain, [Scheffer et al. 2020](https://doi.org/10.7554/eLife.57443) | 58 right, 19 left |
+| | | [Schlegel et al. 2021](https://doi.org/10.7554/eLife.66018), from sensory neurons | 59, right lobe |
+| | | [Schlegel et al. 2021](https://doi.org/10.7554/eLife.66018), from projection neurons | 58, right lobe |
+| Male CNS: a male brain and nerve cord, EM | `JRCFIB2022M` | neuPrint male CNS, [Berg et al. 2026](https://doi.org/10.1016/j.cell.2026.08.015) | 58 per lobe |
+| Grabe 2015: a living brain, light microscopy | `GRABE` | [Grabe et al. 2015](https://doi.org/10.1002/cne.23697) | 54 per lobe |
 
-Which one to reach for depends on what you are comparing against:
+The three EM brains also show their *neuropils*, the named regions of the brain, and a *virtual neuropil stain*: an image made from synapse positions that looks like an nc82 antibody stain. Grabe 2015 shows its own confocal image.
 
-- **GRABE** is the only atlas built from an intact, living brain, imaged
-  in vivo rather than dissected and fixed. Its glomerular shapes and the
-  geometry of its reference stack (`elav-nSyb::DsRed`, not nc82) are
-  therefore the closest match to in vivo imaging data. It is also the
-  oldest of the six and predates revisions to the fine structure of a few
-  glomeruli.
-- **FAFB14** (the FAFB volume, which FlyWire also reconstructs) is a complete female brain, dissected and
-  chemically fixed. Benton 2025
-  ([based on Bates 2020](https://doi.org/10.1016/j.cub.2020.06.042))
-  annotates its left AL comprehensively and to current nomenclature; the
-  right AL is unannotated.
-- **JRCFIB2018F** (hemibrain) is a dissected, fixed female. Three
-  independent annotations cover its right AL, and one of them also
-  covers a subset of the left. The right AL is partially truncated even
-  so: some of its 58 glomeruli extend past the imaged volume. All of the
-  hemibrain atlases have a few glomeruli with holes or multiple connected
-  components.
-- **JRCFIB2022M** (male CNS) has complete, current annotations for both
-  hemispheres, though the meshes are of variable quality, with several
-  glomeruli having holes or multiple pieces. The JRCFIB2022M specimen is
-  male rather than female, which may subtly affect the shape of a few
-  glomeruli, and is dissected and fixed like the other EM volumes.
+[The brains and atlases](https://github.com/gumadeiras/lobemap/blob/main/docs/atlases.md) says which atlas fits which comparison, and lists known gaps in the published data.
 
-Each space also carries one reference image, and each EM space its brain
-neuropils. For Grabe, which is light microscopy and has no neuropil meshes,
-the image is its own confocal stack. For the
-three EM spaces it is a **virtual neuropil stain**: the density of
-predicted presynapses, binned and blurred into something that reads like an
-nc82 antibody stain, computed natively in each volume rather than warped in
-from light microscopy.
+## Learn more
 
-Glomerulus names are scoped to a space, so switching space may change both
-the list of glomeruli and their colors.
+- [Using the viewer](https://github.com/gumadeiras/lobemap/blob/main/docs/viewer.md): every control, the panel, the layers, and speed.
+- [The brains and atlases](https://github.com/gumadeiras/lobemap/blob/main/docs/atlases.md): what each atlas is, which one to use, and known gaps in the data.
+- [Data](https://github.com/gumadeiras/lobemap/blob/main/docs/data.md): download, storage, checks, rebuilding from source, and data licenses.
+- [Data sources](https://github.com/gumadeiras/lobemap/blob/main/docs/data-sources.md): where each dataset came from, and what lobemap does to it.
+- [Commands](https://github.com/gumadeiras/lobemap/blob/main/docs/cli.md): every `lobemap` command and option.
+- [Upgrading from 0.1](https://github.com/gumadeiras/lobemap/blob/main/docs/upgrading.md): what changed, and what was removed.
+- [Development](https://github.com/gumadeiras/lobemap/blob/main/docs/development.md): work from the source code, run the tests, and release.
+- [Changelog](https://github.com/gumadeiras/lobemap/blob/main/CHANGELOG.md): what changed in each version.
 
-## Data
+## Data licenses and citation
 
-The data the viewer opens is not committed. Its fourteen artifacts are published as assets of the [`data-v1` release](https://github.com/gumadeiras/lobemap/releases/tag/data-v1) — 2.51 GB, of which the three virtual stains are 2.44 GB. What the repository does commit is the published source data some of them are built from, about 220 MB under [`registry/sources/`](registry/sources/README.md), and the registry metadata. Only the metadata ships in the package.
+If you use an atlas, cite the paper it came from. [Data sources](https://github.com/gumadeiras/lobemap/blob/main/docs/data-sources.md) gives the citations.
 
-`registry/manifest.toml` records where the artifacts are fetched from and the sha256 of every one, and `lobemap fetch` checks each download against it; a file that does not match is discarded rather than kept. `lobemap fetch --check` verifies what is on disk without downloading anything. Naming an asset fetches just that one:
+The lobemap code is under the [MIT License](https://github.com/gumadeiras/lobemap/blob/main/LICENSE). The data is not: each dataset keeps the license of its source.
 
-```bash
-uv run lobemap fetch --asset hemibrain_stain
-```
+- **CC BY 4.0:** the neuPrint hemibrain and male CNS data, Schlegel 2021, and the hemibrain and male CNS stains.
+- **CC0 1.0:** the Benton 2025 atlas.
+- **CC BY-NC 4.0, no commercial use:** the FAFB neuropils and stain, from FlyWire.
+- **No published terms:** the Grabe 2015 files. The rights stay with the authors and the publisher.
 
-`lobemap view` fetches before it opens a window: every missing artifact except the stains, up to 11 files and 76 MB, whichever space you open. So the explicit `fetch` above is a convenience rather than a requirement. It never fetches a stain, though: after `fetch --nostains` the EM spaces open without a reference image until you fetch one. A stain that *is* on disk is always shown.
-
-You can also rebuild from source instead of downloading:
-
-```bash
-uv run lobemap build --list
-```
-
-```bash
-uv run lobemap build hemibrain_stain
-```
-
-Each stain needs several gigabytes downloaded from the published synapse releases, about 40 GB of scratch space, and a long run, so `build --all` skips them and they have to be asked for by name. Everything else is derived from sources that either ship in `registry/sources/` or are downloaded by the build; the neuPrint assets need a neuPrint token in `NEUPRINT_APPLICATION_CREDENTIALS`, and `fafb_neuropil` needs FlyWire access. `registry/recipes.toml` records exactly how each asset is built, and [`registry/data/README.md`](registry/data/README.md) describes each pipeline.
-
-A rebuilt asset is not byte-identical to the original — every pipeline stamps the date it ran — so compare its *content* hash, which the build prints, instead. `lobemap pack` writes the upload-ready copies if you are republishing.
-
-## Data licenses
-
-The MIT License in [LICENSE](LICENSE) covers the lobemap code. It does not cover the data. Each data asset keeps the license of its source, recorded per asset in [`registry/assets.toml`](registry/assets.toml) as `source.license`, with the page that states it as `source.license_url`:
-
-| assets | license | stated at |
-|---|---|---|
-| `neuprint_hemibrain_glomeruli`, `neuprint_hemibrain_neuropil`, `hemibrain_stain` | CC BY 4.0 | [Janelia FlyEM hemibrain](https://www.janelia.org/project-team/flyem/hemibrain) |
-| `neuprint_cns_glomeruli`, `neuprint_cns_neuropil`, `malecns_stain` | CC BY 4.0 | [male CNS downloads](https://male-cns.janelia.org/download/) |
-| `schlegel2021_s11_glomeruli`, `schlegel2021_s12_glomeruli` | CC BY 4.0 | [Schlegel et al. 2021, eLife](https://elifesciences.org/articles/66018) |
-| `benton2025_glomeruli` | CC0 1.0 (the article itself is CC BY 4.0) | [Benton et al. 2025, EMBO Reports](https://europepmc.org/article/PMC/PMC12187929) |
-| `fafb_neuropil`, `fafb_stain` | CC BY-NC 4.0: attribution, no commercial use | [FlyWire guidelines](https://flywire.ai/guidelines) |
-| `grabe2015_glomeruli`, `grabe2015_labels`, `grabe2015_stack` | none published | [Grabe et al. 2015](https://doi.org/10.1002/cne.23697), [atlas page](https://www.ice.mpg.de/232714/vivo-3d-atlas) |
-
-The Grabe 2015 assets are built from files reproduced from the paper and its in vivo atlas: the confocal stack, and the Amira label volume with its material table. Neither the journal nor the atlas page publishes terms for them, and lobemap grants none: the rights stay with the authors and the publisher.
-
-The tracked source files under `registry/sources/` keep the terms of the same sources: Benton's Dataset EV1 and EV2 are CC0 1.0 and its figure panels CC BY 4.0; the Grabe files are reproduced from the paper as above, except the Grabe 2016 supplemental tables (`s1.png`, `s1_cont.png`, `s2.png`), which are [CC BY-NC-ND 4.0](https://doi.org/10.1016/j.celrep.2016.08.063); the Bates 2020 atlas figure is CC BY 4.0; and the JRC2018 Unisex template and ROI volumes from Virtual Fly Brain are [CC BY-NC-SA 4.0](https://www.virtualflybrain.org/reports/JRC2018). [`registry/reference/glomerulus_ground_truth.csv`](registry/reference/README.md) compiles values from published tables, and each value keeps the terms of its source.
-
-CC BY and CC BY-NC require attribution, so cite the paper behind each atlas you use; [docs/data-sources.md](docs/data-sources.md) has the citations. CC BY-NC data, which includes everything in FAFB14 except the Benton atlas, may not be used commercially.
-
-## In the viewer
-
-The window has three columns. On the left, the **View** dock, tabbed with napari's **Layer settings**, sits above napari's **Layers** list, with napari's two rows of buttons above and below the list. The canvas is in the middle. On the right, **Brain regions** has a **Glomeruli** tab and, in every brain but GRABE, a **Neuropils** tab, each with a source menu and a sides menu over its table. The tabs of both columns look alike, and each row of tabs stands on a line of the open tab's color across its column, so the open tab joins the section it shows. The docks have no close button; the Window menu shows a hidden one again.
-
-### The View dock
-
-A control that works in one mode only stays in view in the other, disabled, and its tooltip says when it works. The mouse wheel changes a box or menu only after you click it or reach it with Tab, so scrolling over the dock changes nothing; the same holds for the panel's **Source**, **Sides** and **Driver line** menus. The wheel turns no tab of either column.
-
-- **Brain** opens another brain without restarting: FAFB (female, EM), Hemibrain (female, EM), Male CNS (EM) or Grabe 2015 (live, light microscopy). Its tooltip spells out the abbreviations and names the template the brain is shown in. Only brains with data on disk are listed.
-- **Show** switches between **3D**, which draws the meshes, and **Slice**, which draws one section at a time: the image, and exact mesh–plane outlines that stay sharp at any zoom. **Fit to window** fits the brain to the window; in 3D it also turns back to the front view, dorsal side up, with the rotation applied, and frames the whole brain as that view shows it, turned, flipped and under perspective, with a hundredth of the window to spare on each side. It never moves the slice or the angles. The brain opens framed the same way, and napari refits it so whenever you enter 3D.
-- **Zoom** is how large the brain is drawn, in screen pixels per micrometer of the brain: napari's own zoom factor, the number its camera popup shows. Scrolling, Fit to window and the popup change it, and typing a number zooms to it, in 3D and in Slice view.
-- **Perspective** is the 3D camera's field of view, from `0° (flat)`, the default, with no perspective, to 90°, the strongest. It works in 3D only; in Slice view it is disabled. Hovering, the corner arrows, Fit to window, the rotation and the flip are the same under perspective.
-- **Sections** chooses which sections the slider steps through. Each choice is named by its plane and the anatomical axis the slider steps along across it — frontal sections along anterior–posterior, horizontal along dorsal–ventral, sagittal along medial–lateral — and by the angle between that axis and the image grid the sections follow, for example `Frontal (17.5° off anterior–posterior)` in FAFB. **Align to the anatomical axes**, off by default, cuts the sections square to those three axes instead, and the menu then reads `Frontal (anterior–posterior)`. Both work in Slice view only; in 3D they are disabled. The menu is as wide as the longest choice of any brain, aligned or not, so no choice is cut short and the menu never changes width.
-- **Mirror the brain left to right** shows the brain as its mirror image about its mid-plane, to compare a left lobe with a right one. It is for display only: the data do not change, and the corner arrows follow it. In 3D the camera then faces the front view turned by the angles, as a new angle puts it, so the mirror and the flip together are a 180° turn about the line of sight.
-- **Flip the picture upside down** turns the picture over on screen, top to bottom about the middle of the view, after the rotation and the mirror, in 3D and in Slice view. It is for display only: no slider, plane or layer moves, the corner arrows follow, names on the slice stay readable, the surfaces stay lit from outside, from the lower right, as the upright picture is lit from the upper right, whatever moves you make while it is on, and turning it off gives back the view exactly. With the mirror, a front view is turned 180°. Its only cost is the click: about 35 ms in Slice view and 4 ms in 3D. A slice step and a change between 3D and Slice view take as long upside down as upright.
-- **Rotate around** turns the view by three angles, from −180° to 180°, about the axes of the screen:
-  - **Line of sight**: positive turns the picture counterclockwise.
-  - **Vertical axis**: positive moves the near side to your right.
-  - **Horizontal axis**: positive brings the top toward you.
-
-  The rows are named by the screen's axes, not by x, y and z, which are the image's own axes and differ from the screen's once the slice axis changes. In 3D the camera turns from the front view, and no layer moves. Dragging still turns the camera freely and leaves the angles as they are; a new angle, or Fit to window, puts the camera back at the front view turned by the angles. In Slice view, a turn about the line of sight turns the section in the screen plane. A turn about the vertical or horizontal axis cuts a true oblique section: the image is resampled on the turned plane and the outlines are exact sections of the meshes on it, the slider steps along your line of sight and reads `depth`, and napari's x/y/z arrows are hidden, since no image axis is on screen. **Reset rotation** gives back exactly the unturned view; in 3D it also turns the camera back to the front view after a drag, even with the angles at 0°.
-- The corner shows the anatomy's arrows, each labeled with the pole it points at, one of `A`/`P`, `D`/`V` and `L`/`R`. In 3D they are turned in space, beside napari's arrows for the image's own axes `x`, `y` and `z`. In Slice view each is the projection of its pole's direction onto the section, at any rotation, alignment, mirror and flip; a pole within 20.5° of the line of sight, whose arrow would be under 35% of its length, has none. napari's x/y arrows are not shown in Slice view, because the image grid is 5 to 31° off the anatomy and the two sets of letters fell on top of each other. The legend under the controls says what the letters mean, in both views.
-
-0.1's controls map onto these as follows, for a frontal view:
-
-| 0.1 | now |
-|---|---|
-| Z/slice | Rotate around **Line of sight** |
-| Y/vertical | Rotate around **Vertical axis** |
-| X/horizontal | Rotate around **Horizontal axis** |
-| Mirror horizontal | **Mirror the brain left to right** |
-| Mirror vertical | **Flip the picture upside down** |
-| both mirrors, Benton's 0.1 default | both, which is a 180° turn: the same as **Line of sight** 180° |
-
-### napari's buttons
-
-napari's buttons are where napari puts them, and each one either works in step with the View dock or is off and says why in its tooltip.
-
-- Under the layer list: **console**; **2D/3D**, the same as **Show**; **roll**, which steps to the next **Sections** choice in the menu's order, the first after the last, and is off in 3D, as Sections is; **transpose** and **grid**, both off; and **home**, the same as **Fit to window**, rotation and flip kept. Each pair follows the viewer, so using one updates the other.
-- A right-click on **2D/3D** opens napari's camera popup. Its up/down menu is **Flip the picture upside down**, its zoom is **Zoom**, and in 3D its perspective is **Perspective**; each shows the other's change. Its angle sliders turn the camera as dragging does: the **Rotate around** boxes keep their values, and Fit to window goes back to them. Its left/right menu, and in 3D its depth menu, are off, because either would show the brain mirrored with no control to say so: use **Mirror the brain left to right**, or flip the picture and turn it 180° about the line of sight. Its **Sync 2D/3D camera** box is off too, and View > Toggle Synced 2D/3D Camera (⌘U) says why and changes nothing: 3D and Slice view share one camera, so the zoom and the view the dock shows hold across a change of mode.
-- A right-click on **roll** lists the axes in the order the slice uses. Dragging an axis to the top slices along it, as **Sections** does; a drag that swaps the two axes on screen is undone, and a message says why.
-- **Transpose** would show the brain mirrored across the picture's diagonal and **grid** would draw the outlines apart from their image, with nothing in the View dock to show either, so both are off, with their right-click settings. So are their keys: ⌘T, ⌘⌥T (napari's turn of every layer by 90°, also Option-click on transpose) and ⌘G show a message and do nothing, and so does any key you bind to them in napari's Preferences. View > Scene Axes stays off too and says why: napari draws those axes at the image's origin, outside the brain, and does not turn or mirror them with it.
-- Over the layer list: **new points**, **new shapes** and **new labels** layers, which are yours to draw in, and **delete**. lobemap's own layers carry napari's lock: delete, ⌘⌫ and ⌘⌦ on the canvas, and ⌫ and ⌦ in the layer list pass them by and say that they are part of the brain and can be hidden instead, and they stay locked if unlocked from the layer menu. Layers you add delete as usual. The layer menu's Duplicate and projections, which would copy one of lobemap's layers into a layer that follows neither the panel nor the mirror and the rotation, and Link Layers, which would hide an atlas in both modes, refuse lobemap's layers and say why; your own layers duplicate, project and link as usual.
-
-### The layer list
-
-lobemap lists its layers, and draws them, in one order, top first: each glomerulus atlas, the primary one first, then the neuropils, then the brain maps, the glomerulus label volume over the stain or the confocal image. Each atlas and neuropil set has two layers next to each other: `· outlines`, drawn in Slice view, and `· 3D`. The order holds as parts are built, between 3D and Slice view and after a brain switch, and layers you add stay on top, where napari puts them.
-
-Every layer is translucent and none is additive: each is laid over the layers under it, so a glomerulus keeps its own color over the stain and the neuropils, in 3D and in Slice view. The neuropils and the brain maps are drawn without depth, napari's `translucent_no_depth`, so nothing inside them is hidden. The neuropils open at 10% opacity, which leaves the stain readable through all of a brain's neuropils, and the glomeruli at 75%. A blending or opacity you set in **Layer settings** stays until you open another brain.
-
-### Switching brains
-
-A switch that succeeds keeps the mode, the angles, the alignment and the perspective, which mean the same on screen in every brain, and the section plane by its anatomy: frontal stays frontal, whichever image axis that is in the new brain. It clears the mirror and the flip, so a brain never opens reflected or upside down. Each brain opens its own tables, with its primary atlas checked.
-
-A switch that fails says why under the controls and leaves the brain you had exactly as it was: its checked rows, names, fills, searches, driver lines, open tab and sources, its slice and plane, the mode, the mirror, the flip, the angles, the alignment and the camera.
-
-### The tables
-
-- The panel has two tabs, **Glomeruli** and **Neuropils**; GRABE has Glomeruli only. **Source**, at the top of each tab, chooses which of the brain's atlases of that kind the table shows, with its citation under the menu: neuPrint, Schlegel (sensory) or Schlegel (projection) in the hemibrain, Benton 2025 in FAFB, neuPrint in the male CNS and Grabe 2015 in GRABE; for the neuropils, FlyWire in FAFB and neuPrint in the hemibrain and the male CNS. The menu and its citation sit in the same place in every brain, with one source or three, and the menu is as wide as its longest source. Choosing a source shows its table and never changes what is drawn; each source keeps its own checked rows, search and driver line.
-- **Sides**, at the right of the same row, chooses which sides of each row the boxes act on: **Both**, the default, **Left** or **Right**. With **Right**, ticking `Show` on DA1 shows the right DA1 and leaves the left as it was; `Label`, `Fill`, the header checkboxes and **Driver line** act on the chosen sides too. A neuropil across the midline is on either side. Each box shows its row on the chosen sides: ticked when every one is on, half ticked when some are, so a row whose right side alone is shown is half ticked under **Both** and ticked under **Right**. A row with none of the chosen sides, such as any row of Benton 2025's left lobe under **Right**, has its boxes disabled. Each tab has its own choice, and a failed brain switch keeps it.
-- Each row is one glomerulus or neuropil with every side the atlas has of it, and its boxes act on the sides **Sides** chooses, every side by default. Glomerulus tables have the columns `Show`, `Glomerulus`, `Label`, `Fill` and `Receptor`; neuropil tables have `Show`, `Neuropil`, `Label` and `Fill`. A missing value shows `—` everywhere.
-- A checked row is a drawn compartment, every chosen side of it, in 3D and in Slice view. A brain opens with its primary atlas checked and everything else unchecked, and hiding a layer with napari's eye unchecks its rows. `Label` writes the name on the slice, as the table has it and without the side, `DA1` or `MB_PED`, since where it is shows the side; `Fill` fills its outline; they work in Slice view only, so in 3D their boxes are disabled.
-- The `Show`, `Label` and `Fill` headers each have one checkbox for all the rows listed, which are the rows the search keeps: ticked when every listed row is ticked, half ticked when some are. Clicking it ticks every listed row, or clears them all when all are ticked; the rows the search hides keep theirs. To show only the glomeruli a search finds, clear the `Show` header first, then search and tick it; the `Invert` button is gone. Under the table the count says how many rows are shown, as `58 of 58 shown`, and while a search hides rows, how many it lists too: `5 listed · 58 of 58 shown`. The search looks in the name of each side, as published too, and in the receptor, sensillum, organ and the other details of the table's kind; clicking any other column header sorts by it.
-- **Driver line**, under the search, shows only the glomeruli that a GAL4 or QF2 line labels, on the chosen sides, from the `sensory_neuron_lines` and `projection_neuron_lines` columns of `registry/reference/glomerulus_ground_truth.csv`. `Orco-GAL4 & GH146-GAL4` shows the glomeruli that both lines label. The menu lists the lines only and reads `None` while no line is what is shown; changing a row by hand sets it back to `None`.
-- Selecting a row fills the details under the table: first **Sides**, `Left`, `Right`, `Left and right` or `Midline`; then for a glomerulus its standard name, receptor, co-receptor, sensory neuron, sensillum and organ, with **Open in Virtual Fly Brain**, and for a neuropil its full name and **Name from**, the source of that name. A value the sides do not share is given for each side, a line each, as `Left: …` and `Right: …`, and a doubt that only some sides have is written after those sides in **Sides**; the name's tooltip gives each side's reason. The details area keeps its size, with room for the longest value in the table, so selecting another row changes only the text.
-- Hovering in the canvas names what is under the cursor in the status bar, for example `VA3 (left) — Benton 2025` or `AL, antennal lobe (right) — Neuropils (FlyWire)`, on its mesh in 3D and inside its outline in Slice view, and the name stays there while the cursor rests, whichever layer is active. Away from every compartment the status bar shows napari's own words for the active layer. Hovering moves nothing in the panel. A click that does not drag opens the row's tab, chooses its source, selects the row and fills the details; a drag turns or pans the view.
-- Only the primary atlas is built when a brain opens. The others are read in the background and are built, and join napari's layer list, the first time their table is shown: chosen in **Source**, or, for the neuropils, when their tab opens. A neuropil set that reaches past the rest of its brain waits in the layer list as a hidden `Neuropils (FlyWire) · not loaded yet` layer, in the place its layer takes, so the sliders and the view are the same before and after it is built.
-
-### Layers
-
-Each layer is named by its atlas and what it draws: `Benton 2025 · 3D` for the meshes and `Benton 2025 · outlines` for the sections. A neuropil set also says where its data come from, as in `Neuropils (FlyWire) · 3D` and `Neuropils (neuPrint) · 3D`. The images are `Neuropil stain (from synapses)`, `Confocal image (Grabe 2015)` and, off by default, `Glomerulus label volume (Grabe 2015)`. Each mesh layer's colormap is named after its atlas, as `Benton 2025 colors`, with the brain first where another brain has an atlas of that name, as `Male CNS neuPrint colors`; a brain's neuropils use `Hemibrain neuropil colors` and the like. Both the mesh and the outline layer stay in the list in either mode; the one the mode cannot draw is switched off. lobemap's layers are locked against napari's drawing and transform tools, which would move a mesh off its image, and against deletion; a layer you add yourself is not. A layer you add is not mirrored, flipped or turned with the brain: a point placed on a turned section keeps its place while the brain turns back, so after **Reset rotation** it can lie off the glomerulus it was placed on.
-
-Each glomerulus keeps one color across the atlases of its brain, in 3D, on the slice and on its name.
-
-A brain's reference image, the virtual stain or the Grabe confocal image, is shown in grayscale whenever it has been fetched. In 3D a virtual stain first shows a coarser level of its pyramid and sharpens, usually within a second, once the finest level that fits one GPU texture has been read in the background; later visits to 3D show that level at once. `--show` turns on something that starts off, in the first brain only: an asset id (`lobemap view FAFB14 --show fafb_neuropil`), an atlas id (`lobemap view JRCFIB2018F --show schlegel2021_s12`) or a role (`--show neuropil`). A name the brain does not have, or an unknown space, is refused with one line before any window opens. `--ndisplay 2` opens in Slice view.
-
-### Speed while turned
-
-At 0° nothing of the rotation runs. Once turned, a repeat step of the slider in Slice view takes 2–4 ms in every brain. The first visit to an oblique plane takes 5–24 ms, and about 40 ms in the hemibrain at a compound angle. Setting an oblique angle takes 55–215 ms. While turned, the hemibrain peaks at about 2.3 GB of memory, against 1.15 GB unturned.
-
-## Documentation
-
-- [docs/data-sources.md](docs/data-sources.md) — where each dataset came from
-- [registry/data/README.md](registry/data/README.md) — how each data asset is rebuilt
-- [registry/sources/README.md](registry/sources/README.md) — the source data in the repository
-- [registry/reference/README.md](registry/reference/README.md) — the reference table and how it was built
-- [CHANGELOG.md](CHANGELOG.md) — what changed since 0.1.4, including what was removed
-
-lobemap 0.1, with its atlas selector, DoOR and Potter maps, and BANC and Virtual Fly Brain browsers, remains at tag [`v0.1.4`](https://github.com/gumadeiras/lobemap/tree/v0.1.4).
+[Data licenses](https://github.com/gumadeiras/lobemap/blob/main/docs/data.md#data-licenses) has the full table.
 
 ## Authors
 
