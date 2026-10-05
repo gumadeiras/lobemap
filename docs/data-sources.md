@@ -2,7 +2,7 @@
 
 This document records where each dataset lobemap ships came from, what is done to it before the viewer opens it, and how to obtain it. `registry/assets.toml` carries the same provenance per asset in machine-readable form, and is the authority if the two ever disagree.
 
-Nothing here is redistributed under a license of lobemap's own: the code's MIT License does not cover the data. Each dataset keeps the license and citation requirements of its own source; the "Data licenses" section of the [README](../README.md#data-licenses) lists them, and `registry/assets.toml` records each asset's license with the page that states it. **If you use an atlas, cite the paper it came from.**
+Nothing here is redistributed under a license of lobemap's own: the code's MIT License does not cover the data. Each dataset keeps the license and citation requirements of its own source; the "Data licenses" section of [Data](data.md#data-licenses) lists them, and `registry/assets.toml` records each asset's license with the page that states it. **If you use an atlas, cite the paper it came from.**
 
 Paper PDFs are not tracked, with one exception: Grabe 2015's atlas PDF, which is part of the published atlas rather than the paper. The papers' links are in [`paper-pdf-sources.csv`](../registry/sources/paper-pdf-sources.csv).
 
