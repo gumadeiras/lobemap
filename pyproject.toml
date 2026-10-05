@@ -1,6 +1,6 @@
 [project]
 name = "lobemap"
-version = "0.2.0"
+version = "0.2.1"
 description = "napari viewer for Drosophila antennal lobe glomerular atlases across coordinate spaces"
 readme = "README.md"
 # MIT, and the copyright in LICENSE is Gustavo Madeira Santana's. Both

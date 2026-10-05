@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-10-05
+
+### Changes
+
+- The README is short and in plain words, with screenshots and animations of the viewer; the full details moved to pages under `docs/`: the viewer's controls, the brains and atlases, the data, the commands, upgrading from 0.1, and development.
+
 ## 0.2.0 - 2026-10-05
 
 ### Features
