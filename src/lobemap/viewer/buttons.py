@@ -43,6 +43,7 @@ manager's, replaced by name.
 
 from __future__ import annotations
 
+import inspect
 import weakref
 
 from .axes import keep_scene_axes_off
@@ -106,7 +107,8 @@ OFF_ACTIONS = {
     "napari:toggle_grid": GRID_OFF,
 }
 
-#: Each lobemap viewer's own handlers of napari's actions; see `take_action`.
+#: Each lobemap viewer's own handlers of napari's actions, each behind a
+#: reference that does not keep its viewer alive; see `take_action`.
 _TAKEN: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
@@ -159,18 +161,26 @@ def take_action(viewer, name: str, handler) -> None:
     viewer; every key, button and menu napari binds to the action, now or
     later, reaches it. napari injects the viewer by the annotation, as it
     does into its own command.
+
+    A bound method -- the View dock's -- is held by a weak method. The dock
+    holds its viewer, and a value that holds its own weak key keeps it:
+    held strongly, it kept every closed window's viewer and scene for the
+    life of the process.
     """
     from napari.components import ViewerModel
     from napari.utils.action_manager import action_manager
 
-    _TAKEN.setdefault(viewer, {})[name] = handler
+    _TAKEN.setdefault(viewer, {})[name] = (
+        weakref.WeakMethod(handler) if inspect.ismethod(handler) else lambda: handler
+    )
     action = action_manager._actions[name]
     if getattr(action.command, "_lobemap", False):
         return
     napari_command = action.command
 
     def command(viewer: ViewerModel) -> None:
-        handler = _TAKEN.get(viewer, {}).get(name)
+        ref = _TAKEN.get(viewer, {}).get(name)
+        handler = ref() if ref is not None else None
         if handler is None:
             napari_command(viewer)
         else:
