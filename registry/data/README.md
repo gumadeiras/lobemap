@@ -42,7 +42,7 @@ https://cdn.elifesciences.org/articles/66018/elife-66018-supp12-v2.zip
 
 ## FAFB14 neuropils
 
-`lobemap build fafb_neuropil` fetches FlyWire's neuropil meshes through fafbseg, which needs FlyWire access, and bridges them from FlyWire space into FAFB14 as part of the build. The viewer labels the layer `fafb_neuropil [bridged]`.
+`lobemap build fafb_neuropil` fetches FlyWire's neuropil meshes through fafbseg, which needs FlyWire access, and bridges them from FlyWire space into FAFB14 as part of the build. The viewer names its layers `Neuropils (FlyWire) · 3D` and `Neuropils (FlyWire) · outlines`.
 
 ## Virtual neuropil stains
 

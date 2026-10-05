@@ -37,7 +37,7 @@ def test_mask_colors_equal_mesh_colors(registry):
     viewer = napari.Viewer(show=False)
     try:
         surfaces, _contours = build_scene(viewer, registry, "GRABE")
-        layer = viewer.layers["grabe2015_labels"]
+        layer = viewer.layers["Glomerulus label volume (Grabe 2015)"]
         surface = surfaces["grabe2015"]
         color_dict = layer.colormap.color_dict
 

@@ -66,7 +66,7 @@ def test_the_masks_are_hidden_but_the_atlas_is_not(registry):
     try:
         surfaces, _ = build_scene(viewer, registry, "GRABE")
         assert surfaces["grabe2015"].layer.visible
-        assert not viewer.layers["grabe2015_labels"].visible
+        assert not viewer.layers["Glomerulus label volume (Grabe 2015)"].visible
     finally:
         viewer.close()
 
@@ -79,7 +79,7 @@ def test_labels_become_a_napari_labels_layer(registry):
     viewer = napari.Viewer(ndisplay=3, show=False)
     try:
         build_scene(viewer, registry, "GRABE")
-        layer = viewer.layers["grabe2015_labels"]
+        layer = viewer.layers["Glomerulus label volume (Grabe 2015)"]
         assert type(layer).__name__ == "Labels"
         assert layer.metadata["lobemap"]["kind"] == "labels"
     finally:

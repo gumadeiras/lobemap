@@ -12,9 +12,9 @@ So such a part holds its place from the start with a stand-in: a hidden
 Surface layer of two vertices, the corners of the part's mesh, which
 becomes the part's mesh layer when it is built -- taken over rather than
 replaced, since napari charges a layer's removal a full garbage collection,
-50-70 ms. It is named for the part, and switching it on in the layer list
-builds the part and shows it, as the part's own layer did when every part
-was built at open.
+50-70 ms. It is named for the part, "Neuropils (FlyWire) · not loaded
+yet", and switching it on in the layer list builds the part and shows it,
+as the part's own layer did when every part was built at open.
 
 The meshes are read by a thread started before the rest of the scene is
 built, in two passes. The first reads each part's corners (`mesh_bounds`),
@@ -43,10 +43,11 @@ import threading
 import numpy as np
 
 from . import napari_private
+from .parts import part_title, surface_style
 from .view import reflect_vertices
 
-#: What a stand-in is called: its part's name, and that it is not built.
-STANDIN_NAME = "{name} (not opened)"
+#: What a stand-in is called: its part's plain title, and that it is not built.
+STANDIN_NAME = "{title} · not loaded yet"
 
 
 def mesh_bounds(registry, part) -> tuple[np.ndarray, np.ndarray]:
@@ -130,8 +131,9 @@ class Deferred:
         """Add a stand-in for each part reaching outside the layers `built`.
 
         A part inside them moves nothing when it is built, and gets none.
-        Added under every layer, and the layer selection is left as it was.
-        Waits for the corners, and not for the meshes.
+        Added on top, for `scene.stack` to put in the place of the layer it
+        becomes; the layer selection is left as it was. Waits for the
+        corners, and not for the meshes.
         """
         self._bounded.wait()
         layers = self.viewer.layers
@@ -142,10 +144,10 @@ class Deferred:
                 continue
             layer = self.viewer.add_surface(
                 (np.stack([lo, hi]), np.zeros((0, 3), dtype=int)),
-                name=STANDIN_NAME.format(name=name), visible=False, shading="none",
+                name=STANDIN_NAME.format(title=part_title(self.registry, self.parts[name])),
+                visible=False, shading="none", **surface_style(self.parts[name]),
             )
             layer.metadata["lobemap"] = {"kind": "stand-in", "part": name}
-            layers.move(layers.index(layer), 0)
             self._eyes[name] = lambda event, name=name: self._on_eye(name)
             layer.events.visible.connect(self._eyes[name])
             self.standins[name] = layer
@@ -175,6 +177,19 @@ class Deferred:
         """The lowest and highest vertex of a part's mesh, per axis, or None if
         it could not be read. After `hold`."""
         return self._bounds.get(name)
+
+    def vertices(self, name: str):
+        """A part's mesh vertices if the thread has read its mesh, else None.
+
+        Without waiting: `bounds` stands in for a mesh not read yet.
+        """
+        done, part = self._read.get(name), self.parts.get(name)
+        if done is None or part is None or not done.is_set():
+            return None
+        try:
+            return self.registry.mesh(part.asset.id).vertices
+        except Exception:                   # noqa: BLE001 - its tab says why
+            return None
 
     def wait(self, name: str) -> None:
         """Wait until the thread is done with the mesh of `name`.

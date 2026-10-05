@@ -10,6 +10,7 @@ built whole by `build_scene`, the way every scene used to open.
 from __future__ import annotations
 
 import time
+import weakref
 
 import numpy as np
 import pytest
@@ -17,7 +18,9 @@ from viewer_harness import (
     assert_renders_loops,
     assert_rows_match_drawing,
     checked,
+    clear_all,
     drawn,
+    every_index,
     hover,
     launched,
     layer_names,
@@ -26,11 +29,11 @@ from viewer_harness import (
     session,
     shaded_normals,
     signed_volume,
+    stand_in_name,
     switch_to,
     switcher,
+    tick_all,
 )
-
-from lobemap.viewer.deferred import STANDIN_NAME
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
@@ -58,18 +61,14 @@ def _stained(*values, space, also=()):
     return pytest.param(*values, marks=[pytest.mark.requires_data(*wanted)] if wanted else [])
 
 
-def _buttons(tab):
-    from qtpy.QtWidgets import QPushButton
-
-    return {b.text(): b for b in tab.findChildren(QPushButton)}
-
-
 def _open_tab(panel, name):
-    """Click the tab, as a user does."""
-    index = next(i for i in range(panel.count()) if panel.tabText(i) == name[:20])
-    panel.setCurrentIndex(index)
+    """Open the tab that lists the part and choose it in the tab's source
+    menu, as a user does; what the tab then shows."""
+    page = panel.page_of(name)
+    panel.setCurrentWidget(page)
+    page.menu.setCurrentIndex(page.menu.findData(name))
     pump()
-    return panel.currentWidget()
+    return page.stack.currentWidget()
 
 
 @pytest.mark.parametrize(("space", "name"), DEFERRED)
@@ -89,20 +88,20 @@ def test_a_deferred_part_is_built_when_its_tab_opens(monkeypatch, space, name, n
         after = layer_names(viewer)
         assert set(after) - set(before) == {tab.surface.layer.name,
                                             sess.contours[name].layer.name}
-        assert set(before) - set(after) <= {STANDIN_NAME.format(name=name)}
+        assert set(before) - set(after) <= {stand_in_name(sess, name)}
         n = tab.table.rowCount()
         assert checked(tab) == set()
-        assert tab.count.text() == f"0 / {n} shown"
+        assert tab.count.text() == f"0 of {n} shown"
         assert drawn(tab.surface, sess.contours[name]) == set()
         assert not tab.surface.layer.visible
         assert not sess.contours[name].layer.visible
 
-        _buttons(tab)["Show all"].click()
+        tick_all(tab)
         pump(300)
-        assert checked(tab) == set(range(n))
+        assert checked(tab) == set(every_index(tab))
         assert_rows_match_drawing(sess)
         if ndisplay == "3":
-            assert drawn(tab.surface) == set(range(n))
+            assert drawn(tab.surface) == set(every_index(tab))
         else:
             assert drawn(tab.surface, sess.contours[name]), "no outline on the plane"
 
@@ -218,14 +217,15 @@ def test_a_switch_moves_the_sliders_once_the_scene_it_replaces_is_gone(monkeypat
     real, moves = scene.center_sliders, []
 
     def center_sliders(viewer, *args, **kwargs):
-        moves.append(({layer.name for layer in viewer.layers}, viewer.dims.ndisplay))
+        moves.append((list(viewer.layers), viewer.dims.ndisplay))
         return real(viewer, *args, **kwargs)
 
     monkeypatch.setattr(scene, "center_sliders", center_sliders)
     with launched(monkeypatch, "view", "FAFB14", "--ndisplay", ndisplay) as (code, viewer):
         assert code == 0
         assert len(moves) == 1, "the open put the sliders where they belong"
-        old = set(layer_names(viewer))
+        # By identity: both scenes have a "Neuropil stain (from synapses)".
+        old = weakref.WeakSet(viewer.layers)
         switch_to(viewer, "JRCFIB2018F")
         assert session(viewer).space == "JRCFIB2018F"
         if ndisplay == "3":
@@ -233,8 +233,9 @@ def test_a_switch_moves_the_sliders_once_the_scene_it_replaces_is_gone(monkeypat
             viewer.dims.ndisplay = 2
             pump()
         assert len(moves) == 2
-        names, mode = moves[1]
-        assert not names & old, "the sliders moved beside the scene being replaced"
+        layers, mode = moves[1]
+        assert not any(layer in old for layer in layers), (
+            "the sliders moved beside the scene being replaced")
         assert mode == 2
         viewer.dims.ndisplay = 5 - int(ndisplay)
         pump()
@@ -260,7 +261,7 @@ def test_building_a_deferred_part_moves_neither_the_sliders_nor_the_plane(
         camera = (viewer.scene.camera.zoom, viewer.scene.camera.center)
 
         tab = _open_tab(sess.panel, name)
-        _buttons(tab)["Show all"].click()
+        tick_all(tab)
         pump(300)
         assert name in sess.surfaces
         assert viewer.dims.range == sliders
@@ -274,15 +275,15 @@ def test_switching_a_stand_in_on_builds_its_part_and_shows_it(monkeypatch):
     with launched(monkeypatch, "view", "FAFB14", "--ndisplay", "2") as (code, viewer):
         assert code == 0
         sess = session(viewer)
-        stand_in = viewer.layers[STANDIN_NAME.format(name="fafb_neuropil")]
+        stand_in = viewer.layers[stand_in_name(sess, "fafb_neuropil")]
         assert not stand_in.visible
         stand_in.visible = True
         pump(300)
         tab = sess.panel.tabs["fafb_neuropil"]
         # It became the part's mesh layer: no stand-in is left.
         assert tab.surface.layer is stand_in
-        assert not [layer for layer in viewer.layers if "(not opened)" in layer.name]
-        assert checked(tab) == set(range(tab.table.rowCount()))
+        assert not [layer for layer in viewer.layers if layer.name.endswith("not loaded yet")]
+        assert checked(tab) == set(every_index(tab))
         assert drawn(tab.surface, sess.contours["fafb_neuropil"])
         assert_rows_match_drawing(sess)
 
@@ -294,7 +295,7 @@ def test_a_stand_in_deleted_by_hand_leaves_its_tab_working(monkeypatch, space, n
     with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
         assert code == 0
         sess = session(viewer)
-        viewer.layers.remove(viewer.layers[STANDIN_NAME.format(name=name)])
+        viewer.layers.remove(viewer.layers[stand_in_name(sess, name)])
         pump()
 
         tab = _open_tab(sess.panel, name)
@@ -302,9 +303,9 @@ def test_a_stand_in_deleted_by_hand_leaves_its_tab_working(monkeypatch, space, n
         assert name in sess.surfaces and name not in sess.pending
         assert tab.surface.layer in viewer.layers
         assert sess.contours[name].layer in viewer.layers
-        _buttons(tab)["Show all"].click()
+        tick_all(tab)
         pump(300)
-        assert checked(tab) == set(range(tab.table.rowCount()))
+        assert checked(tab) == set(every_index(tab))
         assert drawn(tab.surface, sess.contours[name]), "no outline on the plane"
         assert_renders_loops(sess.contours[name])
         assert_rows_match_drawing(sess)
@@ -338,7 +339,7 @@ def test_a_part_built_under_the_mirror_is_drawn_mirrored(monkeypatch, space, nam
         assert hi == pytest.approx(2 * center - x.min(), abs=1e-4)
 
         # And its outlines are drawn where that reflection puts them.
-        _buttons(tab)["Show all"].click()
+        tick_all(tab)
         pump(300)
         assert drawn(surface, contour), "no outline on the plane"
         assert_renders_loops(contour)
@@ -419,14 +420,15 @@ def test_the_mirror_plane_is_where_it_was(registry, space):
 def test_a_deferred_shell_is_picked_once_built(monkeypatch):
     with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
         sess = session(viewer)
-        _buttons(sess.panel.tabs["benton2025"])["Show none"].click()
+        clear_all(sess.panel.tabs["benton2025"])
         tab = _open_tab(sess.panel, "fafb_neuropil")
         names = tab.surface.meshset.names
         index = next(i for i, n in enumerate(names) if n.startswith("AL"))
         tab.select([index])
         pump(300)
-        assert hover(viewer, tab.surface.meshset.centroid(index)).startswith(
-            "fafb_neuropil:")
+        said = hover(viewer, tab.surface.meshset.centroid(index))
+        assert said.startswith("AL, antennal lobe (") and said.endswith(
+            ") — Neuropils (FlyWire)"), said
 
 
 def test_a_deferred_part_that_cannot_be_read_says_so_in_its_tab(monkeypatch):
@@ -447,7 +449,7 @@ def test_a_deferred_part_that_cannot_be_read_says_so_in_its_tab(monkeypatch):
         page = _open_tab(sess.panel, "fafb_neuropil")
         from qtpy.QtWidgets import QLabel
 
-        assert any("could not be loaded" in label.text()
+        assert any(label.text() == "FlyWire could not be opened: its data could not be read"
                    for label in page.findChildren(QLabel))
         assert layer_names(viewer) == before
         assert "fafb_neuropil" in sess.pending
@@ -596,7 +598,8 @@ def test_a_switch_before_the_fine_level_arrives_leaves_nothing(monkeypatch):
         # Long enough for the read to finish; its result is dropped.
         pump(3000)
         assert fine.array is None
-        assert all(name.startswith(("grabe", "Grabe")) for name in layer_names(viewer))
+        # Only the open scene's layers are left.
+        assert set(viewer.layers) == set(session(viewer).all_layers()), layer_names(viewer)
         assert_rows_match_drawing(session(viewer))
 
 
@@ -727,7 +730,7 @@ def test_a_space_opens_without_its_deferred_meshes_and_a_tab_waits_for_one(monke
         assert [(r["stem"], r["ended"]) for r in loads if r["stem"] == name] == [
             (name, False)], "the open waited for the mesh"
         # Its corners were read: it holds its place.
-        stand_in = viewer.layers[STANDIN_NAME.format(name=name)]
+        stand_in = viewer.layers[stand_in_name(sess, name)]
 
         gate.open_soon()
         tab = _open_tab(sess.panel, name)
@@ -735,14 +738,15 @@ def test_a_space_opens_without_its_deferred_meshes_and_a_tab_waits_for_one(monke
         assert tab.surface.layer is stand_in
         assert [(r["stem"], r["thread"]) for r in loads if r["stem"] == name] == [
             (name, "lobemap-meshes")]
-        _buttons(tab)["Show all"].click()
+        tick_all(tab)
         pump(300)
         assert drawn(tab.surface, sess.contours[name]), "no outline on the plane"
         assert_rows_match_drawing(sess)
 
 
 @pytest.mark.parametrize("reading", ["corners", "mesh"])
-def test_a_switch_that_fails_while_the_thread_reads_leaves_nothing(monkeypatch, reading):
+def test_a_switch_that_fails_while_the_thread_reads_leaves_nothing(monkeypatch, capfd,
+                                                                   reading):
     """Its thread reads no further file, and has ended once the switch is undone.
 
     It fails before the stand-ins, while the corners are read, or after them,
@@ -792,8 +796,10 @@ def test_a_switch_that_fails_while_the_thread_reads_leaves_nothing(monkeypatch, 
         kept = session(viewer)
         before = layer_names(viewer)
         assert _wait(lambda: not _reading())
+        capfd.readouterr()
         switch_to(viewer, space)
-        assert want in switcher(viewer).status.text()
+        assert switcher(viewer).status.text().startswith("Could not open ")
+        assert want in capfd.readouterr().err
         assert not _reading(), "the failed scene's thread outlived it"
         assert session(viewer) is kept
         assert layer_names(viewer) == before

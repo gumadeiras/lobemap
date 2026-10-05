@@ -27,17 +27,19 @@ pytest.importorskip("napari")
 def _snapshot(viewer):
     return {
         "layers": layer_names(viewer),
-        "docks": len(docks(viewer, "Compartments")),
+        "docks": len(docks(viewer, "Brain regions")),
         "handlers": handler_counts(viewer),
         "space": session(viewer).space,
     }
 
 
-def _assert_intact(viewer, before, want: str) -> None:
+def _assert_intact(viewer, before, title: str) -> None:
     after = _snapshot(viewer)
     assert after == before, {k: (before[k], after[k]) for k in before
                              if before[k] != after[k]}
-    assert want in switcher(viewer).status.text()
+    status = switcher(viewer).status.text()
+    assert status.startswith(f"Could not open {title}: "), status
+    assert status.endswith(". Your view is unchanged."), status
     # And the old scene is still the one being driven: a mode round trip
     # neither re-adds the failed scene's layers nor loses the kept ones.
     viewer.dims.ndisplay = 2
@@ -47,7 +49,7 @@ def _assert_intact(viewer, before, want: str) -> None:
 
 
 @pytest.mark.requires_data("hemibrain_stain")
-def test_a_corrupt_asset_leaves_the_previous_space_intact(monkeypatch, tmp_path):
+def test_a_corrupt_asset_leaves_the_previous_space_intact(monkeypatch, capfd, tmp_path):
     """The hemibrain stain fails to open after its neuropil shell is built."""
     root = tmp_path / "data"
     root.mkdir()
@@ -62,28 +64,34 @@ def test_a_corrupt_asset_leaves_the_previous_space_intact(monkeypatch, tmp_path)
     ):
         assert code == 0
         before = _snapshot(viewer)
+        capfd.readouterr()
         switch_to(viewer, "JRCFIB2018F")
-        _assert_intact(viewer, before, "JRCFIB2018F failed")
+        _assert_intact(viewer, before, "Hemibrain (female, EM)")
+        assert "could not open JRCFIB2018F" in capfd.readouterr().err
 
 
-def test_a_failure_after_the_hooks_are_installed_leaves_none(monkeypatch):
+def test_a_failure_after_the_hooks_are_installed_leaves_none(monkeypatch, capfd):
     """Contour and picking hooks exist by the time the panel is docked."""
+    from lobemap.viewer import app
+
     with launched(monkeypatch, "view", "GRABE") as (code, viewer):
         assert code == 0
         before = _snapshot(viewer)
-        real = viewer.window.add_dock_widget
+        real = app.add_dock
         failures = []
 
-        def refuse_once(widget, *args, **kwargs):
-            if kwargs.get("name") == "Compartments" and not failures:
+        def refuse_once(viewer, widget, name, *args, **kwargs):
+            if name == app.PANEL_TITLE and not failures:
                 failures.append(True)
                 raise RuntimeError("the dock refused")
-            return real(widget, *args, **kwargs)
+            return real(viewer, widget, name, *args, **kwargs)
 
-        monkeypatch.setattr(viewer.window, "add_dock_widget", refuse_once)
+        monkeypatch.setattr(app, "add_dock", refuse_once)
+        capfd.readouterr()
         switch_to(viewer, "FAFB14")
         assert failures, "the injected failure was never reached"
-        _assert_intact(viewer, before, "the dock refused")
+        _assert_intact(viewer, before, "FAFB (female, EM)")
+        assert "the dock refused" in capfd.readouterr().err
 
 
 def test_handlers_stay_flat_across_repeated_switches(monkeypatch):
@@ -101,16 +109,20 @@ def test_handlers_stay_flat_across_repeated_switches(monkeypatch):
             seen.append(handler_counts(viewer))
         assert seen[-1] == first, (first, seen[-1])
         assert all(counts == seen[0] for counts in seen), seen
-        assert len(docks(viewer, "Compartments")) == 1
+        assert len(docks(viewer, "Brain regions")) == 1
 
 
-def test_a_bridged_asset_says_so_in_its_layer_name(monkeypatch):
-    """`_tag` existed and was never called, so the tag went missing."""
+def test_layers_are_named_by_title_and_say_whose_they_are(monkeypatch):
+    """A layer's name is its part's title and what it draws; a neuropil
+    set's says where its data come from. No id, and no tag in brackets."""
     with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
         assert code == 0
+        names = layer_names(viewer)
+        assert "Neuropils (FlyWire) · not loaded yet" in names, names
         session(viewer).panel.tab("fafb_neuropil")   # built when its tab opens
         names = layer_names(viewer)
-        assert "fafb_neuropil [bridged]" in names, names
-        assert "fafb_neuropil [bridged] [contours]" in names, names
-        # Native atlases are not tagged.
-        assert "Benton 2025 (Dataset EV2)" in names, names
+        assert names == sorted([
+            "Benton 2025 · 3D", "Benton 2025 · outlines",
+            "Neuropils (FlyWire) · 3D", "Neuropils (FlyWire) · outlines",
+            *(["Neuropil stain (from synapses)"] if session(viewer).images else []),
+        ]), names

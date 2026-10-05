@@ -2,7 +2,8 @@
 
 napari has no public way to draw a visual under a layer, to keep a slice
 step from recomputing every layer's extent, to recolor its axis indicator
-or add a second one, or to reach its Qt window; bermuda, vispy, zarr and
+or add a second one, to reach its Qt window, or to arrange its own buttons
+and docks; bermuda, vispy, zarr and
 navis are reached below their documented surface in places too. Most of
 these are reached through `getattr` defaults or `contextlib.suppress`, so
 when one moves the viewer misdraws, slows down or drops a control without
@@ -36,6 +37,19 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from napari_chrome_checks import (  # noqa: F401 - collected here, with this module's fixtures
+    test_the_buttons_popups_and_keys_lobemap_keeps_in_step,
+    test_the_napari_chrome_lobemap_tidies,
+    test_the_window_and_canvas_lobemap_reaches,
+)
+from napari_view_checks import CHECKED as VIEW_CHECKED
+from napari_view_checks import (  # noqa: F401 - collected here, as above
+    test_napari_actions_lobemap_takes_over,
+    test_the_camera_popups_sync_box,
+    test_the_fits_and_the_depth_napari_makes,
+    test_the_light_napari_gives_a_surface,
+    test_the_status_napari_reckons_for_the_cursor,
+)
 
 napari = pytest.importorskip("napari")
 
@@ -66,6 +80,18 @@ CHECKED = {
     "_layer_node": "test_a_volume_takes_its_voxels_at_its_next_draw",
     "_volume_node": "test_a_volume_takes_its_voxels_at_its_next_draw",
     "_prepare_draw": "test_a_volume_takes_its_voxels_at_its_next_draw",
+    "napari._qt.widgets.qt_viewer_dock_widget": "test_the_napari_chrome_lobemap_tidies",
+    "_extent_world_augmented": "test_a_turned_view_rewrites_the_extent_napari_reads",
+    "_clean_cache": "test_a_turned_view_rewrites_the_extent_napari_reads",
+    "_on_layers_change": "test_a_turned_view_rewrites_the_extent_napari_reads",
+    "_extent_augmented": "test_a_turned_view_rewrites_the_extent_napari_reads",
+    "_update_draw": "test_a_turned_image_picks_its_level_as_napari_draws",
+    "_viewbox_corners_in_world": "test_a_turned_image_picks_its_level_as_napari_draws",
+    "_current_viewbox_size": "test_a_turned_image_picks_its_level_as_napari_draws",
+    "_data_level": "test_a_turned_image_picks_its_level_as_napari_draws",
+    "_slicing_state": "test_a_turned_image_picks_its_level_as_napari_draws",
+    "_resize_axis_labels": "test_a_slider_label_is_sized_for_the_text_it_is_given",
+    **VIEW_CHECKED,
 }
 
 #: lobemap's own private names, reached from another of its modules.
@@ -592,24 +618,6 @@ def test_the_axis_indicator_is_recolored_and_gets_a_second_triad(opened):
          "Axes.set_data and Axes.text on a second Axes", used)
 
 
-def test_the_window_and_canvas_lobemap_reaches(opened):
-    from qtpy.QtWidgets import QMainWindow
-
-    used = "viewer.switcher.SpaceSwitcher docking and viewer.view.maximize"
-    with reaching("napari Window._qt_window", used):
-        window = opened.viewer.window._qt_window
-    need(isinstance(window, QMainWindow)
-         and all(callable(getattr(window, name, None))
-                 for name in ("splitDockWidget", "resizeDocks", "showNormal", "showMaximized")),
-         "Window._qt_window, a QMainWindow", used)
-    used = "viewer.view.install_initial_fit"
-    with reaching("viewer.window._qt_viewer.canvas.events", used):
-        events = opened.viewer.window._qt_viewer.canvas.events
-    need(all(hasattr(events, name) for name in
-             ("resize", "draw", "mouse_press", "mouse_wheel", "key_press")),
-         "QtViewer.canvas.events resize, draw, mouse_press, mouse_wheel and key_press", used)
-
-
 def test_the_prefetch_finds_the_planes_a_step_lands_on(viewer):
     """`Dims.set_current_step` puts the point at start + k * step, and the copied
     transform maps it as `Layer.world_to_data` does, to the last bit: the keys
@@ -659,3 +667,123 @@ def test_navis_says_whether_cmtk_is_installed():
     cmtk = pytest.importorskip("navis.transforms.cmtk")
     need(hasattr(cmtk, "_cmtkbin"), "navis.transforms.cmtk._cmtkbin",
          "core.spaces.cmtk_available")
+
+
+def test_a_turned_view_rewrites_the_extent_napari_reads(viewer):
+    """`hook_extent` swaps the layer list's class for one whose two cached
+    extents go through lobemap; napari must read its slider ranges from
+    `extent` and fit from `_extent_world_augmented`."""
+    from functools import cached_property
+
+    from napari.components.layerlist import LayerList
+
+    from lobemap.viewer.napari_private import augmented_extent, hook_extent
+
+    used = "viewer.turned.TurnedView, through napari_private.hook_extent"
+    for name in ("extent", "_extent_world_augmented"):
+        need(isinstance(LayerList.__dict__.get(name), cached_property),
+             f"LayerList.{name}, a functools.cached_property", used)
+    need(callable(getattr(viewer.layers, "_clean_cache", None)), "LayerList._clean_cache",
+         used)
+    need(callable(getattr(viewer, "_on_layers_change", None)),
+         "ViewerModel._on_layers_change", used)
+    layer = viewer.add_image(np.zeros((10, 20, 30), np.uint8), scale=(2.0, 1.0, 0.5))
+    with reaching("Layer._extent_augmented", used):
+        extent = augmented_extent(layer)
+    need(np.allclose(extent.world, [[-1.0, -0.5, -0.25], [19.0, 19.5, 14.75]]),
+         "Layer._extent_augmented, the world extent with the pixels' size", used)
+    shifted = np.array([[100.0, 0.0, 0.0], [140.0, 50.0, 60.0]])
+    hook_extent(viewer, ranges=lambda world, step: (shifted, step * 0 + 0.25),
+                fit=lambda world: shifted)
+    need([tuple(r) for r in viewer.dims.range]
+         == [(100.0, 140.0, 0.25), (0.0, 50.0, 0.25), (0.0, 60.0, 0.25)],
+         "viewer._on_layers_change setting dims.range from layers.extent", used)
+    viewer.reset_view()
+    need(np.allclose(viewer.scene.camera.center[-2:], [25.0, 30.0]),
+         "ViewerModel.fit_to_view reading layers._extent_world_augmented", used)
+    hook_extent(viewer)
+    need(type(viewer.layers) is LayerList
+         and tuple(viewer.dims.range[0]) == (0.0, 18.0, 2.0),
+         "LayerList restored with its own extent", used)
+
+
+def test_a_turned_image_picks_its_level_as_napari_draws(viewer):
+    """`update_draw` asks a layer for its level and region with the arguments
+    napari's canvas draw gives it, and `level_as_unturned` wraps that call."""
+    from lobemap.viewer.napari_private import level_as_unturned, update_draw
+
+    used = "viewer.turned.TurnedView, through napari_private.update_draw"
+    canvas = viewer.window._qt_viewer.canvas
+    with reaching("VispyCanvas._viewbox_corners_in_world / _current_viewbox_size", used):
+        corners = np.asarray(canvas._viewbox_corners_in_world)
+        size = tuple(canvas._current_viewbox_size)
+    need(corners.shape[0] == 2 and len(size) == 2,
+         "VispyCanvas._viewbox_corners_in_world (2, ndim) and _current_viewbox_size", used)
+    need({"scale_factor", "corner_pixels_displayed", "shape_threshold"}
+         <= set(inspect.signature(napari.layers.Image._update_draw).parameters),
+         "Layer._update_draw(scale_factor=, corner_pixels_displayed=, shape_threshold=)",
+         used)
+    levels = [np.zeros((4, n, n), np.uint8) for n in (4096, 2048, 1024, 512, 256, 128)]
+    layer = viewer.add_image(levels, multiscale=True)
+    viewer.reset_view()
+    with reaching("Layer._update_draw", used):
+        update_draw(viewer, layer)
+    plain = layer.data_level
+    need(plain < len(levels) - 1 and np.any(layer.corner_pixels),
+         "Layer._update_draw setting data_level and corner_pixels", used)
+    from lobemap.viewer.napari_private import level_of, put_level, slice_now
+
+    kept = level_of(layer)
+    layer.data_level = len(levels) - 1
+    with reaching("Image._data_level", used):
+        put_level(layer, kept)
+        slice_now(viewer, layer)
+    need(callable(getattr(getattr(layer, "_slicing_state", None),
+                          "set_slice_input_from_dims", None)),
+         "Layer._slicing_state.set_slice_input_from_dims(dims, force)", used)
+    need(layer.data_level == plain and np.array_equal(layer.corner_pixels, kept[1])
+         and np.asarray(layer._slice.image.raw).shape[-1]
+         == kept[1][1, 2] - kept[1][0, 2] + 1,
+         "Image._data_level and corner_pixels read by the next slice", used)
+    calls = []
+    original = type(layer)._update_draw
+
+    def spy(self, *args, **kwargs):
+        calls.append(1)
+        return original(self, *args, **kwargs)
+
+    type(layer)._update_draw = spy
+    try:
+        level_as_unturned(layer, [[0.0, -1.0], [1.0, 0.0]])
+        update_draw(viewer, layer)
+    finally:
+        type(layer)._update_draw = original
+        level_as_unturned(layer, None)
+    need(len(calls) == 1 and "_update_draw" not in layer.__dict__,
+         "an instance _update_draw found before the class's", used)
+
+
+def test_a_slider_label_is_sized_for_the_text_it_is_given(viewer):
+    """napari leaves a slider's label at its width when `dims.axis_labels` is
+    set, and `fit_axis_labels` has its dims widget size the labels for their
+    text, as it does when one is edited."""
+    from qtpy.QtWidgets import QApplication
+
+    from lobemap.viewer.napari_private import fit_axis_labels
+
+    used = "viewer.axes.apply_axis_mode, through napari_private.fit_axis_labels"
+    viewer.add_image(np.zeros((6, 8, 10), np.uint8))
+    QApplication.processEvents()
+    with reaching("QtViewer.dims.slider_widgets[i].axis_label", used):
+        label = viewer.window._qt_viewer.dims.slider_widgets[0].axis_label
+    before = label.maximumWidth()
+    viewer.dims.axis_labels = ("depth", "y", "x")
+    QApplication.processEvents()
+    need(label.maximumWidth() == before, "a label napari does not size when set",
+         used)
+    with reaching("QtDims._resize_axis_labels", used):
+        fit_axis_labels(viewer)
+    # Wider for the longer text, and fixed; how wide a laid-out window lets
+    # it be is `test_turned_spaces.py`'s to measure.
+    need(label.minimumWidth() == label.maximumWidth() > before,
+         "QtDims._resize_axis_labels fixing each label's width for its text", used)

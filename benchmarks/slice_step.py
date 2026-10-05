@@ -61,6 +61,16 @@ first sweep starts right after that, while it runs, and each result says
 whether it still was; `--wait-prefetch` starts the sweeps once it has
 finished and reports how long it took.
 
+`--canvas W H` sizes the hidden canvas, as a shown window would be, and
+fits the view to it; napari picks pyramid levels for the canvas it has, so
+the levels read depend on it. `--rotate SPIN TILT TURN` turns the scene
+once it is open (`SceneSession.set_rotation`), `--aligned` cuts 2D
+along the brain's own planes (`set_aligned`), and `--flip` shows the
+picture upside down (`set_flip`); each is timed. The planes
+are then inside the primary atlas's extent along the turned line of sight,
+and each worker also times `drag`, sixteen consecutive steps from the
+middle plane, as a slider dragged is.
+
 The machine is rarely quiet, so use `--repeat` and read the spread, not one
 number. `--no-bermuda` hides napari's compiled triangulation backend, which
 reproduces an environment without it.
@@ -160,13 +170,19 @@ def _wait_loaded(viewer, app, timeout_s: float = 10.0) -> None:
         app.processEvents()
 
 
-def _sweeps(viewer, axis, ks, app, shapes_of=None) -> dict:
-    """Two timed passes over the same planes."""
+def _sweeps(viewer, axis, ks, app, shapes_of=None, drag=False) -> dict:
+    """Two timed passes over the same planes, and with `drag` a third over
+    consecutive planes from the middle one."""
     out = {}
     images = _images(viewer)
-    for name in ("first", "repeat"):
+    plans = {"first": ks, "repeat": ks}
+    if drag and ks:
+        middle = ks[len(ks) // 2]
+        plans["drag"] = [k for k in range(middle + 1, middle + 17)
+                         if k < int(viewer.dims.nsteps[axis])]
+    for name, plan in plans.items():
         times, loaded, ui, shapes, levels = [], [], [], [], set()
-        for k in ks:
+        for k in plan:
             ready0 = _READY_MS[0]
             t0 = time.perf_counter()
             viewer.dims.set_current_step(axis, k)
@@ -232,6 +248,30 @@ def _backend() -> dict:
 # -- workers -------------------------------------------------------------
 
 
+#: The canvas size and the turn applied once a scene is open; see `--canvas`
+#: and `--rotate`.
+_CANVAS: list = [None]
+_ROTATE: list = [None]
+_ALIGNED: list = [False]
+_FLIP: list = [False]
+
+
+def _size_canvas(viewer, app) -> None:
+    """Give the hidden canvas `--canvas`'s size, as a shown window would have."""
+    from lobemap.viewer.view import fit_view
+
+    if _CANVAS[0] is None:
+        return
+    scene = viewer.window._qt_viewer.canvas._scene_canvas
+    scene.size = tuple(_CANVAS[0])
+    _settle(app)
+    scene.events.resize(size=scene.size)
+    fit_view(viewer)
+    _settle(app)
+    viewer.window._qt_viewer.canvas.on_draw()
+    _settle(app)
+
+
 def _open(space: str, ndisplay: int, registry_root, data_root, asynchronous=False):
     import napari
 
@@ -253,15 +293,49 @@ def _open(space: str, ndisplay: int, registry_root, data_root, asynchronous=Fals
     session = load_space(viewer, registry, space)
     load_s = time.perf_counter() - t0
     _settle(app)
-    return viewer, registry, session, app, {"registry_s": registry_s, "load_s": load_s}
+    _size_canvas(viewer, app)
+    out = {"registry_s": registry_s, "load_s": load_s}
+    if _ROTATE[0] is not None or _ALIGNED[0]:
+        t0 = time.perf_counter()
+        if _ALIGNED[0]:
+            session.set_aligned(True)
+        if _ROTATE[0] is not None:
+            session.set_rotation(*_ROTATE[0])
+        out["rotate_ms"] = (time.perf_counter() - t0) * 1e3
+        out["rotate"] = list(_ROTATE[0] or (0.0, 0.0, 0.0))
+        out["aligned"] = _ALIGNED[0]
+        _settle(app)
+        viewer.window._qt_viewer.canvas.on_draw()
+        _settle(app)
+    if _FLIP[0]:
+        # Not drawn after: a hidden canvas's draw picks the pyramid levels,
+        # and the flip leaves them as they are (`tests/test_flip_spaces.py`).
+        t0 = time.perf_counter()
+        session.set_flip(True)
+        out["flip_ms"] = (time.perf_counter() - t0) * 1e3
+        _settle(app)
+    if _CANVAS[0] is not None:
+        out["canvas"] = list(_CANVAS[0])
+    return viewer, registry, session, app, out
 
 
 def _primary_planes(viewer, registry, session, space, n):
+    import numpy as np
+
     primary = registry.primary_atlas(space).id
     surface = session.surfaces[primary]
     axis = int(viewer.dims.order[0])
-    extent = surface.layer.extent.world
-    lo, hi = float(extent[0][axis]), float(extent[1][axis])
+    contour = session.contours[primary]
+    frame = getattr(contour, "frame", None)
+    if frame is None:
+        extent = surface.layer.extent.world
+        lo, hi = float(extent[0][axis]), float(extent[1][axis])
+    else:
+        # Turned across the grid: the atlas's extent along the turned line
+        # of sight, through the contour layer's frame and transform.
+        q = frame.apply(surface.meshset.vertices[::5])
+        world = np.array([contour.layer.data_to_world(p) for p in q[::20]])[:, axis]
+        lo, hi = float(world.min()), float(world.max())
     return primary, axis, _step_indices(viewer, axis, lo, hi, n)
 
 
@@ -334,7 +408,8 @@ def work_steps(space, mode, planes, registry_root, data_root, hide=None,
             "hide": hide, "async": asynchronous, "draw": draw,
             **load, **_backend(), **state,
             "sweeps": _sweeps(viewer, axis, ks, app,
-                              shapes_of=lambda: len(overlay.paths)),
+                              shapes_of=lambda: len(overlay.paths),
+                              drag=_ROTATE[0] is not None or _ALIGNED[0]),
         }
         result["held_mb"] = _held_mb(overlay)
         if mode == "primary" and not hide:
@@ -424,6 +499,10 @@ def _at(ndim, axis, value):
 
 
 def _worker_main(args) -> int:
+    _CANVAS[0] = args.canvas
+    _ROTATE[0] = args.rotate
+    _ALIGNED[0] = args.aligned
+    _FLIP[0] = args.flip
     if args.no_bermuda:
         # An import that fails, exactly as when the package is absent.
         sys.modules["bermuda"] = None
@@ -519,6 +598,15 @@ def main(argv: list[str] | None = None) -> int:
                    help="let napari pick image levels for the canvas before the sweeps")
     p.add_argument("--wait-prefetch", action="store_true",
                    help="start the sweeps once the contour prefetch has finished")
+    p.add_argument("--canvas", nargs=2, type=int, default=None, metavar=("W", "H"),
+                   help="size the hidden canvas, as a shown window would be")
+    p.add_argument("--rotate", nargs=3, type=float, default=None,
+                   metavar=("SPIN", "TILT", "TURN"),
+                   help="turn the scene by these angles once it is open")
+    p.add_argument("--aligned", action="store_true",
+                   help="cut 2D along the brain's own planes once the scene is open")
+    p.add_argument("--flip", action="store_true",
+                   help="show the picture upside down once the scene is open")
     p.add_argument("--json", default=None, help="write every result here")
     p.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--mode", default=None, help=argparse.SUPPRESS)
@@ -542,6 +630,14 @@ def main(argv: list[str] | None = None) -> int:
         common.append("--draw")
     if args.wait_prefetch:
         common.append("--wait-prefetch")
+    if args.canvas:
+        common += ["--canvas", *map(str, args.canvas)]
+    if args.rotate:
+        common += ["--rotate", *map(str, args.rotate)]
+    if args.aligned:
+        common.append("--aligned")
+    if args.flip:
+        common.append("--flip")
     jobs = []
     for mode in args.modes:
         if mode == "benton":

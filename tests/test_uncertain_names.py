@@ -11,7 +11,15 @@ from __future__ import annotations
 import shutil
 
 import pytest
-from viewer_harness import contour_loops, hover, launched, pump, rendered_labels, session
+from viewer_harness import (
+    clear_all,
+    contour_loops,
+    hover,
+    launched,
+    pump,
+    rendered_labels,
+    session,
+)
 
 pytestmark = pytest.mark.requires_data(
     "grabe2015_glomeruli", "grabe2015_labels", "grabe2015_stack")
@@ -39,7 +47,6 @@ def test_a_misspelled_name_is_refused(registry, registry_root, tmp_path):
 
 def test_the_viewer_shows_the_doubt_where_it_names_the_glomerulus(monkeypatch):
     from qtpy.QtCore import Qt
-    from qtpy.QtWidgets import QPushButton
 
     from lobemap.viewer.panel import LABEL_COL, NAME_COL, VISIBLE_COL
 
@@ -50,24 +57,31 @@ def test_the_viewer_shows_the_doubt_where_it_names_the_glomerulus(monkeypatch):
         vp2 = surface.meshset.names.index("VP2(L)")
         da1 = surface.meshset.names.index("DA1(L)")
 
-        # The table, with the reason as its tooltip; a neighbor is unchanged.
-        cell = tab.table.item(tab._row_of(vp2), NAME_COL)
-        assert cell.text() == "VP2(L) (VM6?)"
-        assert "VM6andVC6" in cell.toolTip()
-        assert tab.table.item(tab._row_of(da1), NAME_COL).text() == "DA1(L)"
+        # The table, with each side's reason as its tooltip; a neighbor is
+        # unchanged.
+        cell = tab.table.item(tab.table_row(vp2), NAME_COL)
+        assert cell.text() == "VP2 (VM6?)"
+        assert cell.toolTip() == "\n\n".join(
+            f"{side}: Grabe 2015 labels this region 'VP2_{side.lower()}_VM6andVC6'. "
+            "When the atlas is aligned to the male CNS and to Schlegel (projection), "
+            "it sits where VM6 is, not VP2."
+            for side in ("Left", "Right")
+        )
+        assert tab.table.item(tab.table_row(da1), NAME_COL).text() == "DA1"
 
-        # The slice label: VP2 alone, labeled, on a plane through it.
-        next(b for b in tab.findChildren(QPushButton) if b.text() == "Show none").click()
-        tab.table.item(tab._row_of(vp2), VISIBLE_COL).setCheckState(Qt.Checked)
-        tab.table.item(tab._row_of(vp2), LABEL_COL).setCheckState(Qt.Checked)
+        # The slice label: the VP2 row alone, labeled, on a plane through it.
+        clear_all(tab)
+        tab.table.item(tab.table_row(vp2), VISIBLE_COL).setCheckState(Qt.Checked)
+        tab.table.item(tab.table_row(vp2), LABEL_COL).setCheckState(Qt.Checked)
         axis = int(viewer.dims.order[0])
         viewer.dims.set_point(axis, float(surface.meshset.centroid(vp2)[axis]))
         pump(300)
-        assert "VP2(L) (VM6?)" in [text for text, _pos, _rgba in rendered_labels(overlay)]
+        # As the table names it: the side is where it is.
+        assert "VP2 (VM6?)" in [text for text, _pos, _rgba in rendered_labels(overlay)]
 
         # The hover status, in 2D and in 3D.
-        path = max((loop for _owner, loop in contour_loops(overlay)), key=len)
-        assert hover(viewer, path.mean(axis=0)) == "grabe2015: VP2(L) (VM6?)"
+        path = max((loop for owner, loop in contour_loops(overlay) if owner == vp2), key=len)
+        assert hover(viewer, path.mean(axis=0)) == "VP2 (VM6?, left) — Grabe 2015"
         viewer.dims.ndisplay = 3
         pump()
-        assert hover(viewer, surface.meshset.centroid(vp2)) == "grabe2015: VP2(L) (VM6?)"
+        assert hover(viewer, surface.meshset.centroid(vp2)) == "VP2 (VM6?, left) — Grabe 2015"

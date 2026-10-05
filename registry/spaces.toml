@@ -27,7 +27,7 @@
 # recorded per space in `notes` below.
 
 [FAFB14]
-title = "FAFB14"
+title = "FAFB (female, EM)"
 units = "nm"
 flybrains_template = "FAFB14"
 lateral_convention = "mirrored"
@@ -71,7 +71,7 @@ no asset lives in it, and navis still routes through it internally when \nthat i
 # why these are per-space rather than a constant. Names give +y (0.99) and
 # dorsal -z (0.93); the left AL lands 94 um to the viewer's right.
 [JRCFIB2018F]
-title = "Hemibrain (JRCFIB2018F)"
+title = "Hemibrain (female, EM)"
 units = "nm"
 flybrains_template = "JRCFIB2018F"
 # Three atlases share this space, so which one opens is a choice: the
@@ -96,7 +96,7 @@ still succeeds but falls back to a bounding-box reflection, which is not a \
 midline mirror here. Mirror in a symmetric space, then bridge in."""
 
 [JRCFIB2022M]
-title = "Male CNS (JRCFIB2022M)"
+title = "Male CNS (EM)"
 units = "nm"
 flybrains_template = "JRCFIB2022M"
 # Names give anterior -z (0.98) and dorsal -y (0.98); the left AL lands 121 um
@@ -164,7 +164,7 @@ VNC and CV, so brain = CentralBrain + Optic(L) + Optic(R)."""
 # without rotating leaves 59.6 um RMS where a rotation leaves 8.5.
 anatomical_rotation = { axis = [-0.430254, 0.798427, -0.421184], degrees = 108.85 }
 primary_atlas = "grabe2015"
-title = "Grabe 2015 LM template"
+title = "Grabe 2015 (live, light microscopy)"
 units = "um"
 notes = """Island: no bridging registration to any EM space. One atlas, with \
 its own LM stack as the only reference layer."""

@@ -14,6 +14,14 @@ instead labeled napari's own arrows with the pole each reached -- FAFB read
 R, V, P and the hemibrain L, A, V -- which left nothing showing where the
 voxel grid ran.
 
+In Slice view the same poles are drawn as arrows in the plane of the
+section: each the projection of its pole's direction onto the shown plane,
+however the section is turned, aligned, mirrored or flipped
+(`plane_arrows`). A pole that lies too near the line of sight to read is
+left out. napari's x/y arrows are not drawn there: the image grid is 5 to
+31 degrees off the anatomy in every brain, so the two sets of arrows and
+their letters fell on top of each other.
+
 napari 0.9 offers two: a SCENE overlay drawn at the world origin, and a
 CANVAS overlay anchored in a corner. This uses the canvas one, because the
 world origin is not inside the data. Spaces are in the coordinates their
@@ -46,6 +54,7 @@ import numpy as np
 from ..core.model import (
     anatomical_triad,
 )
+from . import napari_private
 
 
 def _vispy_axes_overlay(viewer):
@@ -98,9 +107,25 @@ ANATOMY_COLORS = _table("#D55E00", "#009E73", "#0072B2")
 #: sliders step, so these are the labels whatever the display mode.
 VOXEL_LABELS = ("x", "y", "z")
 
+#: The slider's label while a turned 2D view cuts across the image grid: it
+#: steps along the turned line of sight, which is no image axis.
+DEPTH_LABEL = "depth"
+
 #: Where the second triad is kept. It hangs off napari's own vispy
 #: overlay rather than off the viewer, so it dies with the canvas.
 _ANATOMY_ATTR = "_lobemap_anatomy_axes"
+
+#: The shortest a pole's arrow in Slice view may be, as a share of its full
+#: length: its projection onto the plane, the sine of its angle from the
+#: line of sight. Shorter, the pole is within 20.5 degrees of the line of
+#: sight, its arrow under 18 px, mostly head, and its direction hard to
+#: read, so it is left out: in an unaligned frontal section of the EM
+#: brains, 15 to 18 degrees off anterior-posterior, A and P are.
+MIN_ARROW = 0.35
+
+#: A Slice view arrow's full length, its head, and the gap to its letter,
+#: in the corner box's units: 50 px each, centered in a box of 100.
+PLANE_SCALE, PLANE_HEAD, PLANE_HALF_WIDTH, PLANE_GAP = 0.6, 0.14, 0.07, 0.2
 
 
 def _anatomy_triad(overlay):
@@ -142,8 +167,105 @@ def _reflection_4x4(axis: int, displayed=(0, 1, 2)) -> np.ndarray:
     return mat
 
 
+def _roll_4x4(degrees: float) -> np.ndarray:
+    """A 2D triad turned with the slice, in vispy's row-vector form.
+
+    In the 2D triad vispy x is the column axis and y the row axis, drawn
+    down, so counterclockwise on screen takes x toward -y.
+    """
+    t = np.radians(degrees)
+    c, s = np.cos(t), np.sin(t)
+    mat = np.eye(4)
+    mat[:2, :2] = [[c, -s], [s, c]]
+    return mat
+
+
+SCENE_AXES_OFF = (
+    "Off in lobemap: napari's scene axes stand at the image's origin, outside "
+    "the brain, and are not turned or mirrored with it. The arrows in the "
+    "corner show the brain's axes, as it is shown."
+)
+
+
+def keep_scene_axes_off(viewer) -> None:
+    """Keep napari's scene axes (View > Scene Axes) off, and say why.
+
+    They are drawn at the world's origin, which is outside the data, and
+    along the world's axes, not the image's as the brain is shown: under the
+    mirror the x arrow pointed the other way, and spun 30 degrees both were
+    30 degrees off. The corner arrows are the ones lobemap keeps true.
+    """
+    from napari.utils.notifications import show_info
+
+    model = viewer.scene.overlays["axes"]
+
+    def _off(event=None) -> None:
+        if model.visible:
+            model.visible = False
+            show_info(SCENE_AXES_OFF)
+
+    model.events.visible.connect(_off)
+    _off()
+
+
+def plane_arrows(viewer, triad, turn=None) -> list[tuple[int, str, np.ndarray]]:
+    """The anatomical arrows of Slice view: (column, pole, (right, down)) each.
+
+    `triad` is `core.model.anatomical_triad`'s, reflected with the scene;
+    `turn` the 2D turn shown (`turned.TurnedView.shown_turn`), or None. Each
+    pole's direction is carried into the shown world by the turn and read on
+    the two shown axes, columns to the right and rows down, as napari draws
+    them: its projection onto the plane, unit long when it lies in the plane.
+    The flip is the corner box's camera's, as it is the canvas's. A pole
+    shorter than `MIN_ARROW` is left out.
+    """
+    matrix, labels = triad
+    q = np.eye(3) if turn is None else np.asarray(turn.q, float)
+    row, col = (int(a) for a in list(viewer.dims.order)[-2:])
+    out = []
+    for column in range(3):
+        shown = q @ np.asarray(matrix, float)[:, column]
+        arrow = np.array([shown[col], shown[row]])
+        if np.linalg.norm(arrow) >= MIN_ARROW:
+            out.append((column, labels[column], arrow))
+    return out
+
+
+def _draw_plane_arrows(node, overlay, arrows) -> None:
+    """Draw `arrows` (`plane_arrows`) with the triad's own line, heads and
+    letters, from the middle of the corner box."""
+    from vispy.visuals.transforms import MatrixTransform
+
+    lines, colors, heads, letters, places, inks = [], [], [], [], [], []
+    for column, label, arrow in arrows:
+        # The colors the 3D triad gives each pole: it draws column k as its
+        # arrow 2 - k.
+        color = ANATOMY_COLORS[2 - column]
+        tip = PLANE_SCALE * arrow
+        along = arrow / np.linalg.norm(arrow)
+        across = np.array([-along[1], along[0]])
+        base = tip - PLANE_HEAD * along
+        lines += [(0.0, 0.0, 0.0), (*base, 0.0)]
+        colors += [color, color]
+        heads += [(*tip, 0.0), (*(base + PLANE_HALF_WIDTH * across), 0.0),
+                  (*(base - PLANE_HALF_WIDTH * across), 0.0)]
+        letters.append(label)
+        places.append((*(tip + PLANE_GAP * along), 0.0))
+        inks.append(color)
+    node.line.set_data(pos=np.array(lines, float), color=np.array(colors, float))
+    node.mesh.set_data(vertices=np.array(heads, float),
+                       faces=np.arange(len(heads)).reshape(-1, 3),
+                       face_colors=np.array(inks, float))
+    node.text.text = letters
+    node.text.pos = np.array(places, float)
+    node.text.color = np.array(inks, float)
+    mat = np.eye(4)
+    mat[3, :2] = np.asarray(overlay.node.camera.center, float)[:2]
+    node.transform = MatrixTransform(mat)
+
+
 def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
-    """Two triads in 3D; only napari's own in 2D. Returns what is shown.
+    """Two triads in 3D; the anatomy's arrows alone in 2D. Returns what is shown.
 
     `mirror_axis` is the array axis the scene is being displayed
     reflected along, or None. Both triads are reflected to match, so
@@ -165,20 +287,42 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
     here, so an anatomical label there claimed an alignment the slice
     does not have.
 
-    So the anatomical triad is hidden in 2D. What stays is napari's,
-    naming the axes the slider actually steps.
+    So 2D does not draw the triad turned in space. It draws, in the plane,
+    where each pole lies on the section (`plane_arrows`), and leaves out a
+    pole near the line of sight: no arrow claims an alignment the slice does
+    not have. napari's x/y arrows are hidden there, in favor of these; the
+    slider still names the image axis it steps.
+
+    A turned 2D view (`turned.TurnedView.shown`) keeps that true. Spun in
+    its plane, the slice is still cut along the grid, and the slider keeps
+    its axis name. Cut across the grid, no image axis lies along the slider,
+    which is labeled `DEPTH_LABEL`. The poles' arrows follow either turn.
     """
     from vispy.visuals.transforms import MatrixTransform, NullTransform
+
+    from .rotation import owner
 
     three_d = getattr(viewer.dims, "ndisplay", 3) == 3
     triad = anatomical_triad(space, reflect_axis=mirror_axis)
     show_anatomy = bool(three_d and triad is not None)
+    view = owner(viewer)
+    shown = None if three_d or view is None else view.shown
+    oblique = shown is not None and shown[0] == "oblique"
+    flat = None
+    if not three_d and triad is not None:
+        flat = plane_arrows(viewer, triad, None if view is None else view.shown_turn)
 
     if getattr(viewer.dims, "ndim", 3) == len(VOXEL_LABELS):
         # napari TRUNCATES a longer tuple, keeping the tail, so three
         # labels on a 2D-ndim viewer would land on the wrong axes.
+        labels = list(VOXEL_LABELS)
+        if oblique:
+            labels[int(viewer.dims.order[0])] = DEPTH_LABEL
         with contextlib.suppress(Exception):
-            viewer.dims.axis_labels = VOXEL_LABELS
+            if tuple(viewer.dims.axis_labels) != tuple(labels):
+                viewer.dims.axis_labels = tuple(labels)
+                # Or `depth` is cut to `…` in a label sized for `x`.
+                napari_private.fit_axis_labels(viewer)
 
     # Switching it on is also what makes napari BUILD the visual: it
     # skips overlays that are not visible and waits on their `visible`
@@ -199,19 +343,28 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
         # displayed voxel grid rather than against it. The labels are
         # axis NAMES and so are unaffected; it is the directions that
         # move.
-        overlay.node.axes.transform = (
-            NullTransform() if mirror_axis is None
-            else MatrixTransform(
-                _reflection_4x4(mirror_axis, tuple(viewer.dims.displayed))
-            )
-        )
+        roll = shown[1] if shown is not None and shown[0] == "spin" else 0.0
+        if mirror_axis is None and not roll:
+            overlay.node.axes.transform = NullTransform()
+        else:
+            mat = np.eye(4)
+            if mirror_axis is not None:
+                mat = _reflection_4x4(mirror_axis, tuple(viewer.dims.displayed))
+            if roll:
+                # Reflected first, then turned: the mirror applies before
+                # the rotation, as it does to the slice.
+                mat = mat @ _roll_4x4(roll)
+            overlay.node.axes.transform = MatrixTransform(mat)
         overlay.node.axes._default_color = VOXEL_COLORS
         overlay._on_data_change()
+        overlay.node.axes.visible = not oblique and flat is None
 
     with contextlib.suppress(Exception):
         node = _anatomy_triad(overlay)
-        node.visible = show_anatomy
-        if show_anatomy:
+        node.visible = show_anatomy or bool(flat)
+        if flat:
+            _draw_plane_arrows(node, overlay, flat)
+        elif show_anatomy:
             from napari.utils.theme import get_theme
 
             # Drawn for the array axes in napari's own order, then
@@ -231,12 +384,19 @@ def apply_axis_mode(viewer, space, mirror_axis: int | None = None) -> str:
             # Same reversal for the text: arrow k carries array axis
             # `axes[k]`, so the labels follow that order too.
             node.text.text = list(labels)[::-1]
+    if flat is not None:
+        return "anatomy"
     return "both" if show_anatomy else "voxel grid"
 
 
 __all__ = [
     "ANATOMY_COLORS",
+    "DEPTH_LABEL",
+    "MIN_ARROW",
+    "SCENE_AXES_OFF",
     "VOXEL_COLORS",
     "VOXEL_LABELS",
     "apply_axis_mode",
+    "keep_scene_axes_off",
+    "plane_arrows",
 ]

@@ -64,7 +64,7 @@ def test_show_accepts_asset_ids_atlas_ids_and_roles(monkeypatch, space, name,
         everything = set(range(surface.meshset.n_compartments))
         assert surface.selection == everything
         tab = sess.panel.tabs[shown]
-        assert tab.count.text() == f"{len(everything)} / {len(everything)} shown"
+        assert tab.count.text() == f"{len(tab.rows)} of {len(tab.rows)} shown"
         if ndisplay == "3":
             assert drawn(surface) == everything
         else:
@@ -78,7 +78,7 @@ def test_show_turns_on_a_label_volume(monkeypatch):
         code, viewer,
     ):
         assert code == 0
-        assert viewer.layers["grabe2015_labels"].visible
+        assert viewer.layers["Glomerulus label volume (Grabe 2015)"].visible
 
 
 def test_show_applies_to_the_first_scene_only(monkeypatch):
@@ -90,7 +90,7 @@ def test_show_applies_to_the_first_scene_only(monkeypatch):
         switch_to(viewer, "GRABE")
         assert switcher(viewer).status.text() == ""
         assert session(viewer).space == "GRABE"
-        assert viewer.title == "lobemap - GRABE"
+        assert viewer.title == "lobemap — Grabe 2015 (live, light microscopy)"
 
         switch_to(viewer, "FAFB14")
         sess = session(viewer)
@@ -98,10 +98,11 @@ def test_show_applies_to_the_first_scene_only(monkeypatch):
         # FAFB14 again, but chosen in the menu: its own defaults, shell off.
         # Not even built until its tab opens -- only its hidden stand-in is
         # in the layer list -- and unchecked when it is.
-        from lobemap.viewer.deferred import STANDIN_NAME
+        from viewer_harness import stand_in_name
 
-        shell = [layer for layer in viewer.layers if layer.name.startswith("fafb_neuropil")]
-        assert [layer.name for layer in shell] == [STANDIN_NAME.format(name="fafb_neuropil")]
+        shell = [layer for layer in viewer.layers
+                 if layer.name.startswith("Neuropils (FlyWire)")]
+        assert [layer.name for layer in shell] == [stand_in_name(sess, "fafb_neuropil")]
         assert not shell[0].visible
         tab = sess.panel.tabs["fafb_neuropil"]
         assert checked(tab) == set()

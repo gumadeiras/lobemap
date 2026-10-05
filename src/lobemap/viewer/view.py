@@ -1,18 +1,33 @@
-"""How a scene is looked at: the camera, the fit, the home button, the mirror.
+"""How a scene is looked at: the camera, the fit, the home button, the mirror
+and the flip.
 
 None of this changes the data. The camera is turned onto each space's
 measured anatomy, the view is fitted to the canvas as the window settles,
 the home button restores the anatomical view rather than napari's array
-view, and the mirror reflects every layer, the surfaces by their own vertices
-(`AtlasSurface._present`) and the rest by a world transform. A failed
+view, the mirror reflects every layer, the surfaces by their own vertices
+(`AtlasSurface._present`) and the rest by a world transform, and the flip
+turns the picture upside down by the camera (`show_upside_down`). A failed
 space switch gives the view back through `capture_view` and `restore_view`.
 """
 
 from __future__ import annotations
 
 import contextlib
+import weakref
 
 import numpy as np
+
+#: napari's camera orientation along the screen's vertical: "down", the
+#: way napari draws array rows and `rotation.grid_frame` reads them, or
+#: "up", which shows the picture upside down (`show_upside_down`).
+UPRIGHT, UPSIDE_DOWN = "down", "up"
+
+#: napari's camera orientation along the screen's depth and horizontal,
+#: the only ones lobemap shows (`keep_orientation`).
+TOWARD, RIGHT = "towards", "right"
+
+#: The viewers whose camera `keep_orientation` watches.
+_KEPT: weakref.WeakSet = weakref.WeakSet()
 
 #: The array axis a mirror reflects along.
 #:
@@ -25,7 +40,8 @@ import numpy as np
 MIRROR_AXIS = 0
 
 
-def orient_anterior(viewer, space, reflect_axis: int | None = None) -> bool:
+def orient_anterior(viewer, space, reflect_axis: int | None = None,
+                    angles=None) -> bool:
     """Face the anterior surface of the brain, dorsal up. True if applied.
 
     Uses the space's MEASURED anatomy, so the view really is down the
@@ -35,6 +51,12 @@ def orient_anterior(viewer, space, reflect_axis: int | None = None) -> bool:
     `reflect_axis` is the array axis the scene is shown mirrored along, or
     None. The frame is reflected with it, so a mirrored scene is looked at
     from its own reflected front, the mirror image of the unmirrored view.
+
+    `angles` turn the scene from there, (spin, tilt, turn) degrees about
+    the screen's axes (`rotation`): the camera is this view turned by their
+    inverse, so no layer moves. None takes the angles of the scene the
+    viewer shows (`rotation.angles_of`), which is what Home faces. A picture
+    shown upside down (`show_upside_down`) is this view upside down.
 
     Needs the whole frame. A view direction alone leaves the roll free,
     so a camera built from anterior without dorsal would face the right
@@ -52,13 +74,162 @@ def orient_anterior(viewer, space, reflect_axis: int | None = None) -> bool:
         anterior[reflect_axis] *= -1.0
         dorsal[reflect_axis] *= -1.0
 
+    from .rotation import ZERO, angles_of, turned_view
+
+    view, up = -anterior, dorsal
+    angles = angles_of(viewer) if angles is None else tuple(angles)
+    if tuple(float(a) for a in angles) != ZERO:
+        view, up = turned_view(view, up, angles)
+    if upside_down(viewer):
+        # The angles stay the upright view's: napari draws its up at the
+        # top of the screen, and the view's up is now at the bottom.
+        up = -up
     camera = viewer.scene.camera
-    camera.set_view_direction(
-        view_direction=tuple(-anterior), up_direction=tuple(dorsal)
-    )
+    camera.set_view_direction(view_direction=tuple(view), up_direction=tuple(up))
     # Up is what napari's angle round trip can lose, so that is what is
     # checked; see `tests/test_default_view.py`.
-    return bool(np.dot(np.asarray(camera.up_direction), dorsal) > 0.99)
+    return bool(np.dot(np.asarray(camera.up_direction), up) > 0.99)
+
+
+def upside_down(viewer) -> bool:
+    """Whether the camera shows the picture upside down (`show_upside_down`)."""
+    return str(viewer.scene.camera.orientation[1]) == UPSIDE_DOWN
+
+
+def show_upside_down(viewer, on: bool) -> None:
+    """Show the picture upside down, or upright again. Display only.
+
+    A flip of the screen, top to bottom about the middle of the view, after
+    every turn and mirror of the scene, made by napari's camera: its
+    vertical axis is turned to point up rather than down. Nothing else
+    moves -- no layer, slider, plane or pick -- and the camera's center,
+    zoom and angles are kept. In 2D that is the flip itself. In 3D napari
+    keeps the screen's up as the camera's up and reverses the handedness,
+    so the same angles show the scene mirrored left to right and turned
+    180 degrees, which is upside down: the angles keep meaning the upright
+    view, and Home (`orient_anterior`), a turn, a trip through 2D or a
+    failed switch put back the same picture, flipped. Off, the picture is
+    exactly what it was.
+
+    What napari does not do itself, `keep_orientation` does, whoever turns
+    the picture over: this, or the up/down menu of napari's camera popup.
+    """
+    keep_orientation(viewer)
+    camera = viewer.scene.camera
+    depth, vertical, horizontal = (str(o) for o in camera.orientation)
+    want = UPSIDE_DOWN if on else UPRIGHT
+    if vertical == want:
+        return
+    camera.orientation = (depth, want, horizontal)
+
+
+def keep_orientation(viewer) -> None:
+    """Follow every change of the camera's orientation with what napari
+    leaves undone, and refuse the ones no control of lobemap's shows.
+
+    napari's camera popup sets the orientation of each screen axis. Up or
+    down is the flip (`show_upside_down`), which the View dock shows. Left
+    along the horizontal, or away along the depth, would mirror the picture
+    with no control to say so -- napari's preferences can ask for either
+    too -- so each is put back to napari's default, right and toward.
+
+    After a flip, two things napari does not do are done here. It hands its
+    3D camera the new handedness but not the turn its angles mean under it,
+    and its next draw read the angles back from the stale turn, which lost
+    the view: so the angles are announced again. And a reversed handedness
+    winds every face the other way on screen, which vispy's shading takes
+    for the inside: so each surface takes its clockwise faces for its front
+    ones (`face_front`), and is lit from outside. The light turns over with
+    the picture, so in 3D too the picture is the upright one upside down.
+
+    And the light, which napari puts behind the camera, above and to the
+    right of the picture, is put there as the picture is shown: under the
+    flip, napari reckoned its right from a camera turned the other way, so
+    any move of the camera with the flip on lit the surfaces from the top
+    left, and that light stayed on the upright picture until the next move
+    (`light_from_the_camera`).
+
+    Connected after napari's own handlers, so they have turned the camera
+    first. Installed once per viewer; later calls do nothing.
+    """
+    if viewer in _KEPT:
+        return
+    _KEPT.add(viewer)
+    camera = viewer.scene.camera
+    ref = weakref.ref(viewer)
+
+    def _settle(event=None) -> None:
+        live = ref()
+        if live is None:
+            return
+        depth, vertical, horizontal = (str(o) for o in camera.orientation)
+        if (depth, horizontal) != (TOWARD, RIGHT):
+            # Its own change of orientation does the rest.
+            camera.orientation = (TOWARD, vertical, RIGHT)
+            return
+        camera.events.angles(value=camera.angles)
+        face_front(live)
+
+    camera.events.orientation.connect(_settle, position="last")
+    depth, vertical, horizontal = (str(o) for o in camera.orientation)
+    if (depth, horizontal) != (TOWARD, RIGHT):
+        camera.orientation = (TOWARD, vertical, RIGHT)
+
+    def _light(event=None) -> None:
+        live = ref()
+        if live is not None:
+            light_from_the_camera(live)
+
+    # After napari's own, which light every surface on these, from its
+    # reckoning; a layer added is lit by napari as it is added.
+    for event in (camera.events.view_direction, camera.events.orientation,
+                  viewer.dims.events.ndisplay, viewer.layers.events.inserted):
+        event.connect(_light, position="last")
+    _light()
+
+
+def light_from_the_camera(viewer, layers=None) -> None:
+    """Light every surface (or `layers`) from behind the camera, above and to
+    the right of the picture as it is shown; in 3D, where they are drawn.
+
+    napari's light is its camera's up, minus its view, plus its right, and
+    it takes the camera's right to be the view crossed with the up. Upside
+    down the picture's right is the other way, so its light came from the
+    left. Handing it the camera's up turned over puts the upright picture's
+    light where the flip turns it, on the right and below: the picture is
+    the upright one upside down, light and all. A function of the camera
+    and the flip alone, whatever moves came before.
+    """
+    from napari.layers import Surface
+
+    from .napari_private import light_surface
+
+    if viewer.dims.ndisplay != 3:
+        return
+    camera = viewer.scene.camera
+    # vispy's axis order, the reverse of napari's.
+    view = np.asarray(camera.view_direction, float)[::-1]
+    up = np.asarray(camera.up_direction, float)[::-1]
+    if upside_down(viewer):
+        up = -up
+    for layer in viewer.layers if layers is None else layers:
+        if isinstance(layer, Surface):
+            with contextlib.suppress(Exception):
+                light_surface(viewer, layer, view, up)
+
+
+def face_front(viewer, layers=None) -> None:
+    """Wind the front faces of every surface (or of `layers`) as the camera
+    shows them: clockwise while the picture is upside down."""
+    from napari.layers import Surface
+
+    from .napari_private import front_face
+
+    clockwise = upside_down(viewer)
+    for layer in viewer.layers if layers is None else layers:
+        if isinstance(layer, Surface):
+            with contextlib.suppress(Exception):
+                front_face(viewer, layer, clockwise)
 
 
 def maximize(viewer) -> bool:
@@ -96,20 +267,102 @@ def maximize(viewer) -> bool:
     return True
 
 
-def fit_view(viewer, margin: float = 0.02) -> None:
+#: The share of the canvas a fit leaves empty around the brain: a hundredth
+#: on either side, at open, on Fit to window and on napari's home alike.
+FIT_MARGIN = 0.02
+
+
+def fit_view(viewer, margin: float = FIT_MARGIN) -> None:
     """Fill the canvas with the data, without disturbing the orientation.
 
     `reset_view` resets the camera angles by default, which would undo
-    `orient_anterior`.
+    `orient_anterior`. In 3D the fit is `fit_3d`'s.
     """
-    try:
+    if getattr(getattr(viewer, "dims", None), "ndisplay", 2) == 3:
+        fit_3d(viewer, margin)
+    else:
         viewer.reset_view(margin=margin, reset_camera_angle=False)
-    except TypeError:                     # older napari: neither keyword
-        viewer.reset_view()
+
+
+def fit_3d(viewer, margin: float = FIT_MARGIN, layers=None) -> None:
+    """Frame the brain in 3D as the camera shows it, with `margin` to spare.
+
+    The brain is the box around every layer (or `layers`), built or not --
+    the stand-ins of the parts not built yet span them (`deferred`). Each of
+    its corners is put inside the canvas as the camera draws it: its
+    distance from the box's middle along the screen's right and up, and,
+    under perspective, its depth, which draws a near corner larger. The
+    camera is centered on the box's middle, its angles kept.
+
+    napari's own fit sized the box for a flat camera, so under perspective
+    its near corners ran off the canvas; and its home fitted the box seen
+    down the image's axes, before lobemap turned the camera to the front:
+    FAFB14 went from 0.68 to 1.97 pixels per micrometer and lost its sides.
+    """
+    layers = list(viewer.layers if layers is None else layers)
+    if not layers:
+        return
+    camera = viewer.scene.camera
+    box = np.asarray(viewer.layers.get_extent(layers).world, float)
+    box = box[:, list(viewer.dims.displayed)]
+    if not np.all(np.isfinite(box)):
+        return
+    corners = np.array([np.where(bits, box[1], box[0]) for bits in np.ndindex(2, 2, 2)])
+    view = np.asarray(camera.view_direction, float)
+    up = np.asarray(camera.up_direction, float)
+    # Screen right and up, and toward the viewer.
+    screen = np.array([np.cross(view, up), up, -view])
+    height, width = _drawn_size(viewer)
+    half = (1 - margin) * np.array([width, height]) / 2
+    fov = float(camera.perspective)
+    # The camera's distance times the zoom: a corner `near` nearer than the
+    # middle is drawn `eye / (eye - near * zoom)` times larger.
+    eye = height / (2.0 * np.tan(np.radians(fov) / 2.0)) if fov > 0 else np.inf
+    middle = box.mean(axis=0)
+    zoom = np.inf
+    # Flat, the box's middle is the middle of the picture. Under perspective
+    # its near side is drawn larger, so the middle is moved across the
+    # screen until the picture of the box is centered: a few rounds settle it.
+    rounds = 1 if fov <= 0 else 6
+    for round_ in range(rounds):
+        right, upward, near = (screen @ (corners - middle).T)
+        zoom = np.inf
+        for limit, reach in zip(half, (np.abs(right), np.abs(upward)), strict=True):
+            # zoom * reach * eye / (eye - near * zoom) <= limit, every corner.
+            spread = reach + (limit * near / eye if np.isfinite(eye) else 0.0)
+            held = spread > 1e-12
+            if held.any():
+                zoom = min(zoom, float(np.min(limit / spread[held])))
+        if not np.isfinite(zoom) or zoom <= 0 or round_ == rounds - 1:
+            break
+        grow = eye / (eye - near * zoom)
+        drawn = np.array([right * grow, upward * grow])
+        offset = (drawn.min(axis=1) + drawn.max(axis=1)) / 2
+        middle = middle + offset @ screen[:2]
+    if not np.isfinite(zoom) or zoom <= 0:
+        return
+    camera.center = tuple(float(c) for c in middle)
+    camera.zoom = zoom
+
+
+def _drawn_size(viewer) -> tuple[float, float]:
+    """The canvas's (height, width) as vispy draws the view.
+
+    napari turns a zoom into vispy's scale by this size, which can move
+    before napari's own `canvas.size` does, as the window settles: a fit by
+    napari's was drawn at the other size until the next one.
+    """
+    canvas = getattr(getattr(viewer, "window", None), "_qt_viewer", None)
+    rect = getattr(getattr(getattr(canvas, "canvas", None), "view", None), "rect", None)
+    if rect is not None and min(rect.size) > 0:
+        width, height = rect.size
+        return float(height), float(width)
+    return tuple(float(s) for s in viewer.canvas.size)
 
 
 def install_home_orientation(viewer, space, reflect_axis=None) -> bool:
-    """Make the home button restore the anatomical view, not napari's.
+    """Make the home button restore the anatomical view, not napari's, and
+    every fit napari makes frame the brain as lobemap's fit does.
 
     `ViewerModel.reset_view` sets the camera angles to (0, 0, 0) before
     fitting, which is a view down the ARRAY axes. Those are not the
@@ -129,8 +382,20 @@ def install_home_orientation(viewer, space, reflect_axis=None) -> bool:
     found in the instance dict still wins over the class, which is what
     makes the button -- verified -- go through this.
 
-    Re-orienting only when napari reset the angles, so `fit_view`, which
-    asks it not to, keeps preserving whatever the user is looking at.
+    Re-orienting only when asked to reset the angles, so `fit_view`, which
+    asks it not to, keeps preserving whatever the user is looking at. Home
+    faces the scene turned by its angles (`orient_anterior`) and then fits
+    the brain as it is seen from there: napari's own fitted it seen down the
+    image's axes, before the camera turned.
+
+    `fit_to_view` is wrapped the same way, and napari calls it through the
+    instance as well: View > Fit to View, and the fit napari makes whenever
+    the axis order changes, as it does on entering 3D. In 3D it is `fit_3d`,
+    which frames the brain as the camera shows it, perspective included; in
+    2D napari's, and a turned 2D view is fitted as it would be unturned
+    (`turned.TurnedView`). Every fit takes lobemap's margin unless its caller
+    gives one, so the brain is framed alike at open, on Home and after a
+    change of mode.
     """
     existing = viewer.__dict__.get("reset_view")
     if getattr(existing, "_lobemap_home", False):
@@ -140,25 +405,37 @@ def install_home_orientation(viewer, space, reflect_axis=None) -> bool:
         return True
 
     original = type(viewer).reset_view.__get__(viewer)
+    fit_original = type(viewer).fit_to_view.__get__(viewer)
 
-    def reset(*args, **kwargs):
-        original(*args, **kwargs)
-        if kwargs.get("reset_camera_angle", True):
+    def fit_to_view(*, layers=None, margin: float = FIT_MARGIN) -> None:
+        if viewer.dims.ndisplay == 3:
+            fit_3d(viewer, margin, layers)
+        else:
+            fit_original(layers=layers, margin=margin)
+
+    def reset(*, layers=None, margin: float = FIT_MARGIN, reset_camera_angle: bool = True):
+        if viewer.dims.ndisplay != 3:
+            original(layers=layers, margin=margin, reset_camera_angle=reset_camera_angle)
+            return
+        if reset_camera_angle:
             axis = reset._lobemap_reflect
-            orient_anterior(viewer, reset._lobemap_space,
-                            reflect_axis=axis() if callable(axis) else axis)
+            if not orient_anterior(viewer, reset._lobemap_space,
+                                   reflect_axis=axis() if callable(axis) else axis):
+                viewer.scene.camera.angles = (0.0, 0.0, 0.0)
+        fit_3d(viewer, margin, layers)
 
     reset._lobemap_home = True
     reset._lobemap_space = space
     reset._lobemap_reflect = reflect_axis
     try:
         object.__setattr__(viewer, "reset_view", reset)
+        object.__setattr__(viewer, "fit_to_view", fit_to_view)
     except Exception:                       # noqa: BLE001 - cosmetic
         return False
     return True
 
 
-def install_initial_fit(viewer, margin: float = 0.02) -> bool:
+def install_initial_fit(viewer, margin: float = FIT_MARGIN) -> bool:
     """Keep refitting until the window settles, then stop at the first touch.
 
     Maximizing is asynchronous, and the canvas can still report a zero width
@@ -193,8 +470,17 @@ def install_initial_fit(viewer, margin: float = 0.02) -> bool:
         # resize callbacks run -- so the widget can already read 987x944 while
         # a fit still computes against 900x700. Watching the widget is how
         # FAFB kept its startup zoom while Grabe happened to refit correctly.
+        #
+        # And the size vispy draws the view at, which can move after napari's:
+        # napari turns a zoom into vispy's scale by it, so a fit made while
+        # the two disagreed was drawn at the other size. GRABE once opened at
+        # 4.30 pixels per micrometer, its lobes cut, where it fits at 2.98.
         got = getattr(getattr(viewer, "canvas", None), "size", None)
-        return tuple(got) if got is not None else None
+        if got is None:
+            return None
+        drawn = getattr(getattr(canvas, "view", None), "rect", None)
+        return (*(float(s) for s in got),
+                *(float(s) for s in (drawn.size if drawn is not None else ())))
 
     def _refit(event=None):
         # Driven by draws, not only by resize: the resize arrives while
@@ -367,17 +653,28 @@ def apply_mirror(layers, on: bool, center: float,
 
 
 __all__ = [
+    "FIT_MARGIN",
     "MIRROR_AXIS",
+    "RIGHT",
+    "TOWARD",
+    "UPRIGHT",
+    "UPSIDE_DOWN",
     "apply_mirror",
     "capture_view",
     "center_sliders",
+    "face_front",
+    "fit_3d",
     "fit_view",
     "install_home_orientation",
     "install_initial_fit",
+    "keep_orientation",
+    "light_from_the_camera",
     "maximize",
     "mirror_center",
     "mirror_matrix",
     "orient_anterior",
     "reflect_vertices",
     "restore_view",
+    "show_upside_down",
+    "upside_down",
 ]

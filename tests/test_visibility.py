@@ -18,21 +18,19 @@ from viewer_harness import (
     SPACES,
     assert_rows_match_drawing,
     checked,
+    clear_all,
+    click_header,
     drawn,
+    every_index,
     launched,
     mode_layer,
     pump,
     session,
+    tick_all,
 )
 
 pytestmark = pytest.mark.requires_data
 pytest.importorskip("napari")
-
-
-def _buttons(tab):
-    from qtpy.QtWidgets import QPushButton
-
-    return {b.text(): b for b in tab.findChildren(QPushButton)}
 
 
 def _tick(tab, index: int, on: bool) -> None:
@@ -40,7 +38,7 @@ def _tick(tab, index: int, on: bool) -> None:
 
     from lobemap.viewer.panel import VISIBLE_COL
 
-    row = tab._row_of(index)
+    row = tab.table_row(index)
     tab.table.item(row, VISIBLE_COL).setCheckState(Qt.Checked if on else Qt.Unchecked)
 
 
@@ -57,7 +55,7 @@ def test_every_tab_draws_what_it_checks_on_open(monkeypatch, space, ndisplay):
             if name != primary:
                 # Secondary atlases and reference shells open off, and say so.
                 assert checked(tab) == set(), name
-                assert tab.count.text().startswith("0 / "), (name, tab.count.text())
+                assert tab.count.text().startswith("0 of "), (name, tab.count.text())
 
 
 def test_a_hidden_atlas_shows_exactly_the_row_ticked(monkeypatch):
@@ -79,7 +77,7 @@ def test_show_all_on_a_hidden_shell_checks_and_draws_every_row(monkeypatch):
     with launched(monkeypatch, "view", "FAFB14") as (code, viewer):
         sess = session(viewer)
         tab = sess.panel.tabs["fafb_neuropil"]
-        _buttons(tab)["Show all"].click()
+        tick_all(tab)
         pump(300)
         everything = set(range(tab.surface.meshset.n_compartments))
         assert drawn(tab.surface, tab.contour) == everything
@@ -100,12 +98,14 @@ def test_compaction_does_not_bring_the_mesh_back_in_2d(monkeypatch):
 def test_rows_and_drawing_agree_after_mode_switches(monkeypatch):
     """The reproduced case -- none in 3D, all in 2D, back to 3D -- then a
     seeded run of every kind of change interleaved with switches."""
+    from lobemap.viewer.panel import VISIBLE_COL
+
     with launched(monkeypatch, "view", "JRCFIB2018F") as (code, viewer):
         sess = session(viewer)
         tab = sess.panel.tabs["neuprint_hemibrain"]
-        _buttons(tab)["Show none"].click()
+        clear_all(tab)
         viewer.dims.ndisplay = 2
-        _buttons(tab)["Show all"].click()
+        tick_all(tab)
         viewer.dims.ndisplay = 3
         pump(300)
         assert drawn(tab.surface, tab.contour) == set(range(tab.surface.meshset.n_compartments))
@@ -115,15 +115,20 @@ def test_rows_and_drawing_agree_after_mode_switches(monkeypatch):
         names = list(sess.panel.tabs)
         for _step in range(30):
             tab = sess.panel.tabs[rng.choice(names)]
-            action = rng.choice(("tick", "untick", "all", "none", "invert", "mode"))
+            action = rng.choice(("tick", "untick", "all", "none", "header", "search", "mode"))
             n = tab.surface.meshset.n_compartments
             if action == "mode":
                 viewer.dims.ndisplay = 5 - viewer.dims.ndisplay
             elif action in ("tick", "untick"):
                 _tick(tab, rng.randrange(n), action == "tick")
+            elif action == "search":
+                # A row's name, or nothing: the header then acts on what is listed.
+                name = rng.choice(list(tab.rows.values())).name
+                tab.filter.setText(rng.choice((name, "")))
+            elif action == "header":
+                click_header(tab, VISIBLE_COL)
             else:
-                label = {"all": "Show all", "none": "Show none", "invert": "Invert"}[action]
-                _buttons(tab)[label].click()
+                (tick_all if action == "all" else clear_all)(tab)
             pump(300)
             assert_rows_match_drawing(sess)
 
@@ -236,12 +241,12 @@ def test_the_eye_of_the_layer_the_mode_does_not_draw_means_the_atlas(monkeypatch
             pump(300)
             drawing = mode_layer(tab.surface, tab.contour)
             other = tab.contour.layer if drawing is tab.surface.layer else tab.surface.layer
-            _buttons(tab)["Show none"].click()
+            clear_all(tab)
             pump(300)
             assert checked(tab) == set()
             other.visible = True                      # the user's click on that eye
             pump(300)
-            assert checked(tab) == set(range(tab.table.rowCount()))
+            assert checked(tab) == set(every_index(tab))
             assert not other.visible
             assert_rows_match_drawing(sess)
             _tick(tab, 0, False)                      # a partial selection is kept

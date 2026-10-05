@@ -584,7 +584,7 @@ def test_filling_works_without_a_compiled_triangulator(registry, monkeypatch):
 def test_contours_follow_the_table_on_a_cached_plane(registry):
     from qtpy.QtCore import Qt
 
-    from lobemap.viewer.panel import INDEX_ROLE, VISIBLE_COL
+    from lobemap.viewer.panel import VISIBLE_COL
 
     viewer, session, primary = _open(registry, "FAFB14")
     try:
@@ -592,12 +592,13 @@ def test_contours_follow_the_table_on_a_cached_plane(registry):
         surface = session.surfaces[primary]
         here = _step_into(viewer, surface, 0.5)
         index = min(_drawn(overlay))
-        table = session.panel.tabs[primary].table
-        row = next(r for r in range(table.rowCount())
-                   if table.item(r, VISIBLE_COL).data(INDEX_ROLE) == index)
+        tab = session.panel.tabs[primary]
+        table, row = tab.table, tab.table_row(index)
 
         table.item(row, VISIBLE_COL).setCheckState(Qt.Unchecked)
         _settle()
+        # Every side of the row goes: Benton has the left alone.
+        assert tab.row_of(index).indices == (index,)
         shown = set(range(overlay.meshset.n_compartments)) - {index}
         assert_draws(overlay, here, "unticked:", shown)
 

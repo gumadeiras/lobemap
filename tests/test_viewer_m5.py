@@ -102,13 +102,19 @@ def test_table_joins_canonical_names(registry, scene):
     surfaces, contours = scene
     panel = CompartmentPanel(None, surfaces, registry=registry, contours=contours)
     tab = panel.tabs["neuprint_hemibrain"]
-    assert tab.table.rowCount() == surfaces["neuprint_hemibrain"].meshset.n_compartments
-    canonicals = [
-        tab.table.item(r, 2).text() for r in range(tab.table.rowCount())
-    ]
-    assert any(c for c in canonicals), "no canonical names joined into the table"
-    sides = {tab.table.item(r, 3).text() for r in range(tab.table.rowCount())}
-    assert sides & {"L", "R"}
+    # One row per glomerulus, every side of it in that row.
+    meshset = surfaces["neuprint_hemibrain"].meshset
+    assert sorted(i for row in tab.rows.values() for i in row.indices) == \
+        list(range(meshset.n_compartments))
+    assert tab.table.rowCount() == len(tab.rows) < meshset.n_compartments
+    # The standard name and the sides are in the details of the selected row.
+    canonicals, sides = [], set()
+    for r in range(tab.table.rowCount()):
+        tab.table.selectRow(r)
+        canonicals.append(tab.details["Standard name"].text())
+        sides.add(tab.details["Sides"].text())
+    assert any(c != "—" for c in canonicals), "no canonical names joined into the table"
+    assert {"Right", "Left and right"} <= sides, sides
 
 
 def test_table_filter_hides_rows(registry, scene):

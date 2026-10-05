@@ -8,12 +8,16 @@ from here as well.
 
 from __future__ import annotations
 
+import contextlib
+import traceback
 import weakref
 
 import numpy as np
 
 from ..core.registry import Registry
+from . import buttons
 from .axes import apply_axis_mode
+from .chrome import add_dock, lock_layers, tidy
 from .images import (
     BASE_DISPLAY,
     ROLE_DISPLAY,
@@ -45,9 +49,16 @@ from .view import (
     fit_view,
     install_home_orientation,
     install_initial_fit,
+    keep_orientation,
     maximize,
     orient_anterior,
 )
+
+#: The compartment panel's dock, on the right.
+PANEL_TITLE = "Brain regions"
+
+#: The View dock, on the left; see `switcher`.
+VIEW_TITLE = "View"
 
 #: Slice x-y and step through z, the way a confocal stack is read. Volume axes
 #: are (x, y, z) to match the mesh columns, and napari would otherwise display
@@ -196,35 +207,61 @@ def _meshes_of(viewer) -> weakref.WeakSet:
     return meshes
 
 
+#: How far, in screen pixels, the cursor may move between press and release
+#: for the press to be a click rather than a drag.
+CLICK_SLOP = 4.0
+
+
 def install_picking(viewer, surfaces, contours, panel=None) -> list:
-    """Identify the glomerulus under the cursor, in 3D and in 2D.
+    """Name the glomerulus under the cursor, and select it on a click.
 
     Returns the viewer callbacks it added, so a scene switch can remove them.
 
-    On the VIEWER, not on each layer. napari sends a layer's mouse-move
-    callbacks only while that layer is the active one, and the active layer
-    after a load is the last one added -- a contour layer, hidden in 3D --
-    so hovering named nothing until the user happened to select the right
-    layer by hand. The viewer's callbacks run on every move, and this asks
-    each layer the current mode draws: surfaces in 3D, contours in 2D, the
-    atlases before the reference shells.
+    Hovering only says what is under the cursor, in the status bar: "VA3
+    (left) — Benton 2025", the panel row's words and whose it is. It moves
+    nothing. It used to select the row as well, which switched the panel's
+    tab, moved its selection, scrolled its table and refilled its details
+    under the user's eyes. A click that does not drag selects the row, as a
+    click in the table does; a drag turns or pans the view and selects
+    nothing.
+
+    On the VIEWER, not on each layer. napari sends a layer's mouse callbacks
+    only while that layer is the active one, and one atlas is drawn by two
+    layers -- a mesh in 3D, its outlines in 2D -- while the user can make
+    any layer active, so hovering named nothing until the right layer
+    happened to be selected. The viewer's callbacks run on every move, and
+    this asks each layer the current mode draws: surfaces in 3D, contours in
+    2D, the atlases before the reference shells.
 
     In 3D the ray is tested against the shown compartments' boxes and then
     their triangles (`AtlasSurface.pick`), not against every triangle of
     the layer as napari's own Surface pick does -- 40 ms a mouse move on
-    Benton. In 2D the contour loops are tested directly, inside the loop
-    rather than on its stroke. `Shapes.get_value` cannot be used for them:
-    napari rounds each shape's slice position to a whole number and compares
-    it with the unrounded plane, so off a whole-micrometer plane it found no
-    shape at all. Drags are skipped: they rotate or pan the view.
+    Benton. Under perspective the ray starts at the eye, which zoomed in can
+    be inside the brain. In 2D the contour loops are tested directly, inside
+    the loop rather than on its stroke. `Shapes.get_value` cannot be used for
+    them: napari rounds each shape's slice position to a whole number and
+    compares it with the unrounded plane, so off a whole-micrometer plane it
+    found no shape at all.
 
     The dicts are read on every move, so a part the session builds later
     (`SceneSession.realize`) is picked too.
+
+    The words stay once the cursor rests. napari works out the status bar's
+    words for the cursor itself, in a thread of its own, once the cursor is
+    over the canvas -- the active layer's name and the value under the
+    cursor -- and they arrived a moment after these and replaced them:
+    "neuPrint · 3D [306, 174, 198]: 7, 23185" where "DA3 (right) — neuPrint"
+    had been, naming the hidden 3D layer in Slice view. So napari's own
+    reckoning names the compartment first (`name_the_cursor`), and gives its
+    own words only where no compartment is.
     """
 
-    def _on_move(_viewer, event):
-        if getattr(event, "buttons", None):
-            return          # a drag: rotating or panning, not pointing
+    def _pick(event):
+        """(part, compartment, words) under the cursor, or None."""
+        return _pick_at(event.position, getattr(event, "view_direction", None),
+                        getattr(event, "dims_displayed", None) or viewer.dims.displayed)
+
+    def _pick_at(position, view_direction, dims_displayed):
         three_d = viewer.dims.ndisplay == 3
         order = sorted(
             surfaces,
@@ -238,31 +275,193 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
                 if not surface.layer.visible or not three_d:
                     continue
                 index = surface.pick(
-                    event.position,
-                    getattr(event, "view_direction", None),
-                    getattr(event, "dims_displayed", None) or viewer.dims.displayed,
+                    position, view_direction, dims_displayed,
+                    from_position=viewer.scene.camera.perspective > 0,
                 )
-                label = surface.meshset.names[index] if index is not None else None
             else:
                 if not overlay.layer.visible:
                     continue
                 shown = list(viewer.dims.displayed)
-                point = overlay.layer.world_to_data(event.position)
+                point = overlay.layer.world_to_data(position)
                 shape = polygon_at(
                     [np.asarray(path)[:, shown] for path in overlay.paths],
                     np.asarray(point)[shown],
                 )
                 label = overlay.name_at_shape(shape)
                 index = overlay.meshset.names.index(label) if label else None
-            if label:
-                shown_as = surface.display_names[index] if index is not None else label
-                viewer.status = f"{name}: {shown_as}"
-                if panel is not None and index is not None:
-                    panel.highlight(name, index)
-                return
+            if index is not None:
+                tab = panel.tabs.get(name) if panel is not None else None
+                said = tab.describe(index) if tab is not None else ""
+                return name, index, said or f"{surface.display_names[index]} — {surface.name}"
+        return None
+
+    def _on_move(_viewer, event):
+        if getattr(event, "buttons", None):
+            return          # a drag: rotating or panning, not pointing
+        picked = _pick(event)
+        if picked is not None:
+            viewer.status = picked[2]
+
+    def _words(position, view_direction) -> str | None:
+        """What napari's status says for the cursor; see `name_the_cursor`."""
+        picked = _pick_at(position, view_direction, viewer.dims.displayed)
+        return None if picked is None else picked[2]
+
+    # Found through the callback, so a scene torn down names nothing.
+    _on_move.lobemap_words = _words
+    name_the_cursor(viewer)
+
+    def _on_press(_viewer, event):
+        if getattr(event, "button", 1) != 1:
+            return          # not the left button: napari's own, or a menu
+        start = np.asarray(event.pos, float)
+        yield
+        while event.type == "mouse_move":
+            if np.hypot(*(np.asarray(event.pos, float) - start)) > CLICK_SLOP:
+                return      # a drag
+            yield
+        picked = _pick(event)
+        if picked is not None:
+            viewer.status = picked[2]
+            if panel is not None:
+                panel.highlight(picked[0], picked[1])
 
     viewer.mouse_move_callbacks.append(_on_move)
-    return [_on_move]
+    viewer.mouse_drag_callbacks.append(_on_press)
+    return [_on_move, _on_press]
+
+
+def name_the_cursor(viewer) -> None:
+    """Give the status bar lobemap's words for what the cursor is over.
+
+    napari reckons the status bar's words for the cursor whenever it moves
+    over the canvas, in a thread, and whenever another layer is made active:
+    the active layer's name, the cursor's position and the value there.
+    Here that reckoning asks the scene's picking first (`install_picking`),
+    and keeps napari's words for where no compartment is. So whichever layer
+    is active, 2D or 3D, the words that stay are the compartment's.
+
+    The scene's picking is found through its mouse callback, which a scene
+    switch removes, so the scene shown is the one asked. Once per viewer.
+    While a switch builds the next scene (`hold_status`), the words are left
+    as they are.
+    """
+    from .napari_private import status_for_cursor
+
+    def _words(position, view_direction) -> str | None:
+        for callback in reversed(list(viewer.mouse_move_callbacks)):
+            words = getattr(callback, "lobemap_words", None)
+            if words is not None:
+                return words(position, view_direction)
+        return None
+
+    status_for_cursor(viewer, _words, held=lambda: viewer in _HELD)
+
+
+#: The viewers building a scene beside the one shown; see `hold_status`.
+_HELD: weakref.WeakSet = weakref.WeakSet()
+
+
+@contextlib.contextmanager
+def hold_status(viewer):
+    """Leave the status bar's words as they are while a switch builds the
+    next scene, and reckon them anew once it is done.
+
+    napari keeps layer names unique, so the next scene's layers are named
+    "neuPrint · 3D [1]" until the scene they were built beside is gone
+    (`SceneSession.take_names`). napari's status thread kept reckoning the
+    status bar's words meanwhile, from the active layer's name, and the
+    status bar could show the numbered name after the switch.
+    """
+    _HELD.add(viewer)
+    try:
+        yield
+    finally:
+        _HELD.discard(viewer)
+        viewer.update_status_from_cursor()
+
+
+def show_main_layer(viewer, registry: Registry, session: SceneSession) -> None:
+    """Make the primary atlas's 3D layer the active one.
+
+    napari makes the last layer added active, which after a load is an
+    outline layer: the layer settings showed napari's drawing tools for it,
+    and the status bar their keys. The primary atlas is what a scene opens
+    on, so its controls are the ones worth showing first.
+    """
+    primary = registry.primary_atlas(session.space)
+    surface = session.surfaces.get(primary.id) if primary is not None else None
+    if surface is not None:
+        viewer.layers.selection.active = surface.layer
+
+
+#: Each viewer's scenes, held weakly; see `tear_down_on_close`.
+_SCENES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def tear_down_on_close(viewer, session: SceneSession) -> None:
+    """Tear `session` down when the viewer closes, before napari closes it.
+
+    A closed window's scene stayed in memory. Qt deletes a closed window's
+    widgets only as its event loop turns, and they held the scene until
+    then, with its colormap entries: a window opened meanwhile numbered its
+    own (`layers._take_colormap`). And the window's own close -- its close
+    button, File > Close Window -- never closed the viewer: napari keeps
+    such a window's `Window` for the life of the process, by a handler of
+    its theme, and with it the viewer and the scene.
+
+    So `viewer.close` first tears down each scene still loaded in the
+    viewer, while the canvas is there -- its threads and timers stopped,
+    its colormap entries given back, its handlers gone -- and then napari's
+    close removes the layers and closes the window. The window's own close
+    goes through `viewer.close` too, as napari's quit does, once napari has
+    accepted it: a close the user cancels closes nothing. Installed once
+    per viewer; the scenes are held weakly.
+    """
+    scenes = _SCENES.get(viewer)
+    if scenes is None:
+        scenes = _SCENES[viewer] = weakref.WeakSet()
+        _close_scenes_first(viewer, scenes)
+    scenes.add(session)
+
+
+def _close_scenes_first(viewer, scenes: weakref.WeakSet) -> None:
+    close = type(viewer).close.__get__(viewer)
+    closing = [False]
+
+    def _close() -> None:
+        closing[0] = True
+        try:
+            for session in list(scenes):
+                session.teardown(closing=True)
+        finally:
+            close()
+
+    # A pydantic model: see `view.install_home_orientation`.
+    object.__setattr__(viewer, "close", _close)
+    window = getattr(viewer.window, "_qt_window", None)
+    if window is None:
+        return
+    # Weakly: the window holds this in its own dictionary, where PyQt finds it
+    # before the class's handler.
+    window_ref, viewer_ref = weakref.ref(window), weakref.ref(viewer)
+    close_event = type(window).closeEvent
+
+    def closeEvent(event) -> None:
+        close_event(window_ref(), event)
+        live = viewer_ref()
+        if event.isAccepted() and live is not None and not closing[0]:
+            try:
+                live.close()
+            except Exception:                   # noqa: BLE001 - raised in a Qt handler, it aborts
+                traceback.print_exc()
+
+    window.closeEvent = closeEvent
+
+
+def window_title(registry: Registry, space: str) -> str:
+    """'lobemap — Hemibrain (female, EM)': the brain open, by its title."""
+    return f"lobemap — {registry.spaces[space].title or space}"
 
 
 def load_space(
@@ -287,9 +486,11 @@ def load_space(
     done before this returns. In a switch it can still be reading then, and
     is done by the end of the switch, or within 45 ms of it. The images are
     shown once the plane and the 3D pyramid level are set, so a space
-    opened alone reads each once. See `build_scene`.
+    opened alone reads each once. See `build_scene`. Closing the viewer
+    tears the scene down (`tear_down_on_close`).
     """
     session = SceneSession(viewer, registry, space)
+    tear_down_on_close(viewer, session)
     try:
         build_scene(viewer, registry, space, into=session, defer=True)
 
@@ -300,9 +501,7 @@ def load_space(
             contours=session.contours, space=space,
             names=list(session.parts), realize=session.realize,
         )
-        session.dock = viewer.window.add_dock_widget(
-            session.panel, area="right", name="Compartments"
-        )
+        session.dock = add_dock(viewer, session.panel, PANEL_TITLE, "right")
         session.callbacks += install_picking(
             viewer, session.surfaces, session.contours, panel=session.panel
         )
@@ -315,6 +514,9 @@ def load_space(
             session.show(show)
         install_home_orientation(viewer, registry.spaces[space],
                                  reflect_axis=session.reflect_axis)
+        keep_orientation(viewer)
+        lock_layers(viewer)
+        show_main_layer(viewer, registry, session)
     except BaseException:
         session.teardown()
         raise
@@ -348,14 +550,14 @@ def run(
         raise ViewRequestError("need a space")
     check_request(registry, space, show, on_disk=True)
 
-    viewer = napari.Viewer(title=f"lobemap - {space}", ndisplay=ndisplay)
+    viewer = napari.Viewer(title=window_title(registry, space), ndisplay=ndisplay)
     try:
         def _load(target: str, show: tuple[str, ...] = ()):
             # Unfitted: a switch builds beside the open scene, and a fit
             # now would frame both. The switcher fits once the old one is
             # gone, and the first scene is fitted below.
             session = load_space(viewer, registry, target, show=show, fit=False)
-            viewer.title = f"lobemap - {session.space}"
+            viewer.title = window_title(registry, session.space)
             return session
 
         session = _load(space, tuple(show))
@@ -365,13 +567,11 @@ def run(
         switcher = SpaceSwitcher(viewer, registry, session, _load)
         # Added ONCE and never torn down, unlike the compartment panel: it is
         # the control that does the switching, so it cannot be owned by the
-        # scene it replaces. Right, beside the compartment panel and above it:
-        # the two are the scene's controls, and which space is open is read
-        # before anything about it.
-        switcher.dock = viewer.window.add_dock_widget(
-            switcher, area="right", name="Space", tabify=False
-        )
-        switcher.settle()
+        # scene it replaces. Left, tabbed with napari's layer settings, so the
+        # right column is the compartment panel's alone; see `chrome.tidy`.
+        view_dock = add_dock(viewer, switcher, VIEW_TITLE, "left")
+        tidy(viewer, view_dock, session.dock)
+        buttons.install(viewer)
     except BaseException:
         viewer.close()
         raise
@@ -386,12 +586,15 @@ def run(
 
 __all__ = [
     "BASE_DISPLAY",
+    "CLICK_SLOP",
     "DIMS_ORDER_XYZ",
     "MIRROR_AXIS",
+    "PANEL_TITLE",
     "REFERENCE_CONTOUR_COLOR",
     "ROLE_DISPLAY",
     "VIEW3D_MAX_AXIS",
     "VIEW3D_MAX_VOXELS",
+    "VIEW_TITLE",
     "MissingAssets",
     "SceneSession",
     "ViewRequestError",
@@ -400,6 +603,7 @@ __all__ = [
     "default_colormap",
     "display_for",
     "fit_view",
+    "hold_status",
     "install_display_mode",
     "install_home_orientation",
     "install_initial_fit",
@@ -407,8 +611,12 @@ __all__ = [
     "level_for_3d",
     "load_space",
     "maximize",
+    "name_the_cursor",
     "orient_anterior",
     "run",
+    "show_main_layer",
     "show_primary_atlas",
     "show_targets",
+    "tear_down_on_close",
+    "window_title",
 ]

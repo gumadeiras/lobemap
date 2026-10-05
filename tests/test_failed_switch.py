@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import turned_harness as th
 from viewer_harness import (
     assert_renders_loops,
     assert_rows_match_drawing,
@@ -26,6 +27,8 @@ from viewer_harness import (
     session,
     switch_to,
     switcher,
+    tick_all,
+    ticked,
 )
 
 pytestmark = pytest.mark.requires_data
@@ -40,23 +43,14 @@ LINE = "Orco-GAL4 & GH146-GAL4"
 TARGET = "GRABE"
 
 
-def _buttons(tab):
-    from qtpy.QtWidgets import QPushButton
-
-    return {b.text(): b for b in tab.findChildren(QPushButton)}
-
-
 def _boxes(tab, column) -> set[int]:
-    from qtpy.QtCore import Qt
-
-    return {tab._index_of(r) for r in range(tab.table.rowCount())
-            if tab.table.item(r, column).checkState() == Qt.Checked}
+    return ticked(tab, column)
 
 
 def _tick(tab, column, index, on=True) -> None:
     from qtpy.QtCore import Qt
 
-    tab.table.item(tab._row_of(index), column).setCheckState(
+    tab.table.item(tab.table_row(index), column).setCheckState(
         Qt.Checked if on else Qt.Unchecked)
 
 
@@ -111,6 +105,7 @@ def _user_scene(viewer) -> None:
         assert axis == 1
         viewer.dims.set_current_step(axis, viewer.dims.current_step[axis] + 3)
     sw.mirror.click()
+    sw.flip.click()
     pump()
 
     panel = sess.panel
@@ -120,25 +115,26 @@ def _user_scene(viewer) -> None:
         _tick(primary, VISIBLE_COL, index, on=False)
     if two_d:                       # labels and fills are 2D controls
         cut = sorted(planes_cut(primary.surface))
-        _buttons(primary)["Label all"].click()
+        tick_all(primary, LABEL_COL)
         _tick(primary, LABEL_COL, cut[0], on=False)
         for index in cut[1:4]:
             _tick(primary, FILL_COL, index)
 
-    neuropil = panel.tabs[NEUROPIL]
-    panel.setCurrentWidget(neuropil)
+    neuropil = panel.open(NEUROPIL)
     names = neuropil.surface.meshset.names
     _tick(neuropil, VISIBLE_COL, names.index(next(n for n in names if n.startswith("AL"))))
 
-    secondary = panel.tabs[SECONDARY]
-    panel.setCurrentWidget(secondary)
-    _buttons(secondary)["Show all"].click()
+    secondary = panel.open(SECONDARY)
+    tick_all(secondary)
     menu = secondary.lines
     menu.setCurrentIndex(next(i for i in range(menu.count())
                               if menu.itemText(i).startswith(LINE + " (")))
     if two_d:
-        _buttons(secondary)["Fill all"].click()
+        tick_all(secondary, FILL_COL)
     secondary.filter.setText("DA")
+    # Each tab's Sides menu off its default.
+    for page, sides in zip(panel.pages.values(), ("Right", "Left"), strict=False):
+        page.sides_menu.setCurrentIndex(page.sides_menu.findText(sides))
 
     camera = viewer.scene.camera
     camera.zoom = camera.zoom * 1.7
@@ -167,12 +163,19 @@ def _rendered(viewer) -> dict:
                     tuple(tuple(round(float(v), 6) for v in r) for r in viewer.dims.range)),
         "slice menu": sw.slice.currentText(),
         "mirror box": sw.mirror.isChecked(),
+        "flip box": sw.flip.isChecked(),
+        # Where the camera looks: the screen's right, up and toward the viewer.
+        "screen": (np.round(th.screen_axes(viewer), 6).tolist()
+                   if viewer.dims.ndisplay == 3 else None),
+        "upside down": sess.flipped,
         "open tab": sess.panel.tabText(sess.panel.currentIndex()),
+        "sources": {kind: page.chosen for kind, page in sess.panel.pages.items()},
+        "sides": {kind: page.sides_menu.currentText() for kind, page in sess.panel.pages.items()},
         "layers": layer_names(viewer),
         "visible": sorted(layer.name for layer in viewer.layers if layer.visible),
         "affines": {layer.name: np.round(layer.affine.affine_matrix, 6).tolist()
                     for layer in viewer.layers},
-        "docks": len(docks(viewer, "Compartments")),
+        "docks": len(docks(viewer, "Brain regions")),
         "handlers": handler_counts(viewer),
         # Building the next scene turns both triads onto its space.
         "triads": _triads(viewer),
@@ -185,7 +188,7 @@ def _rendered(viewer) -> dict:
             "label boxes": _boxes(tab, LABEL_COL),
             "fill boxes": _boxes(tab, FILL_COL),
             "filter": tab.filter.text(),
-            "hidden rows": {tab._index_of(r) for r in range(tab.table.rowCount())
+            "hidden rows": {tab.row_at(r).key for r in range(tab.table.rowCount())
                             if tab.table.isRowHidden(r)},
             "line": tab.lines.currentText(),
             "count": tab.count.text(),
@@ -240,14 +243,16 @@ def _fail_in_panel(monkeypatch, viewer):
 
 
 def _fail_in_dock(monkeypatch, viewer):
-    real = viewer.window.add_dock_widget
+    from lobemap.viewer import app
 
-    def refuse(widget, *args, **kwargs):
-        if kwargs.get("name") == "Compartments":
+    real = app.add_dock
+
+    def refuse(viewer, widget, name, *args, **kwargs):
+        if name == app.PANEL_TITLE:
             raise RuntimeError("the dock refused")
-        return real(widget, *args, **kwargs)
+        return real(viewer, widget, name, *args, **kwargs)
 
-    monkeypatch.setattr(viewer.window, "add_dock_widget", refuse)
+    monkeypatch.setattr(app, "add_dock", refuse)
     return "the dock refused"
 
 
@@ -295,7 +300,7 @@ FAILURES = {
 
 @pytest.mark.parametrize("ndisplay", ["2", "3"])
 @pytest.mark.parametrize("where", list(FAILURES))
-def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, where, ndisplay):
+def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, capfd, where, ndisplay):
     with launched(monkeypatch, "view", SPACE, "--ndisplay", ndisplay) as (
         code, viewer,
     ):
@@ -306,22 +311,26 @@ def test_a_failed_switch_gives_back_the_users_scene(monkeypatch, where, ndisplay
         camera = _camera(viewer)
         kept = session(viewer)
         # The scene really is the user's, not the space's defaults.
-        assert before["mirror box"]
+        assert before["mirror box"] and before["flip box"] and before["upside down"]
         assert before[SECONDARY]["line"].startswith(LINE)
         assert before[SECONDARY]["rows"]
         assert 0 < len(before[SECONDARY]["hidden rows"]) < before[SECONDARY]["n rows"]
         assert before[NEUROPIL]["drawn"]
-        assert before["open tab"] == SECONDARY[:20]
+        assert before["open tab"] == "Glomeruli"
+        assert before["sources"] == {"Glomeruli": SECONDARY, "Neuropils": NEUROPIL}
+        assert before["sides"] == {"Glomeruli": "Right", "Neuropils": "Left"}
         if ndisplay == "2":
             assert before["order"][0] == 1
             assert before[PRIMARY]["labels drawn"]
             assert before[PRIMARY]["filled drawn"]
 
         want = FAILURES[where](monkeypatch, viewer)
+        capfd.readouterr()
         switch_to(viewer, TARGET)
         pump(400)
 
-        assert want in switcher(viewer).status.text()
+        assert switcher(viewer).status.text().startswith("Could not open Grabe 2015 (")
+        assert want in capfd.readouterr().err
         _assert_same(before, _rendered(viewer))
         assert session(viewer) is kept
         center, zoom, angles = _camera(viewer)
@@ -353,16 +362,20 @@ def test_a_switch_that_succeeds_still_replaces_the_scene(monkeypatch):
         sess = session(viewer)
         assert sess.space == TARGET
         assert switcher(viewer).status.text() == ""
-        assert all(name.startswith(("grabe", "Grabe")) for name in layer_names(viewer)), (
-            layer_names(viewer))
-        assert len(docks(viewer, "Compartments")) == 1
+        # Only the open scene's layers are left.
+        assert set(viewer.layers) == set(session(viewer).all_layers()), layer_names(viewer)
+        assert len(docks(viewer, "Brain regions")) == 1
         # The mirror does not carry over, or the new space would come up
         # reflected with nothing clicked; the anatomy chosen for the slice
         # does.
         assert not sess.mirrored
         assert not switcher(viewer).mirror.isChecked()
         assert all(not s.mirrored for s in sess.surfaces.values())
-        assert switcher(viewer).slice.currentText().startswith("Anterior-Posterior")
+        # Nor does the flip: the camera shows the new brain upright.
+        assert not sess.flipped
+        assert not switcher(viewer).flip.isChecked()
+        assert str(viewer.scene.camera.orientation[1]) == "down"
+        assert switcher(viewer).slice.currentText().startswith("Frontal (")
         # On the new scene's own grid, cutting its atlas.
         axis = int(viewer.dims.order[0])
         start, _stop, step = viewer.dims.range[axis]
@@ -370,3 +383,37 @@ def test_a_switch_that_succeeds_still_replaces_the_scene(monkeypatch):
         assert k == pytest.approx(round(k), abs=1e-6)
         assert_rows_match_drawing(sess)
         assert drawn(sess.surfaces["grabe2015"], sess.contours["grabe2015"])
+
+
+def test_a_switch_that_succeeds_in_3d_faces_the_new_brain_upright(monkeypatch):
+    """Flipped and mirrored in 3D, a switch opens the next brain at its front
+    view, dorsal up, unmirrored and upright, and lit from outside: its Home
+    was set while the camera was still the old brain's, flipped."""
+    from lobemap.core.model import anatomical_axes
+    from lobemap.viewer.napari_private import front_face
+
+    with launched(monkeypatch, "view", SPACE) as (code, viewer):
+        assert code == 0
+        sw = switcher(viewer)
+        sw.mirror.click()
+        sw.flip.click()
+        pump()
+        assert session(viewer).flipped
+        switch_to(viewer, TARGET)
+        pump(400)
+        sess = session(viewer)
+        assert sess.space == TARGET and not sess.flipped and not sess.mirrored
+        assert not sw.flip.isChecked() and not sw.mirror.isChecked()
+        th.settle_canvas(viewer)
+        frame = anatomical_axes(sess.registry.spaces[TARGET])
+        _right, up, toward = th.screen_axes(viewer)
+        assert toward @ np.asarray(frame["A"]) > 0.99
+        assert up @ np.asarray(frame["D"]) > 0.99
+        for image in sess.images:
+            image.visible = False
+        surface = sess.surfaces["grabe2015"]
+        lit = th.brightness(th.picture(viewer))
+        # The control: faces wound for a flipped picture are lit from inside.
+        front_face(viewer, surface.layer, True)
+        assert th.brightness(th.picture(viewer)) < 0.8 * lit
+        front_face(viewer, surface.layer, False)

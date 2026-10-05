@@ -301,6 +301,9 @@ def test_the_initial_fit_watches_napari_canvas_not_the_widget(viewer):
     """
     from lobemap.viewer.app import fit_view, install_initial_fit
 
+    # 2D: napari's fit divides by its own size there. In 3D lobemap's fit
+    # divides by the size vispy draws at, watched below.
+    viewer.dims.ndisplay = 2
     viewer.add_image(np.zeros((40, 30, 20), np.uint8))
     assert install_initial_fit(viewer) is True
     canvas = viewer.window._qt_viewer.canvas
@@ -318,6 +321,40 @@ def test_the_initial_fit_watches_napari_canvas_not_the_widget(viewer):
     viewer.canvas.size = (1600, 400)
     canvas.events.draw()
     assert cam.zoom == pytest.approx(refit), "refit after the user took the view"
+
+
+def test_the_initial_fit_in_3d_follows_the_size_vispy_draws_at(viewer):
+    """napari turns a zoom into vispy's scale by the size vispy draws the
+    view at, which can move before napari's own: a fit made against
+    napari's was drawn at the other size, and GRABE once opened at 4.30
+    pixels per micrometer, its lobes cut, where it fits at 2.98. The 3D fit
+    reads vispy's size, and a change of it alone refits."""
+    from lobemap.viewer.app import fit_view, install_initial_fit
+
+    viewer.add_image(np.zeros((40, 30, 20), np.uint8))
+    assert install_initial_fit(viewer) is True
+    canvas = viewer.window._qt_viewer.canvas
+    cam = viewer.scene.camera
+    scene = canvas._scene_canvas
+    for size in ((500, 900), (900, 500)):
+        napari_size = tuple(viewer.canvas.size)
+        scene.size = size
+        scene.events.resize(size=scene.size)
+        viewer.canvas.size = napari_size            # napari's lags behind
+        canvas.events.draw()
+        assert tuple(canvas.view.rect.size) == size
+        refit = cam.zoom
+        fit_view(viewer)
+        assert cam.zoom == pytest.approx(refit), size
+        # Drawn at vispy's size, the box fills the canvas, inside it.
+        from viewer_harness import canvas_position
+
+        box = np.asarray(viewer.layers.extent.world, float)
+        corners = np.array([canvas_position(viewer, np.where(bits, box[1], box[0]))
+                            for bits in np.ndindex(2, 2, 2)])
+        span = corners.max(axis=0) - corners.min(axis=0)
+        assert np.all(corners >= -1e-6) and np.all(corners <= np.asarray(size) + 1e-6)
+        assert np.max(span / np.asarray(size)) > 0.95, (size, span)
 
 
 def test_the_initial_fit_survives_a_viewer_without_a_canvas():

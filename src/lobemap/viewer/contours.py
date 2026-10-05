@@ -32,7 +32,7 @@ import numpy as np
 
 from ..core.meshfmt import MeshSet
 from . import napari_private, prefetch, triangulate
-from .sections import MeshSections, PlaneCache
+from .sections import MeshSections, PlaneCache, plane_key
 
 #: Slice-label point size. Was 7, which read as small against the contours.
 TEXT_SIZE = 10.5
@@ -43,6 +43,9 @@ TEXT_SIZE = 10.5
 #: atlas along y (36 MB of outlines, 16 of fills). With
 #: `sections.SECTION_CACHE_BYTES`, at most 96 MB an atlas.
 GEOMETRY_CACHE_BYTES = 64 * 2**20
+
+#: An overlay's layer: its atlas's plain title, and what it draws.
+OUTLINE_NAME = "{} · outlines"
 
 class _PlaneGeometry:
     """What one plane draws, for every compartment it cuts, built once.
@@ -266,6 +269,9 @@ class ContourOverlay:
         self.colors = None if colors is None else np.asarray(colors, float)
         self._axis = axis
         self.width = width
+        #: A turned view's frame (`sections.PlaneFrame`), or None: the
+        #: meshes are cut by the plane on screen in it; see `set_frame`.
+        self.frame = None
         self.selection = set(
             range(meshset.n_compartments) if selection is None else selection
         )
@@ -289,7 +295,7 @@ class ContourOverlay:
 
         self.layer = viewer.add_shapes(
             data=[],
-            name=f"{name} [contours]",
+            name=OUTLINE_NAME.format(name),
             shape_type="path",
             edge_color=color,
             edge_width=width,
@@ -391,9 +397,27 @@ class ContourOverlay:
         lo, _hi, span = dims.range[axis]
         return float(lo + step * span)
 
+    def set_frame(self, frame) -> None:
+        """Cut the meshes in `frame`, a `sections.PlaneFrame`, or along the grid.
+
+        A 2D view turned across the grid (`viewer.turned`) keeps this layer's
+        transform and moves the meshes into the frame in which the plane on
+        screen is `q[axis] = slice_position()`: the data the loops are in.
+        """
+        if frame is self.frame:
+            return
+        old, self.frame = self.frame, frame
+        self._moves += 1            # the prefetch's planes move with it
+        if old is not None and (frame is None or frame.key != old.key):
+            if self._plan is not None:
+                self._plan.cancel()
+            self.sections.drop_frames()
+            self._geometry.drop(lambda key: len(key) > 2)
+        self.refresh()
+
     def contours_at(self, position: float) -> tuple[list[np.ndarray], list[int]]:
         """Polylines crossing the plane, plus the compartment each came from."""
-        sections = self.sections.at(self.axis, position)
+        sections = self.sections.at(self.axis, position, frame=self.frame)
         paths: list[np.ndarray] = []
         owners: list[int] = []
         for index in sorted(self.selection):
@@ -403,11 +427,12 @@ class ContourOverlay:
         return paths, owners
 
     def _geometry_at(self, axis: int, position: float) -> _PlaneGeometry:
-        key = (int(axis), float(position))
+        key = plane_key(axis, position, self.frame)
         hit = self._geometry.get(key)
         if hit is not None:
             return hit
-        made = _PlaneGeometry(self.sections.at(*key), *key, self.width)
+        made = _PlaneGeometry(self.sections.at(axis, position, frame=self.frame),
+                              int(axis), float(position), self.width)
         return self._geometry.put(key, made, made.nbytes)
 
     def _build(self, sections, axis: int, position: float, pause=None,
@@ -427,18 +452,25 @@ class ContourOverlay:
         start, _stop, step = dims.range[axis]
         nsteps = int(dims.nsteps[axis])
         fills = frozenset(self.filled)
-        key = (axis, self._moves, float(start), float(step), nsteps, fills)
+        frame = self.frame
+        key = (axis, self._moves, float(start), float(step), nsteps, fills,
+               None if frame is None else frame.key)
         if key == self._prefetch_key or self._prefetch_key == ("stopped",):
             return
         if self._plan is not None:
             self._plan.cancel()
         self._prefetch_key = key
-        column = self.meshset.vertices[:, axis]
+        if frame is None:
+            column = self.meshset.vertices[:, axis]
+            bounds = (float(column.min()), float(column.max()))
+        else:
+            direction, offset = frame.depth(axis)
+            column = self.meshset.vertices @ direction.astype(np.float32)
+            bounds = (float(column.min()) + offset - 1e-3, float(column.max()) + offset + 1e-3)
         self._plan = prefetch.Plan(
             self.sections, self._geometry, self._build, axis,
             napari_private.data_from_world(self.layer), dims.point,
-            (float(start), float(step), nsteps),
-            (float(column.min()), float(column.max())), position, fills,
+            (float(start), float(step), nsteps), bounds, position, fills, frame=frame,
         )
         prefetch.submit(self._plan)
 
@@ -481,6 +513,7 @@ class ContourOverlay:
         return (
             axis, position, tuple(self.viewer.dims.displayed), shown,
             frozenset(self.filled & shown), frozenset(self.labels & shown),
+            None if self.frame is None else self.frame.key,
         )
 
     def refresh(self) -> None:
@@ -535,7 +568,8 @@ class ContourOverlay:
         faces.append(stroke.astype(index, copy=False) + index(count) if count else stroke)
         colors.append(edge_rgba[geometry.owner])
         if added:
-            self._geometry.grew((geometry.axis, geometry.position), added)
+            self._geometry.grew(plane_key(geometry.axis, geometry.position, self.frame),
+                                added)
         on = self._showing()
         self.visual.draw(
             geometry.on_screen(np.vstack(verts) if count else verts[0], displayed),

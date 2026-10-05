@@ -1,0 +1,108 @@
+"""The View dock's rotation rows: one angle about each axis of the screen.
+
+Always in view, in 3D and in Slice view, so a turned view is never hidden
+behind a closed group. Each row is named by the screen axis it turns about,
+in the order of 0.1's controls -- line of sight, vertical, horizontal, which
+were "Z/slice", "Y/vertical" and "X/horizontal" -- and not by x, y and z:
+those name the image's own axes, which differ from the screen's once the
+slice axis changes. What the angles mean is `rotation`'s, where they are
+spin, tilt and turn.
+
+The rows are laid out in the View dock's own form (`add_to`), so their
+labels and boxes line up with the dock's other labels and controls.
+"""
+
+from __future__ import annotations
+
+from qtpy.QtCore import QObject, Signal
+from qtpy.QtWidgets import QDoubleSpinBox, QLabel, QPushButton, QSizePolicy
+
+HEADING = "Rotate around"
+HEADING_TIP = (
+    "Turn the view, in 3D and in Slice view, where a turn about the vertical "
+    "or horizontal axis cuts oblique sections. Dragging in 3D leaves the "
+    "angles as they are; a new angle, or Fit to window, turns back to the "
+    "front view with them applied."
+)
+#: Each row: its label, the angle of `rotation` it sets, and its positive sense.
+ROWS = (
+    ("Line of sight", "spin",
+     "Turn the picture in the screen plane. Positive is counterclockwise."),
+    ("Vertical axis", "turn",
+     ("Turn about the screen's vertical axis. Positive moves the near side to "
+      "your right.")),
+    ("Horizontal axis", "tilt",
+     "Turn about the screen's horizontal axis. Positive brings the top toward you."),
+)
+RESET = "Reset rotation"
+RESET_TIP = "Set all three angles to 0°. In 3D, also turn back to the front view."
+
+
+class RotationRows(QObject):
+    """A heading, one angle box per screen axis, and a reset button.
+
+    `changed` carries (spin, tilt, turn) once per edit: an arrow step, or a
+    typed value once it is entered, never each keystroke, since a turn
+    across the image grid resamples the image.
+    """
+
+    changed = Signal(float, float, float)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.heading = QLabel(HEADING)
+        self.heading.setToolTip(HEADING_TIP)
+        #: The angle boxes, and their labels, by the angle they set:
+        #: "spin", "tilt", "turn".
+        self.box: dict[str, QDoubleSpinBox] = {}
+        self.label: dict[str, QLabel] = {}
+        for text, angle, tip in ROWS:
+            box = QDoubleSpinBox()
+            box.setRange(-180.0, 180.0)
+            box.setWrapping(True)
+            box.setSingleStep(1.0)
+            box.setDecimals(1)
+            box.setSuffix("°")
+            box.setKeyboardTracking(False)
+            box.setToolTip(tip)
+            box.valueChanged.connect(self._on_value)
+            label = QLabel(text)
+            label.setToolTip(tip)
+            label.setBuddy(box)
+            self.box[angle] = box
+            self.label[angle] = label
+        self.reset = QPushButton(RESET)
+        self.reset.setToolTip(RESET_TIP)
+        self.reset.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.reset.clicked.connect(self._on_reset)
+
+    def add_to(self, form) -> None:
+        """Lay the rows out in `form`: the heading across it, each angle in
+        its label and control columns, and the reset under the boxes."""
+        form.addRow(self.heading)
+        for _text, angle, _tip in ROWS:
+            form.addRow(self.label[angle], self.box[angle])
+        form.addRow(None, self.reset)
+
+    def angles(self) -> tuple[float, float, float]:
+        """(spin, tilt, turn), as `SceneSession.set_rotation` takes them."""
+        return tuple(self.box[a].value() for a in ("spin", "tilt", "turn"))
+
+    def _on_value(self, _value: float) -> None:
+        self.changed.emit(*self.angles())
+
+    def _on_reset(self) -> None:
+        """All three to zero, as one change rather than three.
+
+        Announced even when they are zero already: in 3D a drag turns the
+        camera and leaves the angles alone, and Reset puts the camera back
+        at the front view.
+        """
+        for box in self.box.values():
+            box.blockSignals(True)
+            box.setValue(0.0)
+            box.blockSignals(False)
+        self._on_value(0.0)
+
+
+__all__ = ["HEADING", "RESET", "ROWS", "RotationRows"]

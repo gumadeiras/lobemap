@@ -189,6 +189,9 @@ class Registry:
                     checksum=src.get("checksum"),
                     derivation=deriv,
                 ),
+                title=body.get("title", ""),
+                about=body.get("about", ""),
+                origin=body.get("origin", ""),
             )
 
     def _load_atlases(self) -> None:
@@ -271,6 +274,16 @@ class Registry:
                 )
             self._volumes[asset_id] = Volume.load(asset.path)
         return self._volumes[asset_id]
+
+    def asset_of(self, name: str) -> Asset | None:
+        """The asset an atlas id or an asset id names, or None.
+
+        A scene names its parts by either: an atlas by its own id, reference
+        geometry by its asset's. Both reach the asset here, and with it the
+        `title` and `about` a reader sees.
+        """
+        atlas = self.atlases.get(name)
+        return self.assets.get(atlas.asset if atlas is not None else name)
 
     def atlases_in_space(self, space: str) -> list[Atlas]:
         return [a for a in self.atlases.values() if a.native_space == space]

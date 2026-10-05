@@ -84,31 +84,33 @@ def test_a_populated_plane_the_user_chose_is_kept(monkeypatch, space, axis):
         _on_plane(viewer, overlay)
 
 
-def _nearest_anatomy(space, axis):
+def _nearest_plane(space, axis):
+    """The plane a slider on `axis` steps through, and its angle to the anatomy:
+    stepping anterior-posterior cuts frontal sections, and so on."""
     from lobemap.core.model import anatomical_axes
 
     frame = anatomical_axes(space)
-    names = {"A": "Anterior-Posterior", "D": "Dorsal-Ventral", "R": "Left-Right"}
+    names = {"A": "Frontal", "D": "Horizontal", "R": "Sagittal"}
     cosines = {names[p]: abs(float(np.asarray(frame[p])[axis])) for p in names}
     name = max(cosines, key=cosines.get)
     return name, float(np.degrees(np.arccos(cosines[name])))
 
 
 @pytest.mark.parametrize("space", SPACES)
-def test_the_slice_menu_names_each_axis_by_its_nearest_anatomy(monkeypatch, space):
+def test_the_sections_menu_names_each_axis_by_its_nearest_plane(monkeypatch, space):
     with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
         menu = switcher(viewer).slice
         registry = session(viewer).registry
-        seen = set()
+        seen = []
         for i in range(menu.count()):
             axis = int(menu.itemData(i))
-            name, degrees = _nearest_anatomy(registry.spaces[space], axis)
-            assert menu.itemText(i) == (
-                f"{name} ({'xyz'[axis]}, {degrees:.1f}° off)"
-            )
-            seen.add(axis)
-        assert seen == {0, 1, 2}
-        assert "no anatomical arrows" in menu.toolTip()
+            name, degrees = _nearest_plane(registry.spaces[space], axis)
+            axis_name = {"Frontal": "anterior–posterior", "Horizontal": "dorsal–ventral",
+                         "Sagittal": "medial–lateral"}[name]
+            assert menu.itemText(i) == f"{name} ({degrees:.1f}° off {axis_name})"
+            seen.append(name)
+        assert seen == ["Frontal", "Horizontal", "Sagittal"]
+        assert menu.toolTip().startswith("Which sections the slider steps through,")
 
 
 def _assert_image_slices(layer, axis) -> None:
@@ -154,7 +156,7 @@ def test_the_slice_axis_survives_3d_and_follows_its_anatomy_to_another_space(
 ):
     with launched(monkeypatch, "view", "GRABE", "--ndisplay", "2") as (code, viewer):
         menu = switcher(viewer).slice
-        menu.setCurrentIndex(menu.findText("Anterior-Posterior", flags=_starts()))
+        menu.setCurrentIndex(menu.findText("Frontal", flags=_starts()))
         pump()
         assert viewer.dims.order[0] == 1               # A-P is y in GRABE
         viewer.dims.ndisplay = 3
@@ -163,7 +165,7 @@ def test_the_slice_axis_survives_3d_and_follows_its_anatomy_to_another_space(
         assert menu.isEnabled()
         assert viewer.dims.order[0] == 1
         switch_to(viewer, "FAFB14")
-        assert menu.currentText().startswith("Anterior-Posterior")
+        assert menu.currentText().startswith("Frontal")
         assert viewer.dims.order[0] == 2               # and z in FAFB14
         _on_plane(viewer, _primary(viewer))
 
@@ -222,7 +224,7 @@ def test_home_faces_the_mirrored_anatomy(monkeypatch):
         switcher(viewer).mirror.setChecked(True)
         pump()
         viewer.scene.camera.angles = (17, 42, -63)
-        viewer.window._qt_viewer.viewerButtons.resetViewButton.click()
+        switcher(viewer).home.click()
         frame = anatomical_axes(session(viewer).registry.spaces["GRABE"])
         reflect = np.array([-1.0, 1.0, 1.0])
         view = np.asarray(viewer.scene.camera.view_direction)
@@ -234,7 +236,7 @@ def test_home_faces_the_mirrored_anatomy(monkeypatch):
 def test_mirrored_contours_follow_a_slice_along_the_mirror_axis(monkeypatch):
     with launched(monkeypatch, "view", "GRABE", "--ndisplay", "2") as (code, viewer):
         menu = switcher(viewer).slice
-        menu.setCurrentIndex(menu.findText("Left-Right", flags=_starts()))
+        menu.setCurrentIndex(menu.findText("Sagittal", flags=_starts()))
         switcher(viewer).mirror.setChecked(True)
         pump()
         overlay = _primary(viewer)
@@ -246,16 +248,17 @@ def test_mirrored_contours_follow_a_slice_along_the_mirror_axis(monkeypatch):
         assert_renders_loops(overlay)
 
 
-def test_napari_roll_button_is_a_slice_axis_choice(monkeypatch):
-    """napari's own roll-dims button changed the slice axis behind the menu:
-    the menu kept its old name and the new plane showed no contour. In 3D a
-    roll broke the identity order that keeps the image and meshes aligned."""
+def test_napari_roll_shortcut_is_a_slice_axis_choice(monkeypatch):
+    """napari's roll-dims button, hidden now but still a shortcut, changed the
+    slice axis behind the menu: the menu kept its old name and the new plane
+    showed no contour. In 3D a roll broke the identity order that keeps the
+    image and meshes aligned. The shortcut runs `viewer.dims.roll()`."""
     with launched(monkeypatch, "view", "GRABE", "--ndisplay", "2") as (code, viewer):
         menu = switcher(viewer).slice
         sess = session(viewer)
         overlay = _primary(viewer)
         before = menu.currentText()
-        viewer.window._qt_viewer.viewerButtons.rollDimsButton.click()
+        viewer.dims.roll()
         pump()
         axis = viewer.dims.order[0]
         assert sess.slice_axis == axis
@@ -264,6 +267,6 @@ def test_napari_roll_button_is_a_slice_axis_choice(monkeypatch):
 
         viewer.dims.ndisplay = 3
         pump()
-        viewer.window._qt_viewer.viewerButtons.rollDimsButton.click()
+        viewer.dims.roll()
         pump()
         assert tuple(viewer.dims.order) == (0, 1, 2)

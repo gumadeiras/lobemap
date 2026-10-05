@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..core.registry import Registry
+from . import rows
 from .contours import ContourOverlay
 from .layers import AtlasSurface, canonical_colors
 from .request import REFERENCE_ROLES
@@ -29,23 +30,31 @@ ATLAS_CONTOUR_COLORS = [
 REFERENCE_CONTOUR_COLOR = "#9aa0a6"
 REFERENCE_CONTOUR_WIDTH = 0.2
 
+#: How a part's 3D layer is drawn: its opacity and napari blending.
+#:
+#: Translucent, as every layer of a scene is: each is laid over what is
+#: drawn before it, glomeruli over neuropils over the brain maps
+#: (`scene.scene_ranks`), so a glomerulus keeps its own color rather than
+#: having the stain's gray and the shells' colors added to it.
+#:
+#: A shell is drawn without depth (`translucent_no_depth`): one that wrote
+#: its depth hid every glomerulus inside it, since the glomeruli are drawn
+#: after it and fail the depth test there. So every face of it is laid on,
+#: back faces too, and with all of a brain's neuropils shown many lie on one
+#: pixel. At 0.1 each, the stain still shows through them, 54-62% of it on
+#: average over the brain and 22-28% or more on 95% of it; at 0.35, the
+#: opacity they had when additive, 17-23% on average, and nothing at all
+#: through the thickest 5%. A glomerulus keeps the 0.75 it always had: three quarters
+#: or more of each of its pixels is its own color, and 81-96% on average,
+#: as its faces overlap. Measured in `tests/test_layer_stack.py`.
+SHELL_STYLE = {"opacity": 0.1, "blending": "translucent_no_depth"}
+ATLAS_STYLE = {"opacity": 0.75, "blending": "translucent"}
 
-def _tag(meshset) -> str:
-    """Mark bridged, degraded and mirrored layers in their name.
 
-    Only ingest-time bridging reaches this now: an asset transformed into
-    the space it is declared in, such as the FlyWire neuropils bridged
-    FLYWIRE -> FAFB14. The viewer no longer bridges atlases across spaces.
-    """
-    params = meshset.meta.get("derivation", {}).get("params", {})
-    if not params:
-        return ""
-    bits = ["bridged"]
-    if params.get("degraded"):
-        bits.append("DEGRADED")
-    if params.get("mirror"):
-        bits.append("mirrored")
-    return " [" + ", ".join(bits) + "]"
+def surface_style(part) -> dict:
+    """The opacity and blending a part's 3D layer opens with (`SHELL_STYLE`,
+    `ATLAS_STYLE`): its stand-in's too, which becomes that layer."""
+    return dict(SHELL_STYLE if part.reference else ATLAS_STYLE)
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,42 @@ class ScenePart:
     @property
     def reference(self) -> bool:
         return self.atlas is None
+
+
+def part_title(registry: Registry, part: ScenePart) -> str:
+    """The plain title a part's layers are named by, from its asset.
+
+    The title the panel's tab shows, and the project the data come from
+    when the title does not say: "Benton 2025", "Neuropils (FlyWire)".
+    """
+    asset = registry.asset_of(part.name) or part.asset
+    title = asset.title or part.name
+    return f"{title} ({asset.origin})" if asset.origin else title
+
+
+def colors_title(registry: Registry, space: str, part: ScenePart) -> str:
+    """What a part's colormap is called in napari's layer settings.
+
+    An atlas's colors are named after the atlas, as the panel's Source menu
+    names it: "Benton 2025 colors". Where another brain has an atlas of the
+    same name -- neuPrint, in the hemibrain and the male CNS -- the brain
+    comes first: "Male CNS neuPrint colors". A brain has one set of
+    neuropils, named after the brain: "Hemibrain neuropil colors". So each
+    part has an entry of napari's colormaps of its own, whichever brains
+    were opened before it; numbered ones, "Glomerulus colors (5)", said
+    nothing. The longest, "Schlegel (projection) colors", leaves the layer
+    settings as narrow as the View dock.
+    """
+    space_title = registry.spaces[space].title if space in registry.spaces else ""
+    brain = space_title.split(" (")[0] or space
+    if part.reference:
+        return f"{brain} {part.asset.role} colors"
+    title = part_title(registry, part)
+    shared = any(
+        atlas.native_space != space
+        and part_title(registry, ScenePart(atlas.id, registry.assets[atlas.asset], atlas)) == title
+        for atlas in registry.atlases.values() if atlas.asset in registry.assets)
+    return f"{brain} {title} colors" if shared else f"{title} colors"
 
 
 def scene_parts(registry: Registry, space: str) -> list[ScenePart]:
@@ -100,24 +145,27 @@ def make_surface(viewer, registry: Registry, space: str, part: ScenePart,
     """
     if meshset is None:
         meshset = registry.mesh(part.asset.id)
+    title = part_title(registry, part)
+    colormap_name = colors_title(registry, space, part)
     if part.reference:
-        # Additive, not translucent: a translucent shell writes depth and so
-        # hides the very glomeruli it is meant to give context to.
         surface = AtlasSurface(
-            viewer, meshset, name=part.asset.id + _tag(meshset), opacity=0.35,
-            blending="additive", shading="none", visible=False, layer=layer,
-            mirror=mirror,
+            viewer, meshset, name=title, **surface_style(part),
+            shading="none", visible=False, layer=layer, mirror=mirror,
+            colormap_name=colormap_name,
+            display_names=[rows.side_name(name) for name in meshset.names],
         )
     else:
         atlas = part.atlas
         surface = AtlasSurface(
-            viewer, meshset, name=(atlas.title or atlas.id) + _tag(meshset),
+            viewer, meshset, name=title, colormap_name=colormap_name,
             # The SPACE's vocabulary, not a global one: a glomerulus is
             # one color across the atlases it can be compared with, which
             # is exactly the atlases sharing its space.
             colors=canonical_colors(atlas.compartments, registry.vocabulary(space)),
-            display_names=[c.label for c in atlas.compartments] or None,
-            visible=False, layer=layer, mirror=mirror,
+            display_names=[rows.side_name(c.published_name, c.uncertain)
+                           for c in atlas.compartments]
+            or [rows.side_name(name) for name in meshset.names],
+            visible=False, layer=layer, mirror=mirror, **surface_style(part),
         )
     surface.layer.metadata["lobemap"].update(
         id=part.name, asset=part.asset.id, role=part.asset.role
@@ -145,11 +193,16 @@ def make_contour(viewer, surface: AtlasSurface, style, reference: bool) -> Conto
 
 __all__ = [
     "ATLAS_CONTOUR_COLORS",
+    "ATLAS_STYLE",
     "REFERENCE_CONTOUR_COLOR",
     "REFERENCE_CONTOUR_WIDTH",
+    "SHELL_STYLE",
     "ScenePart",
+    "colors_title",
     "contour_styles",
     "make_contour",
     "make_surface",
+    "part_title",
     "scene_parts",
+    "surface_style",
 ]

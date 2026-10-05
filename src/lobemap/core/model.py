@@ -353,6 +353,17 @@ class Asset:
     #: stains, so it carries the override rather than the wrong role.
     display: Mapping[str, Any] = field(default_factory=dict)
     source: Provenance = field(default_factory=Provenance)
+    #: The plain name a reader sees for this asset, such as "Schlegel
+    #: (sensory)": the one place it is written, so a tab, a layer and a
+    #: hover line cannot call the same thing three different names.
+    title: str = ""
+    #: One line under the title: a short citation, then what the asset is.
+    #: "Schlegel et al. 2021, eLife, file 11: glomeruli defined from
+    #: sensory neurons".
+    about: str = ""
+    #: The project the data come from, when the title does not say:
+    #: "FlyWire" for the FAFB neuropils. A layer's name adds it.
+    origin: str = ""
 
 
 @dataclass(frozen=True)

@@ -158,3 +158,36 @@ def test_a_contour_mirrors_its_surface_across_a_mode_switch(registry):
         assert contours["neuprint_hemibrain_neuropil"].layer.visible
     finally:
         viewer.close()
+
+
+@pytest.mark.requires_data
+@pytest.mark.parametrize("space", ["JRCFIB2018F", "FAFB14"])
+def test_the_slice_writes_each_name_as_its_row_shows_it(monkeypatch, space):
+    """Every glomerulus and neuropil named on the slice, as a reader ticks
+    Label, is written as the table's name column has it: `DA1`, not
+    `DA1(R)`; `MB_PED`, not `MB_PED_L`. The side is where the name is."""
+    import re
+
+    from viewer_harness import launched, pump, session, tick_all
+
+    from lobemap.viewer.panel import LABEL_COL, NAME_COL
+    from lobemap.viewer.rows import RENAMED_MARK
+
+    with launched(monkeypatch, "view", space, "--ndisplay", "2") as (code, viewer):
+        assert code == 0
+        sess = session(viewer)
+        checked = 0
+        for name in list(sess.parts):
+            tab = sess.panel.tab(name)
+            contour = sess.contours[name]
+            tick_all(tab)
+            tick_all(tab, LABEL_COL)
+            pump(300)
+            written = sorted(text for text, _pos, _rgba in rendered_labels(contour))
+            cut = {owner for owner, _loop in contour_loops(contour)}
+            want = sorted({tab.table.item(tab.table_row(i), NAME_COL).text().rstrip(RENAMED_MARK)
+                           for i in cut if i in contour.labels})
+            assert written and sorted(set(written)) == want, (name, written[:6], want[:6])
+            assert not [t for t in written if re.search(r"\([LR]\)|_[LR]$", t)], name
+            checked += len(written)
+        assert checked > 40, checked

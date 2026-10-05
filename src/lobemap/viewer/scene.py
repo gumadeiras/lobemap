@@ -2,12 +2,14 @@
 
 `build_scene` adds a space's reference meshes, images and atlases, each atlas
 with its slice contours; `SceneSession` records what one load created, so a
-switch can tear it down again without touching anything else.
+switch can tear it down again without touching anything else. How the scene
+is turned, mirrored and flipped is `pose`'s.
 """
 
 from __future__ import annotations
 
 import contextlib
+import re
 
 from ..core.registry import Registry
 from . import prefetch
@@ -27,21 +29,22 @@ from .parts import (
     make_surface,
     scene_parts,
 )
+from .pose import ScenePose
 from .request import MissingAssets, ViewRequestError, show_targets
+from .rotation import register
 from .slicing import (
     DEFAULT_SLICE_AXIS,
     busiest_plane,
     compartment_spans,
     crosses,
-    order_for,
 )
+from .turned import TurnedView
 from .view import (
     MIRROR_AXIS,
     apply_mirror,
     center_sliders,
     fit_view,
     install_home_orientation,
-    mirror_center,
 )
 
 #: Whether 2D gets its own exact mesh-plane contour layers, or just shows
@@ -65,6 +68,61 @@ from .view import (
 #:
 #: So: outlines, and a Shapes layer beside every Surface layer.
 USE_SLICE_CONTOURS = True
+
+#: The number napari puts after a layer name another layer already has.
+_NUMBERED = re.compile(r" \[\d+\]$")
+
+
+def scene_ranks(parts: dict, primary, surfaces: dict, contours: dict, images,
+                standins=None) -> dict[int, tuple]:
+    """Each layer's place in a scene's stack, by `id`: higher is drawn later,
+    over the lower, and listed higher in the layer list.
+
+    Bottom first: the brain maps -- the stain or the confocal image, then
+    the label volume, which under the confocal image could not be seen --
+    then each neuropil set, then each glomerulus atlas, the primary one on
+    top. Each part's outlines sit right over its 3D layer, so the two are
+    one entry in the list: 2D draws the one and 3D the other. A stand-in
+    (`deferred`) holds the place of the 3D layer it becomes. `primary` is
+    the primary atlas's scene key, or None.
+    """
+    shells = [name for name, part in parts.items() if part.reference]
+    atlases = sorted((name for name, part in parts.items() if not part.reference),
+                     key=lambda name: name != primary)
+    place = {}
+    for group, names in ((1, shells), (2, atlases)):
+        for i, name in enumerate(names):
+            place[name] = (group, len(names) - i)       # the first listed on top
+    maps = sorted(images, key=lambda layer: layer.metadata.get(
+        "lobemap", {}).get("kind") == "labels")
+    ranks = {id(layer): (0, i, 0) for i, layer in enumerate(maps)}
+    for name, surface in surfaces.items():
+        ranks[id(surface.layer)] = (*place[name], 0)
+    for name, overlay in contours.items():
+        ranks[id(overlay.layer)] = (*place[name], 1)
+    for name, layer in (standins or {}).items():
+        ranks[id(layer)] = (*place[name], 0)
+    return ranks
+
+
+def stack(viewer, ranks: dict[int, tuple]) -> None:
+    """Put a scene's layers in the order of their `ranks`, under every other
+    layer: one the user added stays on top, where napari put it.
+
+    Beside the scene a switch replaces, the new one goes under it until it
+    is gone. napari redraws the stack once, after the last move, as its own
+    `move_multiple` has it do; that method is not used because its plan of
+    moves lost track of the indices for some orders, and moved past the end.
+    """
+    layers = viewer.layers
+    ours = sorted((layer for layer in layers if id(layer) in ranks),
+                  key=lambda layer: ranks[id(layer)])
+    if [layers.index(layer) for layer in ours] == list(range(len(ours))):
+        return
+    with layers.events.reordered.blocker():
+        for place, layer in enumerate(ours):
+            layers.move(layers.index(layer), place)
+    layers.events.reordered(value=layers)
 
 
 def build_scene(
@@ -137,7 +195,7 @@ def build_scene(
         except (FileNotFoundError, KeyError):
             pass                    # unreadable: left out, as a missing file is
 
-    # Reference geometry first, so it sits underneath.
+    # Added in any order: `stack` puts them in theirs once all are made.
     for part in parts:
         if part.reference:
             _add(part)
@@ -202,6 +260,10 @@ def build_scene(
         if len(viewer.layers) == len(into.all_layers()):
             into.open_sliders()
 
+    standins = into.deferred.standins if into is not None and into.deferred else None
+    stack(viewer, scene_ranks(by_name, primary.id if primary is not None else None,
+                              surfaces, contours, images, standins))
+
     # Anatomical names for the dimension sliders and napari's own axis
     # overlay. No layer of our own: see `viewer/axes.py`. It shows the
     # anatomy in 3D and the voxel grid in 2D, and is kept up to date by
@@ -237,7 +299,7 @@ def show_primary_atlas(registry: Registry, space: str, surfaces,
             contours[name].selection = set()
 
 
-class SceneSession:
+class SceneSession(ScenePose):
     """One loaded space, and everything needed to unload it again.
 
     Switching space inside a live viewer is not just `layers.clear()`. The
@@ -265,7 +327,7 @@ class SceneSession:
         self.panel = None
         self.dock = None
         self.handlers: list[tuple] = []
-        #: Callbacks added to `viewer.mouse_move_callbacks`.
+        #: Callbacks added to the viewer's mouse move and drag callbacks.
         self.callbacks: list = []
         #: Every mesh the space shows, by scene key, built or not.
         self.parts: dict[str, ScenePart] = {}
@@ -290,6 +352,8 @@ class SceneSession:
         #: Where the sliders go, as `center_sliders` takes it; see `open_sliders`.
         self.sliders: tuple | None = None
         self._spans: dict[tuple[str, int], object] = {}
+        #: The angles the scene is turned by, and what they move; see `turned`.
+        self.turned = TurnedView(self)
 
     def all_layers(self) -> list:
         """Every layer this session owns."""
@@ -306,26 +370,6 @@ class SceneSession:
         out = [c.layer for c in self.contours.values()]
         out += [layer for layer in self.images if layer not in out]
         return out
-
-    def reflect_axis(self) -> int | None:
-        """The array axis the scene is shown mirrored along, or None."""
-        return MIRROR_AXIS if self.mirrored else None
-
-    @property
-    def mirror_center(self) -> float:
-        """The plane the mirror reflects about: the mid-plane of the scene.
-
-        Every part counts, built or not, so the plane is the same whichever
-        tabs have been opened: a part not built yet lies within the layers
-        there are, or has a stand-in that spans it (`deferred`). It is also
-        the mid-plane of the sliders, which span the same layers, so the
-        reflected slider grid is the same grid and the plane stays on it.
-        Measured while nothing is mirrored, because `extent.world` includes
-        the reflection, and held while the mirror is on.
-        """
-        if self.mirrored and self._mirror_center is not None:
-            return self._mirror_center
-        return mirror_center(self.all_layers())
 
     def realize(self, name: str):
         """Build a part `build_scene` deferred; return its surface and contours.
@@ -371,11 +415,12 @@ class SceneSession:
                 contour.handlers = self.contour_handlers
                 surface.pair(contour)
             surface.sync()          # nothing selected: both layers off
-            self._stack(surface.layer, self._rank(name))
-            if contour is not None:
-                self._stack(contour.layer, self._rank(name, contour=True))
+            self._put_in_place(name, surface, contour)
             if self.mirrored and contour is not None:
                 apply_mirror([contour.layer], True, self.mirror_center)
+            if contour is not None:
+                # Placed on the turned plane, as the parts already built are.
+                self.turned.adopt(contour)
         except BaseException:
             for layer in added:
                 with contextlib.suppress(Exception):
@@ -392,76 +437,31 @@ class SceneSession:
                 layers.selection.active = active
         return surface, contour
 
-    def _rank(self, name: str, contour: bool = False) -> int:
-        """Where a part's layer sits, bottom first, as `build_scene` adds them:
-        shells, images, atlases, then every contour layer."""
-        position = list(self.parts).index(name)
-        if contour:
-            return 30_000 + position
-        return position if self.parts[name].reference else 20_000 + position
+    def _put_in_place(self, name: str, surface, contour) -> None:
+        """Move a part just built into its place in the stack (`scene_ranks`).
 
-    def _stack(self, layer, rank: int) -> None:
-        """Move `layer` under this scene's layers ranked above it, or on top.
-
-        Just added, it is on top; a stand-in taken over is at the bottom.
+        Each of its layers goes right under this scene's lowest layer ranked
+        above it, or else right over its highest ranked below, wherever the
+        user has put them: a layer the user added stays on top. Just added,
+        a layer is on top; a stand-in taken over is in its place already.
         """
-        ranks = {id(image): 10_000 + i for i, image in enumerate(self.images)}
-        for key, surface in self.surfaces.items():
-            ranks[id(surface.layer)] = self._rank(key)
-        for key, overlay in self.contours.items():
-            ranks[id(overlay.layer)] = self._rank(key, contour=True)
+        primary = self.registry.primary_atlas(self.space)
+        ranks = scene_ranks(
+            self.parts, primary.id if primary is not None else None,
+            {**self.surfaces, name: surface},
+            {**self.contours, **({name: contour} if contour is not None else {})},
+            self.images, self.deferred.standins if self.deferred is not None else None)
         layers = self.viewer.layers
-        above = [i for i, other in enumerate(layers) if ranks.get(id(other), -1) > rank]
-        layers.move(layers.index(layer), min(above) if above else len(layers))
-
-    def set_mirror(self, on: bool) -> None:
-        """Show the space reflected, or stop.
-
-        The triads are re-derived rather than left alone: a mirror
-        reverses handedness, so an unmirrored anatomical triad over
-        mirrored data would name the wrong side, which is the single
-        error this project has had to correct most often.
-        """
-        if on and not self.mirrored:
-            self._mirror_center = self.mirror_center
-        self.mirrored = bool(on)
-        # Two routes on purpose: the surfaces reflect their own vertices, so
-        # their node transform stays proper and they are lit from outside,
-        # and so do their stand-ins, to the bit; the contours and images
-        # ride on `affine`.
-        for surface in self.surfaces.values():
-            with contextlib.suppress(Exception):
-                surface.set_mirror(self.reflect_axis(), self.mirror_center)
-        if self.deferred is not None:
-            self.deferred.set_mirror(self.reflect_axis(), self.mirror_center)
-        apply_mirror(self.affine_layers(), self.mirrored, self.mirror_center)
-        space = self.registry.spaces.get(self.space)
-        if space is not None:
-            apply_axis_mode(self.viewer, space, mirror_axis=self.reflect_axis())
-        for overlay in self.contours.values():
-            with contextlib.suppress(Exception):
-                overlay.refresh()
-
-    def set_slice_axis(self, axis: int) -> None:
-        """Step 2D along another array axis; image and contours follow.
-
-        Remembered for the session, so 3D and back keeps it. The contours
-        read the axis from `dims.order` and redraw when it changes. The view
-        is refitted, since the camera was framing the other plane's axes.
-        """
-        self.slice_axis = int(axis)
-        if self.viewer.dims.ndisplay == 3:
-            return
-        order = order_for(self.slice_axis)
-        # Not a reason to stop: napari's roll button sets the order first,
-        # and the new plane still has to be found.
-        if tuple(self.viewer.dims.order) != order:
-            self.viewer.dims.order = order
-        space = self.registry.spaces.get(self.space)
-        if space is not None:
-            apply_axis_mode(self.viewer, space, mirror_axis=self.reflect_axis())
-        self.populate_plane()
-        fit_view(self.viewer)
+        for layer in (surface.layer, contour.layer if contour is not None else None):
+            if layer is None:
+                continue
+            rank = ranks[id(layer)]
+            others = [(i, ranks[id(other)]) for i, other in enumerate(layers)
+                      if other is not layer and id(other) in ranks]
+            above = [i for i, other in others if other > rank]
+            below = [i for i, other in others if other < rank]
+            if above or below:
+                layers.move(layers.index(layer), min(above) if above else max(below) + 1)
 
     def _atlas_order(self) -> list[str]:
         primary = self.registry.primary_atlas(self.space)
@@ -486,7 +486,16 @@ class SceneSession:
         plane that cuts any shown atlas is the user's and is kept; an empty
         one moves to the plane cutting the most compartments of the first
         shown atlas, the primary one when it is shown. True if it moved.
+
+        A view turned across the grid keeps its plane: it passes through the
+        pivot, and the spans here are along the grid. The plane a turn put
+        back at rest is put back first (`TurnedView.take_plane`).
         """
+        plane = self.turned.take_plane()
+        if plane is not None and int(self.viewer.dims.order[0]) == plane[0]:
+            self.viewer.dims.set_point(*plane)
+        if self.turned.kind not in (None, "spin"):
+            return False
         shown = [n for n in self._atlas_order() if self.surfaces[n].selection]
         if not shown:
             return False
@@ -539,6 +548,7 @@ class SceneSession:
         layer selection are the switcher's to restore (`restore_view`); these
         are this session's, because they depend on its space and its mirror.
         """
+        register(self.viewer, self.turned)
         space = self.registry.spaces.get(self.space)
         if space is None:
             return
@@ -551,6 +561,19 @@ class SceneSession:
         if self.sliders is not None:
             sliders, self.sliders = self.sliders, None
             center_sliders(self.viewer, *sliders, keep=keep)
+
+    def take_names(self) -> None:
+        """Give each layer back the name napari numbered, once the scene it
+        was built beside is gone.
+
+        napari keeps layer names unique, and the next scene is built while
+        the open one is still there: a name both have -- "Neuropil stain
+        (from synapses)", "neuPrint · 3D" -- came out "... [1]".
+        """
+        for layer in self.all_layers():
+            name = _NUMBERED.sub("", layer.name)
+            if name != layer.name:
+                layer.name = name
 
     def settle_view(self) -> None:
         """Frame this scene once it is the only one loaded.
@@ -584,18 +607,28 @@ class SceneSession:
         if dims.ndisplay == 3:
             fit_view(self.viewer)
 
-    def teardown(self) -> None:
+    def teardown(self, closing: bool = False) -> None:
+        """Undo what this session made, and nothing else.
+
+        With `closing`, the viewer is closing (`app.tear_down_on_close`):
+        napari's close removes every layer once it has stopped slicing, and
+        the window takes the dock with it, so neither is touched here.
+        """
+        self.turned.close()
         for event, handler in self.handlers:
             with contextlib.suppress(Exception):
                 event.disconnect(handler)
         self.handlers = []
-        for overlay in self.contours.values():
-            for event, handler in getattr(overlay, "handlers", ()) or ():
-                with contextlib.suppress(Exception):
-                    event.disconnect(handler)
+        # Every overlay's: they share them. Dropped, as they hold the overlays.
+        for event, handler in self.contour_handlers:
+            with contextlib.suppress(Exception):
+                event.disconnect(handler)
+        self.contour_handlers = []
         for callback in self.callbacks:
-            with contextlib.suppress(ValueError):
-                self.viewer.mouse_move_callbacks.remove(callback)
+            for callbacks in (self.viewer.mouse_move_callbacks,
+                              self.viewer.mouse_drag_callbacks):
+                with contextlib.suppress(ValueError):
+                    callbacks.remove(callback)
         self.callbacks = []
         for surface in self.surfaces.values():
             surface.stop()
@@ -626,11 +659,11 @@ class SceneSession:
         # Only this session's layers. A switch builds the next scene before
         # tearing this one down, and a failed build tears down only itself,
         # so clearing the whole list would take the other scene with it.
-        for layer in self.all_layers():
+        for layer in [] if closing else self.all_layers():
             with contextlib.suppress(Exception):
                 if layer in self.viewer.layers:
                     self.viewer.layers.remove(layer)
-        if self.dock is not None:
+        if self.dock is not None and not closing:
             with contextlib.suppress(Exception):
                 self.viewer.window.remove_dock_widget(self.dock)
             # Removing it undocks it but leaves it a child of the window, so
@@ -654,5 +687,7 @@ __all__ = [
     "make_contour",
     "make_surface",
     "scene_parts",
+    "scene_ranks",
     "show_primary_atlas",
+    "stack",
 ]

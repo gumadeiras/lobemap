@@ -46,9 +46,16 @@ def launched(monkeypatch, *argv):
 
     The window is created hidden and never maximized -- `maximize` would
     show it -- and `napari.run` returns at once, so the viewer is left as
-    the user would first see it. It is closed afterwards.
+    the user would first see it. It is closed afterwards, and let go of:
+    the patch, which holds it, lasts until the test ends.
+
+    napari's event loop module takes `napari.Viewer` by name when it is
+    first imported, so it is imported before the patch. First imported
+    under it, it kept `hidden` in place of napari's class for the rest of
+    the process, and with it the first window this made.
     """
     import napari
+    import napari._qt.qt_event_loop  # before the patch: see above
 
     from lobemap import cli
 
@@ -71,6 +78,7 @@ def launched(monkeypatch, *argv):
     finally:
         for viewer in created:
             viewer.close()
+        created.clear()
         pump()
 
 
@@ -130,11 +138,20 @@ def handler_counts(viewer) -> dict[str, int]:
         for name in ("draw", "resize", "mouse_press", "mouse_wheel", "key_press")
     })
     out["viewer.mouse_move_callbacks"] = len(viewer.mouse_move_callbacks)
+    out["viewer.mouse_drag_callbacks"] = len(viewer.mouse_drag_callbacks)
     return out
 
 
 def layer_names(viewer) -> list[str]:
     return sorted(layer.name for layer in viewer.layers)
+
+
+def stand_in_name(sess, name: str) -> str:
+    """What the stand-in of the part `name` is called in the layer list."""
+    from lobemap.viewer.deferred import STANDIN_NAME
+    from lobemap.viewer.parts import part_title
+
+    return STANDIN_NAME.format(title=part_title(sess.registry, sess.parts[name]))
 
 
 # -- what is drawn --------------------------------------------------------
@@ -373,13 +390,65 @@ def drawn(surface, contour=None) -> set[int]:
     return out | (resident & opaque)
 
 
-def checked(tab) -> set[int]:
+def ticked(tab, column=None) -> set[int]:
+    """The chosen sides (`AtlasTab.chosen`) of the rows whose box in
+    `column`, Show by default, is ticked in full: the compartments the
+    table says are on."""
     from qtpy.QtCore import Qt
 
     from lobemap.viewer.panel import VISIBLE_COL
 
-    return {tab._index_of(r) for r in range(tab.table.rowCount())
-            if tab.table.item(r, VISIBLE_COL).checkState() == Qt.Checked}
+    column = VISIBLE_COL if column is None else column
+    return {i for r in range(tab.table.rowCount())
+            if tab.table.item(r, column).checkState() == Qt.CheckState.Checked
+            for i in tab.chosen(tab.row_at(r))}
+
+
+def checked(tab) -> set[int]:
+    """The compartments whose rows are ticked to show."""
+    return ticked(tab)
+
+
+def click_header(tab, column: int) -> None:
+    """Click a column's header with the left button, as a user does."""
+    from qtpy.QtCore import QPoint, Qt
+    from qtpy.QtTest import QTest
+
+    header = tab.table.horizontalHeader()
+    x = header.sectionViewportPosition(column) + header.sectionSize(column) // 2
+    QTest.mouseClick(header.viewport(), Qt.MouseButton.LeftButton,
+                     Qt.KeyboardModifier.NoModifier, QPoint(x, header.height() // 2))
+    pump()
+
+
+def tick_all(tab, column=None) -> None:
+    """Click `column`'s header checkbox, Show by default, until it is ticked:
+    every listed row ticked."""
+    _click_until(tab, column, "Checked")
+
+
+def clear_all(tab, column=None) -> None:
+    """Click `column`'s header checkbox, Show by default, until it is clear."""
+    _click_until(tab, column, "Unchecked")
+
+
+def _click_until(tab, column, state: str) -> None:
+    from qtpy.QtCore import Qt
+
+    from lobemap.viewer.panel import VISIBLE_COL
+
+    column = VISIBLE_COL if column is None else column
+    want = getattr(Qt.CheckState, state)
+    for _click in range(2):
+        if tab.header.state(column) == want:
+            return
+        click_header(tab, column)
+    assert tab.header.state(column) == want, (column, tab.header.state(column))
+
+
+def every_index(tab) -> range:
+    """Every compartment of a tab's mesh, every side of every row."""
+    return range(tab.surface.meshset.n_compartments)
 
 
 def planes_cut(surface) -> set[int]:
@@ -405,6 +474,10 @@ def planes_cut(surface) -> set[int]:
 def assert_rows_match_drawing(sess) -> None:
     """Every tab: checked rows, count text and rendered geometry agree.
 
+    A row is every side of a compartment, and ticked in full when every side
+    the tab's Sides menu chose is shown; the count counts rows with any side
+    shown.
+
     Call it once the scene has settled (`pump(300)`): a compartment checked
     after compaction reaches the mesh with the next compaction. In 2D only
     the checked compartments this plane crosses can have a contour, so
@@ -414,13 +487,23 @@ def assert_rows_match_drawing(sess) -> None:
     for name, tab in sess.panel.tabs.items():
         contour = sess.contours.get(name)
         rows = checked(tab)
+        selection = set(tab.surface.selection)
         got = drawn(tab.surface, contour)
-        want = planes_cut(tab.surface) if two_d else rows
+        want = planes_cut(tab.surface) if two_d else selection
         n = tab.table.rowCount()
-        assert rows == tab.surface.selection, (name, "rows != selection")
+        on = sum(bool(set(row.indices) & selection) for row in tab.rows.values())
+        # A row is ticked in full when every side the Sides menu chose is
+        # shown; with every side chosen, the default, those are the selection.
+        whole = {i for row in tab.rows.values() if tab.chosen(row)
+                 and set(tab.chosen(row)) <= selection for i in tab.chosen(row)}
+        assert rows == whole, (name, "rows != selection")
+        if all(len(tab.chosen(row)) == len(row.indices) for row in tab.rows.values()):
+            assert rows == selection, (name, "rows != selection")
         assert got == want, (name, sorted(got ^ want)[:8])
-        assert tab.count.text() == f"{len(rows)} / {n} shown", (name, tab.count.text())
-        if not rows:
+        listed = len(tab.listed())
+        said = f"{on} of {n} shown" if listed == n else f"{listed} listed · {on} of {n} shown"
+        assert tab.count.text() == said, (name, tab.count.text())
+        if not selection:
             assert not tab.surface.layer.visible, name
             if contour is not None:
                 assert not contour.layer.visible, name
@@ -450,6 +533,33 @@ def hover(viewer, world) -> str:
     event = MouseEvent(type="mouse_move", pos=canvas_position(viewer, world),
                        modifiers=(), buttons=[])
     canvas._on_mouse_move(event)
+    pump()
+    status = viewer.status
+    return status if isinstance(status, str) else str(status)
+
+
+def click(viewer, world, drag: float = 0.0, button: int = 1) -> str:
+    """Press and release a button, the left by default, over `world`,
+    through napari's own mouse path; `drag` moves the cursor that many
+    pixels in between. What the status bar says after."""
+    from vispy.app.canvas import MouseEvent
+
+    canvas = viewer.window._qt_viewer.canvas
+    x, y = canvas_position(viewer, world)
+    viewer.status = ""
+    press = MouseEvent(type="mouse_press", pos=(x, y), modifiers=(), button=button,
+                       buttons=[button])
+    canvas._on_mouse_press(press)
+    if drag:
+        for k in range(1, 4):
+            move = MouseEvent(type="mouse_move", pos=(x + drag * k / 3, y),
+                              modifiers=(), button=button, buttons=[button],
+                              press_event=press)
+            canvas._on_mouse_move(move)
+    end = (x + drag, y)
+    release = MouseEvent(type="mouse_release", pos=end, modifiers=(), button=button,
+                         buttons=[], press_event=press)
+    canvas._on_mouse_release(release)
     pump()
     status = viewer.status
     return status if isinstance(status, str) else str(status)

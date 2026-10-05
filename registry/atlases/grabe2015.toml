@@ -11,8 +11,8 @@ doi = "10.1002/cne.23697"
 # not resolved.
 [uncertain."VP2(L)"]
 note = "VM6?"
-reason = "Grabe 2015's Amira material is VP2_left_VM6andVC6, and in affine fits to the male CNS and Schlegel S12 it lies at VM6's position rather than VP2's."
+reason = "Grabe 2015 labels this region 'VP2_left_VM6andVC6'. When the atlas is aligned to the male CNS and to Schlegel (projection), it sits where VM6 is, not VP2."
 
 [uncertain."VP2(R)"]
 note = "VM6?"
-reason = "Grabe 2015's Amira material is VP2_right_VM6andVC6, and in affine fits to the male CNS and Schlegel S12 it lies at VM6's position rather than VP2's."
+reason = "Grabe 2015 labels this region 'VP2_right_VM6andVC6'. When the atlas is aligned to the male CNS and to Schlegel (projection), it sits where VM6 is, not VP2."

@@ -13,11 +13,14 @@ index, so that value is EXACTLY the index -- identification is unambiguous.
 
 from __future__ import annotations
 
+import itertools
+import weakref
+
 import numpy as np
 
 from ..core.meshfmt import MeshSet
 from . import napari_private
-from .view import reflect_vertices
+from .view import face_front, reflect_vertices
 
 
 #: A qualitative palette that stays distinguishable at ~60 entries by cycling
@@ -66,7 +69,23 @@ def _hsv_to_rgba(h: np.ndarray, s: np.ndarray, v: np.ndarray) -> np.ndarray:
     return np.stack([r, g, b, np.ones_like(r)], axis=1)
 
 
-def step_colormap(colors: np.ndarray, name: str = "compartments"):
+#: What a surface's colormap is called in napari's layer settings when
+#: nothing names it. A scene names each after its atlas, short
+#: (`parts.colors_title`): napari keeps every colormap it is given by name,
+#: for the session, and its menus are as wide as the longest -- named after
+#: their layers, with ids in them, they widened the layer settings by up to
+#: 60 px. Each surface holds an entry of its own; see `_take_colormap`.
+GLOMERULUS_COLORS = "Glomerulus colors"
+
+#: Every colormap entry a surface has taken, by name, and the surface that
+#: holds it, or None once it is given back.
+_HOLDERS: dict[str, weakref.ref | None] = {}
+
+#: A surface's layer: its part's title, and what it draws.
+MESH_NAME = "{} · 3D"
+
+
+def step_colormap(colors: np.ndarray, name: str = GLOMERULUS_COLORS):
     """A napari Colormap mapping value i to colors[i] with no blending.
 
     With 'zero' interpolation napari wants one more control point than color:
@@ -91,7 +110,49 @@ def step_colormap(colors: np.ndarray, name: str = "compartments"):
     )
 
 
-def direct_label_colormap(values_to_colors, name: str = "labels"):
+def _take_colormap(holder, colors, base: str):
+    """A colormap entry of napari's that `holder` alone recolors, showing `colors`.
+
+    napari keeps every colormap it is given, by name, for the session, in
+    the one list every layer's colormap menu shows, and replaces none: a
+    colormap given under a name it holds with other colors is kept beside
+    it, numbered. Each selection used to be such a colormap, so the menu
+    gained an entry with each row toggled. Each surface takes the first
+    of `base`, "`base` (2)", ... that no live surface holds: one a surface
+    gone before it held, recolored, or a new one. It recolors that entry
+    in place from then on (`_recolor`) and gives it back when its scene is
+    torn down (`stop`). A name napari holds for anyone else is passed by.
+    Two surfaces of the same colors so never share one entry, which a
+    recolor would change under both.
+    """
+    from napari.utils.colormaps import AVAILABLE_COLORMAPS
+
+    n = max(len(colors), 2)                 # as `step_colormap` makes them
+    for k in itertools.count(1):
+        name = base if k == 1 else f"{base} ({k})"
+        if name in _HOLDERS:
+            ref = _HOLDERS[name]
+            if ref is not None and ref() is not None:
+                continue                    # a live surface's
+            entry = AVAILABLE_COLORMAPS[name]
+            if len(entry.colors) != n:
+                continue
+            _recolor(entry, colors)
+        elif name in AVAILABLE_COLORMAPS:
+            continue                        # not lobemap's
+        else:
+            entry = step_colormap(colors, name=name)
+        _HOLDERS[name] = weakref.ref(holder)
+        return entry
+
+
+def _recolor(entry, colors) -> None:
+    """Give a colormap entry `step_colormap`'s colors for `colors`, in place."""
+    colors = np.asarray(colors, dtype=float)
+    entry.colors = np.repeat(colors, 2, axis=0) if len(colors) == 1 else colors
+
+
+def direct_label_colormap(values_to_colors, name: str = GLOMERULUS_COLORS):
     """A napari colormap painting each label value with a given RGBA.
 
     Labels are a segmentation, so they need a value->color dict rather than
@@ -150,9 +211,7 @@ def match_label_colors(layer, surfaces) -> int:
     mapping = {int(v): palette[n] for v, n in names.items() if n in palette}
     if not mapping:
         return 0
-    layer.colormap = direct_label_colormap(
-        mapping, name=f"{layer.name}-colors"
-    )
+    layer.colormap = direct_label_colormap(mapping)
     return len(mapping)
 
 
@@ -183,19 +242,24 @@ class AtlasSurface:
         visible: bool = True,
         layer=None,
         mirror: tuple[int, float] | None = None,
+        colormap_name: str = GLOMERULUS_COLORS,
     ) -> None:
-        """`layer` is a hidden Surface layer to take over rather than add one:
+        """`name` is the part's plain title; the layer is `MESH_NAME` of it.
+        `layer` is a hidden Surface layer to take over rather than add one:
         a stand-in a scene added for this mesh before it was read
-        (`deferred`). It is given everything a new layer would be.
-        `mirror` is (axis, center) for a surface built while the view is
-        reflected (`set_mirror`)."""
+        (`deferred`). It is given everything a new layer would be but its
+        opacity and blending: it was made with the part's, and a change the
+        user made to them since is kept. `mirror` is (axis, center) for a
+        surface built while the view is reflected (`set_mirror`)."""
         self.viewer = viewer
         self.meshset = meshset
+        #: The part's plain title, which its layers and hover text name it by.
         self.name = name
         n = meshset.n_compartments
-        #: What a reader sees for each compartment: its published name, with
-        #: any doubt about it (`Compartment.label`). `meshset.names` stays the
-        #: identity every lookup uses.
+        #: What a reader sees for each compartment: its name as the panel's
+        #: table shows it, without its side and with any doubt about it
+        #: (`rows.side_name`), which the slice writes. `meshset.names` stays
+        #: the identity every lookup uses.
         self.display_names = list(meshset.names if display_names is None
                                   else display_names)
         self.colors = categorical_colors(n) if colors is None else colors
@@ -219,8 +283,10 @@ class AtlasSurface:
         self._resident: list[int] = sorted(self.selection)
         v, f, vals = meshset.select(sorted(self.selection))
         v, f = self._present(v, f)
+        #: This surface's own entry in napari's colormaps; see `_take_colormap`.
+        self._colormap = _take_colormap(self, self.colors, colormap_name)
         settings = {
-            "colormap": step_colormap(self.colors, name=f"{name}-colors"),
+            "colormap": self._colormap,
             "contrast_limits": contrast_limits_for(n),
             "opacity": opacity,
             # Given here rather than set afterwards, so vispy never computes
@@ -232,7 +298,7 @@ class AtlasSurface:
         }
         if layer is None:
             self.layer = viewer.add_surface(
-                (v, f, vals), name=name, **settings,
+                (v, f, vals), name=MESH_NAME.format(name), **settings,
                 # A scene makes its surfaces hidden and lets `sync` show each
                 # in the mode that draws it: napari slices a visible layer as
                 # it is added, so a surface made visible was sliced for nothing
@@ -245,12 +311,16 @@ class AtlasSurface:
             layer.visible = False
             layer.shading = settings.pop("shading")
             layer.data = (v, f, vals)
-            layer.name = name
+            layer.name = MESH_NAME.format(name)
+            for key in ("opacity", "blending"):
+                del settings[key]
             for key, value in settings.items():
                 setattr(layer, key, value)
             layer.visible = visible
             self.layer = layer
         self.layer.metadata["lobemap"] = {"meshset": meshset, "kind": "atlas"}
+        # Lit from outside under a picture shown upside down, as it is.
+        face_front(viewer, [self.layer])
         self.layer.events.visible.connect(self._on_eye)
         #: Whether napari's vispy node still holds this layer's 3D build of
         #: its current data; see `hide_mesh`.
@@ -492,7 +562,8 @@ class AtlasSurface:
         mask = np.zeros(len(colors), dtype=bool)
         mask[sorted(self.selection)] = True
         colors[:, 3] = np.where(mask, 1.0, 0.0)
-        self.layer.colormap = step_colormap(colors, name=f"{self.name}-colors")
+        _recolor(self._colormap, colors)
+        self.layer.colormap = self._colormap
 
     def _schedule_compact(self) -> None:
         if self.compact_delay_ms <= 0:
@@ -509,9 +580,13 @@ class AtlasSurface:
         self._timer.start(self.compact_delay_ms)
 
     def stop(self) -> None:
-        """Cancel a pending compaction, for a scene being torn down."""
+        """Cancel a pending compaction, and give back the colormap entry,
+        for a scene being torn down."""
         if self._timer is not None:
             self._timer.stop()
+        ref = _HOLDERS.get(self._colormap.name)
+        if ref is not None and ref() is self:
+            _HOLDERS[self._colormap.name] = None
 
     def compact(self) -> None:
         """Upload only the selected compartments. Restores exact picking.
@@ -531,8 +606,17 @@ class AtlasSurface:
 
     # -- identification --------------------------------------------------
 
-    def pick(self, position, view_direction, dims_displayed) -> int | None:
+    def pick(self, position, view_direction, dims_displayed,
+             from_position: bool = False) -> int | None:
         """The shown compartment a view ray through `position` meets first.
+
+        `view_direction` is the ray's, from the eye through the cursor, as
+        napari gives it for each pixel: under perspective the rays spread.
+        With `from_position` the ray starts at `position`, which napari puts
+        just in front of a perspective camera's eye; without, it crosses the
+        whole layer, as an orthographic camera sees it. Zoomed in under
+        perspective, the eye can be inside the brain, and what lies behind it
+        is not drawn: hover named it.
 
         napari's own Surface pick tests every triangle of the layer -- about
         40 ms for Benton's 298k -- and hovering asks on every mouse move.
@@ -541,7 +625,10 @@ class AtlasSurface:
         nearer than a hit already found. Only selected compartments count,
         so geometry awaiting compaction cannot answer for a hidden one.
         """
-        from napari.utils.geometry import find_nearest_triangle_intersection
+        from napari.utils.geometry import (
+            intersect_line_with_triangles,
+            line_in_triangles_3d,
+        )
 
         if view_direction is None or not self.selection:
             return None
@@ -556,9 +643,15 @@ class AtlasSurface:
         if length == 0.0:
             return None
         direction /= length
+        # How far along the ray from `start` the first hit may be, if anywhere.
+        first = None
+        if from_position:
+            origin = np.asarray(self.layer.world_to_data(position), float)
+            first = max(0.0, float(np.dot(origin[list(dims_displayed)] - start, direction)))
         if self._mirror is not None:
             # The ray is in the uploaded geometry's coordinates, reflected;
             # the boxes and triangles below are the MeshSet's (`_present`).
+            # A reflection keeps distances along the ray.
             axis, center = self._mirror
             start[axis] = 2.0 * center - start[axis]
             direction[axis] = -direction[axis]
@@ -567,20 +660,24 @@ class AtlasSurface:
         with np.errstate(divide="ignore", invalid="ignore"):
             near = (lo[indices] - start) / direction
             far = (hi[indices] - start) / direction
-        enter = np.nanmax(np.minimum(near, far), axis=1)
+        enter = np.maximum(np.nanmax(np.minimum(near, far), axis=1), first or 0.0)
         leave = np.nanmin(np.maximum(near, far), axis=1)
-        crossed = leave >= np.maximum(enter, 0.0)
+        crossed = leave >= enter
         best, best_t = None, np.inf
         for j in np.flatnonzero(crossed)[np.argsort(enter[crossed])]:
             if enter[j] > best_t:
                 break
             v, f = self.meshset.compartment(int(indices[j]))
-            hit, point = find_nearest_triangle_intersection(start, direction, v[f])
-            if hit is None:
+            triangles = v[f]
+            met = line_in_triangles_3d(start, direction, triangles)
+            if not met.any():
                 continue
-            t = float(np.dot(np.asarray(point) - start, direction))
-            if t < best_t:
-                best, best_t = int(indices[j]), t
+            points = intersect_line_with_triangles(start, direction, triangles[met])
+            t = (np.asarray(points, float) - start) @ direction
+            if first is not None:
+                t = t[t >= first]
+            if t.size and float(t.min()) < best_t:
+                best, best_t = int(indices[j]), float(t.min())
         return best
 
     def _boxes(self) -> tuple[np.ndarray, np.ndarray]:

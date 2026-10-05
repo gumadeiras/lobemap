@@ -6,8 +6,18 @@
 # states it in `source.license_url`, each checked against the primary source
 # (the dataset page, the data portal or the paper). The code's MIT license
 # does not cover any of them; README.md has the summary.
+#
+# `title` is the plain name a reader sees for the asset, and the only place
+# it is written; `about` is one line under it, a short citation and then
+# what the asset is. Neither may be an id. `origin`, where given, names the
+# project the data come from when the title does not, and a layer's name
+# adds it: "Neuropils (FlyWire) · 3D". The panel's source menu names an
+# asset by its `origin` if it has one, else by its title, and cites it with
+# its `about` line.
 
 [neuprint_hemibrain_glomeruli]
+title = "neuPrint"
+about = "Scheffer et al. 2020, eLife: hemibrain glomeruli from neuPrint"
 role = "glomeruli"
 space = "JRCFIB2018F"
 kind = "meshset"
@@ -20,6 +30,9 @@ license = "CC BY 4.0"
 license_url = "https://www.janelia.org/project-team/flyem/hemibrain"
 
 [neuprint_hemibrain_neuropil]
+title = "Neuropils"
+origin = "neuPrint"
+about = "Scheffer et al. 2020, eLife: hemibrain neuropils from neuPrint"
 role = "neuropil"
 space = "JRCFIB2018F"
 kind = "meshset"
@@ -32,6 +45,8 @@ license = "CC BY 4.0"
 license_url = "https://www.janelia.org/project-team/flyem/hemibrain"
 
 [neuprint_cns_glomeruli]
+title = "neuPrint"
+about = "Berg et al. 2026, Cell: male CNS glomeruli from neuPrint"
 role = "glomeruli"
 space = "JRCFIB2022M"
 kind = "meshset"
@@ -44,6 +59,9 @@ license = "CC BY 4.0"
 license_url = "https://male-cns.janelia.org/download/"
 
 [neuprint_cns_neuropil]
+title = "Neuropils"
+origin = "neuPrint"
+about = "Berg et al. 2026, Cell: male CNS brain neuropils from neuPrint"
 role = "neuropil"
 space = "JRCFIB2022M"
 kind = "meshset"
@@ -66,6 +84,8 @@ license_url = "https://male-cns.janelia.org/download/"
 # extend to its figures. The meshes are adapted from Bates et al. 2020's FAFB
 # meshes, not from FlyWire, so FlyWire's terms do not apply to them.
 [benton2025_glomeruli]
+title = "Benton 2025"
+about = "Benton et al. 2025, EMBO Reports, Dataset EV2: glomeruli of the left antennal lobe"
 role = "glomeruli"
 space = "FAFB14"
 kind = "meshset"
@@ -85,6 +105,8 @@ license_url = "https://europepmc.org/article/PMC/PMC12187929"
 # article is not open access) nor the atlas page states terms -- so the
 # rights stay with the authors and the publisher, and none is granted here.
 [grabe2015_glomeruli]
+title = "Grabe 2015"
+about = "Grabe et al. 2015, J Comp Neurol: glomeruli of both antennal lobes, from in vivo confocal images"
 role = "glomeruli"
 space = "GRABE"
 kind = "meshset"
@@ -110,6 +132,8 @@ license_url = "https://www.ice.mpg.de/232714/vivo-3d-atlas"
 # scaling to um lands them within 1.8 um of the neuPrint hemibrain atlas, which
 # confirms raw -> nm is a pure scale.
 [schlegel2021_s11_glomeruli]
+title = "Schlegel (sensory)"
+about = "Schlegel et al. 2021, eLife, file 11: glomeruli defined from sensory neurons"
 role = "glomeruli"
 space = "JRCFIB2018F"
 kind = "meshset"
@@ -122,6 +146,8 @@ license = "CC BY 4.0"
 license_url = "https://elifesciences.org/articles/66018"
 
 [schlegel2021_s12_glomeruli]
+title = "Schlegel (projection)"
+about = "Schlegel et al. 2021, eLife, file 12: glomeruli defined from projection neurons"
 role = "glomeruli"
 space = "JRCFIB2018F"
 kind = "meshset"
@@ -147,6 +173,8 @@ license_url = "https://elifesciences.org/articles/66018"
 # multiscale pyramid averages neighboring voxels, and the mean of two label
 # ids is a third label.
 [grabe2015_labels]
+title = "Glomerulus label volume (Grabe 2015)"
+about = "Grabe et al. 2015, J Comp Neurol: the published glomerulus masks, one value per glomerulus"
 role = "glomeruli"
 space = "GRABE"
 kind = "labels"
@@ -159,6 +187,8 @@ license = "none stated; reproduced from the paper"
 license_url = "https://www.ice.mpg.de/232714/vivo-3d-atlas"
 
 [grabe2015_stack]
+title = "Confocal image (Grabe 2015)"
+about = "Grabe et al. 2015, J Comp Neurol: the in vivo confocal image the atlas was drawn on"
 role = "template_image"
 space = "GRABE"
 kind = "image"
@@ -194,6 +224,9 @@ license_url = "https://www.ice.mpg.de/232714/vivo-3d-atlas"
 # `side` is biological. Independent confirmation of the Bates laterality
 # finding: all 58 Bates centroids fall inside AL_L, none inside AL_R.
 [fafb_neuropil]
+title = "Neuropils"
+origin = "FlyWire"
+about = "Dorkenwald et al. 2024, Nature: FAFB brain neuropils from FlyWire"
 role = "neuropil"
 space = "FAFB14"
 kind = "meshset"
@@ -221,6 +254,8 @@ license_url = "https://flywire.ai/guidelines"
 # not weighted by its number of postsynaptic partners.
 
 [hemibrain_stain]
+title = "Neuropil stain (from synapses)"
+about = "Scheffer et al. 2020, eLife: hemibrain presynapse density, shown like an nc82 stain"
 role = "virtual_stain"
 space = "JRCFIB2018F"
 kind = "image"
@@ -240,6 +275,8 @@ license_url = "https://www.janelia.org/project-team/flyem/hemibrain"
 # published artifact's own metadata says `confidence_threshold: 0.5`, which
 # the build recorded but never used. FlyWire data, so CC BY-NC 4.0.
 [fafb_stain]
+title = "Neuropil stain (from synapses)"
+about = "Yu et al. 2025, bioRxiv: FlyWire presynapse density, shown like an nc82 stain"
 role = "virtual_stain"
 space = "FAFB14"
 kind = "image"
@@ -256,6 +293,8 @@ license_url = "https://flywire.ai/guidelines"
 # brain-labeled presynapses span z 101-328 um and VNC-labeled ones
 # 539-1049 um, a 210 um gap.
 [malecns_stain]
+title = "Neuropil stain (from synapses)"
+about = "Berg et al. 2026, Cell: male CNS presynapse density, shown like an nc82 stain"
 role = "virtual_stain"
 space = "JRCFIB2022M"
 kind = "image"
