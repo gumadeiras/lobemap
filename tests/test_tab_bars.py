@@ -14,6 +14,7 @@ The wheel over either bar changes no tab.
 from __future__ import annotations
 
 import contextlib
+import sys
 from collections import Counter
 
 import pytest
@@ -78,10 +79,16 @@ def drawn_tabs(window, bar) -> list[dict]:
     """Each tab of `bar` as the window draws it, in logical pixels.
 
     `shape`: the box of the tab's paint -- its rows and columns that differ
-    from what is beside the tab in the same row. `top` and `base`: its
-    title's capitals, from the top of its first letter to the line most of
-    its letters stand on. `left` and `right`: its title's ink.
+    from what is beside the tab in the same row. `base`: the line most of
+    its title's letters stand on; `top`: the top of its capitals, the font's
+    cap height above that. Not the top of the first letter's ink: a slanted
+    stroke's antialiasing can reach a pixel above the cap height, and in
+    DejaVu Sans the V of "View" did, a pixel higher than the L of "Layer
+    settings" on the same baseline. `left` and `right`: its title's ink.
     """
+    from qtpy.QtGui import QFontMetricsF
+
+    cap = QFontMetricsF(bar.font()).capHeight()
     pixmap = window.grab()
     image = pixmap.toImage()
     ratio = pixmap.devicePixelRatio()
@@ -120,19 +127,14 @@ def drawn_tabs(window, bar) -> list[dict]:
             ink += [(x, y) for x, c in row if far(c, fill, 90)]
         assert ink, (bar.tabText(i), "no title drawn")
         xs = sorted({x for x, _y in ink})
-        first = [xs[0]]
-        for x in xs[1:]:
-            if x != first[-1] + 1:
-                break
-            first.append(x)
-        letter = [y for x, y in ink if x in set(first)]
         # The line most letters stand on: what most columns of ink end at.
         ends = Counter(max(y for x, y in ink if x == column) for column in xs)
+        base = (ends.most_common(1)[0][0] + 1) / ratio
         out.append({
             "title": bar.tabText(i),
             "shape": (left / ratio, top / ratio, right / ratio, bottom / ratio),
-            "top": min(letter) / ratio,
-            "base": (ends.most_common(1)[0][0] + 1) / ratio,
+            "top": base - cap,
+            "base": base,
             "left": xs[0] / ratio,
             "right": (xs[-1] + 1) / ratio,
         })
@@ -166,7 +168,9 @@ def test_every_tab_title_sits_in_the_middle_of_its_drawn_tab(monkeypatch, style)
 
     with launched(monkeypatch, "view", SPACES[0]) as (code, viewer), _style(style):
         assert code == 0
-        if style is None:
+        if style is None and sys.platform == "darwin":
+            # The platform's own: elsewhere whichever Qt picks, Fusion on
+            # Linux with no desktop's theme, as on CI.
             assert QApplication.style().name() == "macos"
         _lay_out(viewer)
         window = viewer.window._qt_window

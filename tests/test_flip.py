@@ -97,7 +97,15 @@ def test_a_slice_upside_down_is_the_same_slice_and_off_gives_it_back(viewer, reg
 def test_names_on_a_slice_upside_down_read_upright(viewer, registry, mirrored):
     """Each name is drawn upside down where its loop is, in letters that are
     not: its pixels match the upright name's, and not their mirror image.
-    Unturned, spun and cut across the grid."""
+    Unturned, spun and cut across the grid.
+
+    Each crop is centred on its name's anchor rounded to a whole pixel, and
+    the flip turns the anchor's fraction of a pixel over -- 301.56 upright
+    is 298.44 flipped -- so two crops of one name can be a device pixel out
+    of register top to bottom: half a logical pixel on a Retina screen, a
+    whole one at 1x, where the same letters correlated at 0.76 as cropped
+    and 0.99 a row apart. So each pair is set in register by its anchors'
+    fractions, the mirror image by its own, before they are compared."""
     session = _scene(viewer, registry, mirrored)
     contour = session.contours["synthetic"]
     for image in session.images:
@@ -105,12 +113,12 @@ def test_names_on_a_slice_upside_down_read_upright(viewer, registry, mirrored):
     contour.set_labels({0, 1, 2})
     text = contour.visual.text
 
-    def crops() -> dict[str, np.ndarray]:
+    def crops() -> dict[str, tuple[np.ndarray, float]]:
         th.settle_canvas(viewer)
         contour.visual.mesh.visible = False             # the names alone
         pixels = th.picture(viewer).sum(axis=-1).astype(float)
         scale = pixels.shape[1] / viewer.window._qt_viewer.canvas._scene_canvas.size[0]
-        h, w = round(9 * scale), round(24 * scale)
+        h, w = round(9 * scale) + 1, round(24 * scale)     # + a row to register by
         to_canvas = text.get_transform("visual", "canvas")
         out = {}
         for name, pos in zip(np.atleast_1d(text.text), np.asarray(text.pos, float),
@@ -118,12 +126,19 @@ def test_names_on_a_slice_upside_down_read_upright(viewer, registry, mirrored):
             x, y = np.asarray(to_canvas.map(np.r_[pos[:2], 0.0, 1.0]))[:2] * scale
             row, col = round(y), round(x)
             if h <= row < pixels.shape[0] - h and w <= col < pixels.shape[1] - w:
-                out[str(name)] = pixels[row - h:row + h + 1, col - w:col + w + 1]
+                out[str(name)] = (pixels[row - h:row + h + 1, col - w:col + w + 1], y - row)
         return out
 
     def corr(a, b) -> float:
         a, b = a - a.mean(), b - b.mean()
         return float((a * b).sum() / np.sqrt((a * a).sum() * (b * b).sum()))
+
+    def registered(got, past, ref, ref_past) -> float:
+        """`corr` of two crops of one name, whose anchors are `past` and
+        `ref_past` below their middle rows, with the rows that show the
+        same place of the name paired."""
+        shift, rows = round(past - ref_past), got.shape[0] - 1
+        return corr(got[1 + shift:rows + shift], ref[1:rows])
 
     for angles in ANGLES_2D:
         session.set_rotation(*angles)
@@ -132,9 +147,11 @@ def test_names_on_a_slice_upside_down_read_upright(viewer, registry, mirrored):
         session.set_flip(True)
         flipped = crops()
         assert flipped.keys() == upright.keys(), angles
-        for name, got in flipped.items():
-            assert upright[name].std() > 0, name
-            same, mirror_image = corr(got, upright[name]), corr(got, upright[name][::-1])
+        for name, (got, past) in flipped.items():
+            ref, ref_past = upright[name]
+            assert ref.std() > 0, name
+            same = registered(got, past, ref, ref_past)
+            mirror_image = registered(got, past, ref[::-1], -ref_past)
             assert same > 0.8 and mirror_image < same - 0.3, (angles, name, same,
                                                                  mirror_image)
         session.set_flip(False)
