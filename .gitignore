@@ -25,3 +25,6 @@ registry/data/*
 
 # Local git worktrees.
 /.worktrees
+
+# Full-quality videos made by docs/make_media.py, for uploading to GitHub.
+docs/images/*.mp4
