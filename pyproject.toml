@@ -87,6 +87,7 @@ ingest = [
 ingest = ["lobemap[ingest]"]
 dev = [
   "pytest>=8.2",
+  "pytest-xdist>=3.8",
   "ruff>=0.6",
   "setuptools>=77",      # tests/test_wheel.py builds the wheel in-process
 ]

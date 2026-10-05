@@ -52,7 +52,7 @@ jobs:
         run: uv run lobemap fetch --nostains
 
       - name: Run tests
-        run: uv run pytest -q -rs
+        run: uv run pytest -q -rs -n auto --dist loadfile --durations=25
 
       - name: Build the wheel
         run: uv build --wheel --out-dir "$RUNNER_TEMP/dist"
