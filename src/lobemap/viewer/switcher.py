@@ -34,7 +34,7 @@ import re
 import sys
 import traceback
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QSize, Qt
 from qtpy.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -44,6 +44,8 @@ from qtpy.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
+    QStyle,
+    QStyleOptionComboBox,
     QVBoxLayout,
     QWidget,
 )
@@ -154,6 +156,36 @@ def brain_tip(space) -> str:
     return f"{lead}. Shown in the {space.flybrains_template or name} template."
 
 
+class SectionsMenu(QComboBox):
+    """The Sections menu, as wide as the longest of `names` -- every choice
+    of every brain listed, aligned or not -- so no choice is ever cut short
+    and the menu never changes width.
+
+    Sized to the names it held at each moment, it went from 260 to 205 px
+    and back to 258 when the alignment was turned on and off in FAFB14, and
+    lost the closing parenthesis. Measured as Qt measures a menu fitted to
+    its contents, in the font and style it is drawn with, whenever the
+    layout asks: once built, before napari's style had set its font and
+    padding, it was 34 px too narrow under Linux's.
+    """
+
+    def __init__(self, names) -> None:
+        super().__init__()
+        self._names = sorted(set(names))
+
+    def sizeHint(self) -> QSize:
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        metrics, height = self.fontMetrics(), super().sizeHint().height()
+        text = max((metrics.horizontalAdvance(name) for name in self._names), default=0)
+        width = self.style().sizeFromContents(
+            QStyle.ContentsType.CT_ComboBox, option, QSize(text, height), self).width()
+        return QSize(width, height)
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+
 def plain_reason(exc: BaseException) -> str:
     """Why a brain did not open, in words; the details go to the terminal."""
     if isinstance(exc, (MissingAssets, FileNotFoundError)):
@@ -208,9 +240,12 @@ class SpaceSwitcher(QWidget):
         self.home.clicked.connect(lambda: self.session.home())
 
         #: The sections the slider steps through, by array axis.
-        self.slice = QComboBox()
+        self.slice = SectionsMenu(
+            section_label(choice, aligned)
+            for space_id in self.loadable_spaces(registry)
+            for choice in slice_axes(registry.spaces[space_id])
+            for aligned in (False, True))
         self.slice.setToolTip(SECTIONS_TIP)
-        self._size_sections()
         self.slice.currentIndexChanged.connect(self._on_slice)
         self.align = QCheckBox(ALIGN)
         self.align.setToolTip(ALIGN_TIP)
@@ -265,11 +300,16 @@ class SpaceSwitcher(QWidget):
         # group and two between groups; every control as wide as its
         # content, no wider, and as tall as the rest. Only the headings and
         # the text that wraps run across the dock.
+        # The labels against their column's right edge and the form at the
+        # left, under every style: each style has its own default, and
+        # Fusion's put the labels against the left edge.
         form = QFormLayout(self)
         form.setContentsMargins(GRID, GRID, GRID, GRID)
         form.setHorizontalSpacing(GRID)
         form.setVerticalSpacing(GRID)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         form.addRow("Brain", self.combo)
         self._gap(form)
         form.addRow("Show", show)
@@ -300,6 +340,10 @@ class SpaceSwitcher(QWidget):
                 # sits on its control's baseline: "Sections", beside a menu
                 # and a checkbox, sat 3 px below its menu's.
                 label.widget().setFixedHeight(CONTROL_HEIGHT)
+                # No indent, as on the panel's labels (`panel_grid.ColumnLabel`):
+                # napari's style frames a label, and a framed label keeps
+                # half an x clear beside its text, which widened the column.
+                label.widget().setIndent(0)
         guard_wheel(self.combo, self.slice, *boxes)
         # napari's theme pads a push button by half a grid unit all round,
         # which left its text touching the sides: a grid unit either side
@@ -366,24 +410,6 @@ class SpaceSwitcher(QWidget):
         self._anatomy = {c.axis: c.anatomy for c in choices}
         self._choices = choices
         self.session.slice_axis = int(self.slice.currentData())
-
-    def _size_sections(self) -> None:
-        """Size the Sections menu once, for the longest choice it can hold.
-
-        Every choice of every brain listed, aligned or not, so no choice is
-        ever cut short and the menu never changes width. Sized to the names
-        it held at each moment, it went from 260 to 205 px and back to 258
-        when the alignment was turned on and off in FAFB14, and lost the
-        closing parenthesis.
-        """
-        names = {section_label(choice, aligned)
-                 for space_id in self.loadable_spaces(self.registry)
-                 for choice in slice_axes(self.registry.spaces[space_id])
-                 for aligned in (False, True)}
-        self.slice.addItems(sorted(names))
-        self.slice.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self.slice.setFixedWidth(self.slice.sizeHint().width())
-        self.slice.clear()
 
     def next_sections(self, viewer=None) -> None:
         """napari's roll, by its button or its key: the next choice of the
@@ -609,4 +635,4 @@ def _report(what: str, exc: BaseException) -> None:
     traceback.print_exception(exc, file=sys.stderr)
 
 
-__all__ = ["SpaceSwitcher", "brain_tip", "plain_reason", "section_label"]
+__all__ = ["SectionsMenu", "SpaceSwitcher", "brain_tip", "plain_reason", "section_label"]
