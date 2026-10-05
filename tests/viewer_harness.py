@@ -46,9 +46,16 @@ def launched(monkeypatch, *argv):
 
     The window is created hidden and never maximized -- `maximize` would
     show it -- and `napari.run` returns at once, so the viewer is left as
-    the user would first see it. It is closed afterwards.
+    the user would first see it. It is closed afterwards, and let go of:
+    the patch, which holds it, lasts until the test ends.
+
+    napari's event loop module takes `napari.Viewer` by name when it is
+    first imported, so it is imported before the patch. First imported
+    under it, it kept `hidden` in place of napari's class for the rest of
+    the process, and with it the first window this made.
     """
     import napari
+    import napari._qt.qt_event_loop  # before the patch: see above
 
     from lobemap import cli
 
@@ -71,6 +78,7 @@ def launched(monkeypatch, *argv):
     finally:
         for viewer in created:
             viewer.close()
+        created.clear()
         pump()
 
 
