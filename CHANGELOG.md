@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-05
+
 ### Features
 
 - The viewer opens a coordinate space instead of one atlas. `lobemap view <space>` draws every atlas native to FAFB14, JRCFIB2018F (hemibrain), JRCFIB2022M (male CNS) or GRABE together, over that space's reference image and, in the EM spaces, its neuropil meshes, and `lobemap spaces` lists the spaces and what each opens with.
