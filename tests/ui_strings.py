@@ -30,6 +30,10 @@ EXPLAINED = {
 }
 #: Units napari writes after a pyramid level's size, which need no spelling out.
 UNITS = {"KB", "MB", "GB", "TB"}
+#: Names the Your data tab shows that need no spelling out either: the file
+#: formats it opens, by the names their files go by, and the "ID" of
+#: FlyWire's "root ID", as FlyWire and its Codex name a neuron.
+NAMES = {"TIFF", "OME", "NRRD", "SWC", "ID"}
 
 SNAKE = re.compile(r"[A-Za-z0-9]_[A-Za-z0-9]")
 BRACKETED = re.compile(r"\[[^\]]*\]")
@@ -132,7 +136,7 @@ def why_code(text: str, allowed: Allowed, context: str = "") -> str:
     rest = " ".join(w for w in words
                     if w and w not in allowed.biology and w not in allowed.neuropils
                     and w not in allowed.templates
-                    and w not in allowed.sources and w not in UNITS)
+                    and w not in allowed.sources and w not in UNITS and w not in NAMES)
     if BRACKETED.search(rest):
         return "bracketed tag"
     if SNAKE.search(rest):

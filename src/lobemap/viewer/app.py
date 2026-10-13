@@ -535,6 +535,8 @@ def run(
     show: tuple[str, ...] = (),
     data_root=None,
     registry=None,
+    images: tuple = (),
+    neurons: tuple[str, ...] = (),
 ) -> None:
     """Open `space` in a new window and run the event loop.
 
@@ -543,7 +545,9 @@ def run(
     is a one-line error instead of a traceback behind an empty window.
     `show` applies to this first scene only; a space picked later opens
     with its own defaults. `registry`, when given, was loaded from the same
-    roots and is used instead of loading them again.
+    roots and is used instead of loading them again. `images` and `neurons`
+    are opened into the first brain, as the Your data tab opens them
+    (`your_data`): image files, and FlyWire root IDs or Codex links.
     """
     import napari
 
@@ -566,6 +570,8 @@ def run(
         session = _load(space, tuple(show))
 
         from .switcher import SpaceSwitcher
+        from .your_data import TITLE as YOURS_TITLE
+        from .your_data import YourData
 
         switcher = SpaceSwitcher(viewer, registry, session, _load)
         # Added ONCE and never torn down, unlike the compartment panel: it is
@@ -573,8 +579,17 @@ def run(
         # scene it replaces. Left, tabbed with napari's layer settings, so the
         # right column is the compartment panel's alone; see `chrome.tidy`.
         view_dock = add_dock(viewer, switcher, VIEW_TITLE, "left")
-        tidy(viewer, view_dock, session.dock)
+        # Once too: it keeps each brain's data across switches.
+        yours = YourData(viewer)
+        yours.attach(session)
+        switcher.switched.connect(yours.attach)
+        yours_dock = add_dock(viewer, yours, YOURS_TITLE, "left")
+        tidy(viewer, view_dock, session.dock, yours_dock)
         buttons.install(viewer)
+        for path in images:
+            yours.open_image(path)
+        for text in neurons:
+            yours.add_neuron(text)
     except BaseException:
         viewer.close()
         raise

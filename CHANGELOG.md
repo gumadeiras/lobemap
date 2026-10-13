@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Features
+
+- A new **Your data** tab, after **Layer settings** in the left column, shows your own images and neurons in the open brain. Each brain keeps its own.
+- Open TIFF and NRRD stacks, including OME, ImageJ and ScanImage 3 files. Each channel gets its own color, and a recording over time shows as its average. The voxel size comes from the file when the file gives it.
+- Move an image by hand: voxel size, image center, turns, size, flips and dragging, all as you see the brain, with **Undo** and **Reset**.
+- Fit an image to glomeruli: click the center of each glomerulus in Slice view, then click **Fit**. The table shows how far each landmark is from its glomerulus.
+- **Save alignment** saves where an image is, next to the image, for each brain. The image opens there next time.
+- Your images show in 3D and in Slice view at any angle, between the stain and the atlases, and follow the mirror, the flip and the rotation.
+- Add FlyWire neurons by root ID or Codex link, with no account, or add neurons from SWC files. lobemap moves each neuron into the open brain, on its own side of the fly. Hovering names the neuron.
+- `lobemap view --image PATH` and `--neuron ID` add images and FlyWire neurons to the first brain.
+
 ### Fixes
 
 - `fetch --check`, `fetch` and `pack` ignore the `.DS_Store` files that macOS's Finder adds to data folders. A stain that you opened in Finder no longer shows as corrupt.

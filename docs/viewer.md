@@ -1,12 +1,12 @@
 # Using the viewer
 
-This page explains every part of the lobemap window: the **View** dock, napari's buttons, the layer list, the **Brain regions** panel, switching brains, and speed.
+This page explains every part of the lobemap window: the **View** dock, the **Your data** tab, napari's buttons, the layer list, the **Brain regions** panel, switching brains, and speed.
 
 ## The window
 
 The window has three columns:
 
-- **Left:** the **View** dock, in a tab beside napari's **Layer settings**. Under it is napari's **Layers** list, with a row of napari's buttons above the list and a row below it.
+- **Left:** three tabs: the **View** dock, napari's **Layer settings**, and the **Your data** tab. Under them is napari's **Layers** list, with a row of napari's buttons above the list and a row below it.
 - **Middle:** the canvas, where the brain is drawn.
 - **Right:** the **Brain regions** panel. It has a **Glomeruli** tab and, in every brain but GRABE, a **Neuropils** tab. Each tab has a source menu and a sides menu over its table.
 
@@ -136,6 +136,109 @@ For a frontal view, the controls of lobemap 0.1 map onto the new ones as follows
 | Mirror vertical | **Flip the picture upside down** |
 | both mirrors, Benton's 0.1 default | both, which is a 180° turn: the same as **Line of sight** 180° |
 
+## The Your data tab
+
+Use the **Your data** tab to see your own data in a brain:
+
+- an image stack, such as a two-photon or confocal stack, which you move into place by hand or fit to glomeruli;
+- neurons from FlyWire, or from SWC files.
+
+Each brain keeps its own data. When you switch to another brain and back, your data is there as you left it.
+
+### Open an image
+
+Click **Open image…** and choose a TIFF or NRRD file. lobemap reads OME-TIFF, ImageJ TIFF, ScanImage 3 TIFF and plain TIFF files.
+
+- Each channel gets its own color: green, magenta, cyan, then yellow.
+- A recording over time shows as its average image.
+- The voxel size comes from the file, when the file gives it. If it does not, lobemap uses 1 µm, and the tab asks you to set the correct size. ScanImage 3 files give only the z step, so set x and y yourself.
+
+The image opens where you saved it last time in this brain (see [Save the alignment](#save-the-alignment)). If you did not save it, it opens at the center of the view.
+
+The list shows your images in this brain. Untick an image to hide it. Select an image to move it. A dot after the name, as in `fly1.tif •`, means a change that is not saved. **Remove** takes the selected image out of this brain.
+
+Each channel has two layers in the layer list: `fly1.tif · 3D` for 3D, and `fly1.tif · slice` for Slice view. In Slice view, you see the image cut along the same plane as the brain, at any angle. A change of contrast or color in **Layer settings** applies to both layers.
+
+Your images and neurons do not change the slider, **Fit to window** or **Mirror the brain left to right**. These follow the brain only. So the slider does not reach a part of an image that is outside the brain.
+
+### Move the image by hand
+
+| control | what it does |
+|---|---|
+| **Voxel size** **x**, **y**, **z** | the size of one voxel of the image along its x, y and z, in µm. The center of the image stays where it is. |
+| **Image center** **x**, **y**, **z** | where the center of the image is in the brain, in µm. Type a value to move the image there. |
+| **Turn by** | how many degrees each turn button turns the image |
+| **Line of sight**, **Vertical axis**, **Horizontal axis** | turn the image about its center with **−** and **+**. These are the screen's axes, as in **Rotate around**. **+** turns the image counterclockwise, moves its near side to your right, or brings its top toward you. |
+| **Size** | make the image smaller (**−**) or larger (**+**) by the percent beside the buttons |
+| **Flip** | mirror the image **Left–right** or **Top–bottom**, as you see it on the screen |
+| **Drag to move the image** | while ticked, drag in the view to move the image. The view stays still. This works in 3D and in Slice view. |
+| **Undo** | puts the image back as it was before the last change |
+| **Reset** | puts the image back as it was when you opened it. **Undo** cancels a reset. |
+
+The turns, flips and drags follow what you see, also when the brain is mirrored, flipped or turned.
+
+### Fit the image to glomeruli
+
+To fit the image, you mark the center of some glomeruli in the image. These marks are the landmarks. lobemap then moves the image so that each landmark is as near as possible to the center of the same glomerulus in the brain's atlas. The **Landmarks** heading names that atlas.
+
+1. Choose a glomerulus in **Glomerulus**.
+2. Click **Click its center**, then click the center of that glomerulus in the image. This works in Slice view only.
+3. Do steps 1 and 2 again for more glomeruli. If you mark a glomerulus again, the new landmark replaces the old one.
+4. Choose how to fit, and click **Fit**.
+
+| fit | what it does | landmarks needed |
+|---|---|---|
+| **Similarity** | moves, turns and resizes the image, but keeps its shape. Use it when the voxel size is correct. | 3 or more |
+| **Affine** | can also stretch the image, so it also corrects a wrong voxel size. With few landmarks it can stretch the image too much. | 4 or more, not all in one section |
+
+The fit starts as **Affine** for an image whose file does not give its voxel size, and as **Similarity** for other images.
+
+An image taken from behind the brain is a mirror image. **Similarity** finds this only when the landmarks are not all in one section. With 3 landmarks, use **Flip** first.
+
+The table shows each landmark and **Off by**: how far, in µm, the landmark is from the center of its glomerulus in the atlas. The values change when the image moves. To delete a landmark, select it and click **Remove landmark**. After a fit, the line under **Fit** gives the average and the largest distance.
+
+### Save the alignment
+
+**Save alignment** saves where the image is, its voxel size and its landmarks. They go into a file next to the image: `fly1.tif.lobemap.json`. The file keeps one entry for each brain, so you can align one image to several brains. When you open the image again in that brain, from the tab or with `lobemap view --image`, it opens where you saved it.
+
+### Add neurons
+
+**From FlyWire:** paste a FlyWire root ID, or a FlyWire Codex link to a neuron, into the **FlyWire** box. An example of a link is `https://codex.flywire.ai/app/cell_details?root_id=720575940623636701&data_version=783`. Click **Add**. The first neuron can take up to half a minute. The next ones take a few seconds. While you wait, the line under **Add** says what lobemap is reading. If lobemap cannot add the neuron, the same line says why.
+
+**From an SWC file:** an SWC file does not say where its coordinates come from, so first choose:
+
+- **Coordinates**: FlyWire, this brain, or another brain;
+- **Units**: nanometers, micrometers, or 8 nm voxels.
+
+Then click **Add SWC file…** and choose the file. If the neuron lands outside the brain, the tab says so. This usually means that the coordinates or units are not the file's.
+
+lobemap moves each neuron into the brain that is open. The neuron stays on its own side of the fly: a neuron of the left antennal lobe goes into the left lobe. GRABE has no link to the other brains, so it can show only SWC files that are already in GRABE coordinates.
+
+Each neuron has its own color. Untick a neuron to hide it. **Remove** takes the selected neuron out. In 3D, each neuron is a thin tube. In Slice view, you see where the neuron crosses the plane, as small filled shapes. Hover over a neuron to see its name in the status bar.
+
+### Set up FlyWire neurons
+
+You do not need a FlyWire or Codex account, or a token: the neurons of FlyWire's public releases are free to download. You need:
+
+1. A network connection.
+2. lobemap's extra packages, which read and move neurons:
+
+   ```bash
+   pip install "lobemap[ingest]"
+   ```
+
+   In a source checkout, `uv sync` installs them.
+
+3. For the hemibrain only, two large files that link FlyWire to the hemibrain. Download them once:
+
+   ```bash
+   python -c "import flybrains; flybrains.download_jrc_transforms()"
+   ```
+
+   This downloads 8 files of 550 MB to 2 GB each into `~/flybrain-data`. lobemap uses two of them: `JRC2018F_FAFB.h5` and `JRC2018F_JRCFIB2018F.h5`. Without these files, the tab says what to run when you add a neuron in the hemibrain.
+
+FAFB and the male CNS need only steps 1 and 2.
+
 ## napari's buttons
 
 napari's buttons are where napari puts them. Each one either works in step with the **View** dock, or is off and says why in its tooltip.
@@ -194,16 +297,22 @@ Layers that you add delete, duplicate, project and link as usual.
 lobemap lists its layers, and draws them, in one order, top first:
 
 1. each glomerulus atlas, the primary atlas first;
-2. the neuropils;
-3. the brain maps: the glomerulus label volume over the stain or the confocal image.
+2. your neurons, from the **Your data** tab;
+3. the neuropils;
+4. your images, from the **Your data** tab;
+5. the brain maps: the glomerulus label volume over the stain or the confocal image.
 
-Each atlas and neuropil set has two layers next to each other: `· outlines`, drawn in Slice view, and `· 3D`. The order holds as parts are built, between 3D and Slice view, and after a brain switch. Layers that you add stay on top, where napari puts them.
+Your neurons are drawn before the glomeruli, so you can see a neuron through the glomerulus around it. Your images are drawn over the stain or the confocal image, so you can compare the two.
+
+Each atlas and neuropil set has two layers next to each other: `· outlines`, drawn in Slice view, and `· 3D`. So do your neurons. Each channel of your images has `· slice` and `· 3D`. The order holds as parts are built, between 3D and Slice view, and after a brain switch. Layers that you add stay on top, where napari puts them.
 
 ### Blending and opacity
 
-Every layer is translucent, and none is additive. Each layer is laid over the layers under it. So a glomerulus keeps its own color over the stain and the neuropils, in 3D and in Slice view.
+Every layer of the brain is translucent, and none is additive. Each layer is laid over the layers under it. So a glomerulus keeps its own color over the stain and the neuropils, in 3D and in Slice view.
 
 The neuropils and the brain maps are drawn without depth, with napari's `translucent_no_depth` blending, so nothing inside them is hidden. The neuropils open at 10% opacity, which leaves the stain readable through all of a brain's neuropils. The glomeruli open at 75%. A blending or opacity that you set in **Layer settings** stays until you open another brain.
+
+Your images are additive: each channel adds its color to the brain map under it, so you see both.
 
 ### Layer names and colors
 
@@ -218,6 +327,8 @@ Both the mesh layer and the outline layer stay in the list in either mode. The o
 ### Locked layers and your own layers
 
 lobemap's layers are locked against napari's drawing and transform tools, which would move a mesh off its image. They are also locked against deletion. A layer that you add yourself is not locked.
+
+The layers of the **Your data** tab are locked too, and they follow the mirror, the flip and the rotation. To remove an image or a neuron, use **Remove** in the tab. If you try to delete one of their layers from the layer list, a message tells you this.
 
 A layer that you add is not mirrored, flipped or turned with the brain. A point placed on a turned section keeps its place while the brain turns back. So after **Reset rotation**, the point can lie off the glomerulus it was placed on.
 
@@ -244,6 +355,8 @@ A switch that succeeds keeps:
 - the section plane, by its anatomy: frontal stays frontal, whichever image axis that is in the new brain.
 
 These mean the same on screen in every brain. The switch clears the mirror and the flip, so a brain never opens reflected or upside down. Each brain opens its own tables, with its primary atlas checked.
+
+Each brain also keeps its own images and neurons from the **Your data** tab. When you open a brain again, they are there as you left them, with their landmarks and their **Undo** steps.
 
 A switch that fails says why under the controls. It leaves the brain you had exactly as it was: its checked rows, names, fills, searches, driver lines, open tab and sources, its slice and plane, the mode, the mirror, the flip, the angles, the alignment and the camera.
 
@@ -332,7 +445,7 @@ The details area keeps its size, with room for the longest value in the table. S
 
 ### Hover and click
 
-Hovering in the canvas names what is under the cursor in the status bar, for example `VA3 (left) — Benton 2025` or `AL, antennal lobe (right) — Neuropils (FlyWire)`.
+Hovering in the canvas names what is under the cursor in the status bar, for example `VA3 (left) — Benton 2025` or `AL, antennal lobe (right) — Neuropils (FlyWire)`. Your neurons come first: over a neuron inside a glomerulus, the status bar names the neuron, as `720575940623636701 — Your neurons`.
 
 - In 3D it names the mesh under the cursor. In Slice view it names the outline the cursor is inside.
 - The name stays there while the cursor rests, whichever layer is active.
@@ -358,3 +471,16 @@ At 0° none of the rotation code runs. Once the view is turned:
 | setting an oblique angle | 55–215 ms |
 
 While turned, the hemibrain uses up to about 2.3 GB of memory, against 1.15 GB unturned.
+
+## Speed with your images
+
+Measured with a 512 × 511 × 117 two-photon stack in GRABE:
+
+| action | time |
+|---|---|
+| move, turn or flip the image in 3D | about 8 ms |
+| the same in Slice view | about 25 ms |
+| the same in Slice view, with **Vertical axis** or **Horizontal axis** turned | 35–65 ms |
+| one step of the slider in Slice view, with the image shown | about 22 ms |
+
+In Slice view, each step reads one plane of the image. So a larger image takes longer.

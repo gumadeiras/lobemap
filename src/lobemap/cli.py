@@ -1117,6 +1117,34 @@ def _install_crash_log() -> None:
     atexit.register(_finish)
 
 
+def _your_data(args) -> tuple[tuple[Path, ...], tuple[str, ...]]:
+    """`--image` files and `--neuron` names, checked; ViewRequestError if not.
+
+    An SWC file's coordinates and units are not in it, and are chosen in
+    the Your data tab, so `--neuron` takes FlyWire neurons only.
+    """
+    from .core.neurons import NeuronError, parse_spec
+    from .core.user_image import SUFFIXES
+    from .viewer.request import ViewRequestError
+
+    images = tuple(Path(p).expanduser() for p in args.image or ())
+    for path in images:
+        if path.suffix.lower() not in SUFFIXES:
+            raise ViewRequestError(f"--image {path}: lobemap reads TIFF and NRRD images")
+        if not path.is_file():
+            raise ViewRequestError(f"--image {path}: no such file")
+    for text in args.neuron or ():
+        try:
+            spec = parse_spec(text)
+        except NeuronError as exc:
+            raise ViewRequestError(f"--neuron {text}: {exc}") from exc
+        if spec.root_id is None:
+            raise ViewRequestError(
+                f"--neuron {text}: add SWC files in the Your data tab, where their "
+                "coordinates and units are chosen")
+    return images, tuple(args.neuron or ())
+
+
 def cmd_view(args) -> int:
     from .core.registry import Registry
     from .viewer.request import MissingAssets, ViewRequestError, check_request
@@ -1129,6 +1157,7 @@ def cmd_view(args) -> int:
     registry = Registry.load(root, data_root=data_root)
     try:
         check_request(registry, args.space, show)
+        images, neurons = _your_data(args)
     except ViewRequestError as exc:
         print(f"lobemap view: {exc}", file=sys.stderr)
         return 2
@@ -1156,6 +1185,8 @@ def cmd_view(args) -> int:
             # opened another.
             data_root=data_root,
             registry=registry,
+            images=images,
+            neurons=neurons,
         )
     except ViewRequestError as exc:
         print(f"lobemap view: {exc}", file=sys.stderr)
@@ -1230,6 +1261,12 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--show", action="append", metavar="NAME",
                    help="start this visible in the first scene: an asset id, "
                         "an atlas id, or a role such as neuropil. Repeatable.")
+    v.add_argument("--image", action="append", metavar="PATH",
+                   help="open this TIFF or NRRD image in the Your data tab, where "
+                        "you last saved its alignment, if you did. Repeatable.")
+    v.add_argument("--neuron", action="append", metavar="ID",
+                   help="add this FlyWire neuron, a root ID or a FlyWire Codex "
+                        "link, in the Your data tab. Repeatable.")
     v.set_defaults(func=cmd_view)
 
     val = sub.add_parser("validate", help="load and check the registry")

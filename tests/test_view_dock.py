@@ -1,8 +1,8 @@
 """The View dock and napari's own window, as lobemap lays them out.
 
 The layout is measured on a window laid out for real at 1440 x 900: the
-View dock tabbed with napari's layer settings above the layer list on the
-left, the compartment panel alone on the right, and the canvas between.
+View dock tabbed with napari's layer settings and the Your data tab above
+the layer list on the left, the compartment panel alone on the right, and the canvas between.
 The controls are checked by what they do to the viewer, and the outline
 layers by napari's own layer state, not by any widget's text.
 """
@@ -91,9 +91,10 @@ def _assert_layout(viewer) -> None:
     assert panel.width() == RIGHT_WIDTH, panel.width()
     floor = max(dock.minimumSizeHint().width() for dock in (view, settings, layers))
     assert view.width() == max(LEFT_WIDTH, floor), (view.width(), floor)
-    # Left: the View tab, shown, ahead of the layer settings, above the list.
+    # Left: the View tab, shown, ahead of the layer settings and Your data,
+    # above the list.
     assert settings in window.tabifiedDockWidgets(view)
-    assert (["View", "Layer settings"], 0) in _tabs(window), _tabs(window)
+    assert (["View", "Layer settings", "Your data"], 0) in _tabs(window), _tabs(window)
     for dock in (view, layers):
         assert window.dockWidgetArea(dock) == Qt.DockWidgetArea.LeftDockWidgetArea
         assert dock.geometry().right() < left, (dock.windowTitle(), dock.geometry())

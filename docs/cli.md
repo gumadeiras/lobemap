@@ -38,7 +38,7 @@ These go before the command name, as in `lobemap --data-root /path/to/data fetch
 Open a coordinate space.
 
 ```text
-lobemap view [-h] [--ndisplay {2,3}] [--show NAME] [space]
+lobemap view [-h] [--ndisplay {2,3}] [--show NAME] [--image PATH] [--neuron ID] [space]
 ```
 
 | argument | default | what it does |
@@ -46,6 +46,8 @@ lobemap view [-h] [--ndisplay {2,3}] [--show NAME] [space]
 | `space` | `FAFB14` | space id; `lobemap spaces` lists them (default: FAFB14) |
 | `--ndisplay {2,3}` | `3` | open in 3D (`3`) or in Slice view (`2`) |
 | `--show NAME` | | start this visible in the first scene: an asset id, an atlas id, or a role such as neuropil. Repeatable. |
+| `--image PATH` | | open this TIFF or NRRD image in the Your data tab, where you last saved its alignment, if you did. Repeatable. |
+| `--neuron ID` | | add this FlyWire neuron, a root ID or a FlyWire Codex link, in the Your data tab. Repeatable. |
 
 `--show` turns on something that starts off, in the first brain only:
 
@@ -54,6 +56,14 @@ lobemap view [-h] [--ndisplay {2,3}] [--show NAME] [space]
 - a role: `lobemap view --show neuropil`
 
 A name the brain does not have, or an unknown space, is refused with one line before any window opens.
+
+`--image` and `--neuron` add your own data to the first brain, as the [Your data tab](viewer.md#the-your-data-tab) does:
+
+- `lobemap view GRABE --image fly1/zStack023.tif`
+- `lobemap view FAFB14 --neuron 720575940623636701`
+- `lobemap view FAFB14 --neuron "https://codex.flywire.ai/app/cell_details?root_id=720575940623636701&data_version=783"`
+
+If the file is missing or is not a TIFF or NRRD image, or if the neuron is not a FlyWire root ID or Codex link, lobemap stops with a one-line message before it opens a window. To add an SWC file, use the tab, where you choose its coordinates and units. [Set up FlyWire neurons](viewer.md#set-up-flywire-neurons) explains what `--neuron` needs.
 
 Before it opens a window, `view` fetches every missing artifact except the virtual stains. [Data](data.md#what-lobemap-view-fetches-by-itself) has the details.
 

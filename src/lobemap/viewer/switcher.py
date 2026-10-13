@@ -34,7 +34,7 @@ import re
 import sys
 import traceback
 
-from qtpy.QtCore import QSize, Qt
+from qtpy.QtCore import QSize, Qt, Signal
 from qtpy.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -204,6 +204,9 @@ class SpaceSwitcher(QWidget):
     """
 
     loadable_spaces = staticmethod(loadable_spaces)
+
+    #: A switch opened another brain: its session, once the old one is gone.
+    switched = Signal(object)
 
     def __init__(self, viewer, registry, session, load, parent=None) -> None:
         super().__init__(parent)
@@ -557,6 +560,7 @@ class SpaceSwitcher(QWidget):
             _report(f"opened {want} but could not fit it", exc)
             self.status.setText(UNFITTED.format(title=title))
         self._carry_turn(new, title)
+        self.switched.emit(new)
 
     def _carry_turn(self, new, title: str) -> None:
         """Turn the new scene as the controls say, once it is framed.

@@ -23,7 +23,9 @@ napari has added it, so a layer that arrives to be added already marked is a
 copy.
 
 Layers you add are yours, and none of this touches them; they are not
-mirrored, flipped or turned with the brain.
+mirrored, flipped or turned with the brain. The layers that draw your data
+from the Your data tab are lobemap's, and kept as its others are; the tab
+says where they are removed (`YOURS_KEPT`).
 """
 
 from __future__ import annotations
@@ -34,6 +36,10 @@ KEPT = (
     "{names} stay: lobemap's layers are part of the brain shown, drawn from "
     "its atlases and images. To hide one, click its eye, or untick its rows in "
     "the panel."
+)
+YOURS_KEPT = (
+    "{names} stay: they draw your data, which the Your data tab shows, hides and "
+    "removes."
 )
 NOT_COPIED = (
     "{names} cannot be copied: a copy of one of lobemap's layers would not "
@@ -79,7 +85,12 @@ def guard_layers(viewer) -> None:
         if not kept:
             remove_selected()
             return
-        show_info(KEPT.format(names=_names(kept)))
+        yours = [layer for layer in kept if layer.metadata["lobemap"].get("yours")]
+        brain = [layer for layer in kept if layer not in yours]
+        if brain:
+            show_info(KEPT.format(names=_names(brain)))
+        if yours:
+            show_info(YOURS_KEPT.format(names=_names(yours)))
         if len(kept) == len(layers.selection):
             return
         # The user's layers go as napari deletes them; lobemap's stay, and
@@ -118,4 +129,4 @@ def guard_layers(viewer) -> None:
     layers.insert = _insert
 
 
-__all__ = ["KEPT", "NOT_COPIED", "NOT_LINKED", "guard_layers", "ours"]
+__all__ = ["KEPT", "NOT_COPIED", "NOT_LINKED", "YOURS_KEPT", "guard_layers", "ours"]

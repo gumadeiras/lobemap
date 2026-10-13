@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 import turned_harness as th
 from scipy.spatial.transform import Rotation
-from viewer_harness import canvas_position, pump
+from viewer_harness import canvas_position, click, pump
 
 from lobemap.core.placement import apply, middle
 from lobemap.viewer import placing
@@ -247,6 +247,40 @@ def test_a_drag_moves_the_image_under_the_cursor(viewer, registry, ndisplay):
     after = np.asarray(canvas_position(viewer, _shown(session, moved,
                                                       (np.array(SHAPE) - 1) / 2)))
     assert after - before == pytest.approx((30.0, -20.0), abs=0.05)
+
+
+def test_dragging_with_the_mouse_moves_the_image_and_not_the_view(viewer, registry):
+    """Through napari's own mouse path, as the tab's Drag to move does."""
+    from lobemap.viewer.image_rows import PlaceRows
+
+    session, image = _scene(viewer, registry)
+    applied = []
+
+    class Box:                                   # what PlaceRows asks of its tab
+        def __init__(self):
+            self.viewer, self.session = viewer, session
+
+        def current(self):
+            return image if not applied else type("I", (), {"matrix": applied[-1]})()
+
+        def apply(self, matrix, record=True):
+            applied.append(matrix)
+            session.place(image, matrix)
+
+        def undo(self):
+            pass
+
+    rows = PlaceRows(Box())
+    camera = tuple(viewer.scene.camera.center)
+    center = _shown(session, image.matrix, (np.array(SHAPE) - 1) / 2)
+    before = np.asarray(canvas_position(viewer, center))
+    rows.drag.setChecked(True)
+    click(viewer, center, drag=24.0)
+    rows.drag.setChecked(False)
+    assert tuple(viewer.scene.camera.center) == camera and viewer.scene.camera.mouse_pan
+    after = np.asarray(canvas_position(viewer, _shown(session, image.matrix,
+                                                      (np.array(SHAPE) - 1) / 2)))
+    assert after - before == pytest.approx((24.0, 0.0), abs=0.05)
 
 
 def test_taking_an_image_out_leaves_the_scene_as_it_was(viewer, registry):

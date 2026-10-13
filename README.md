@@ -54,6 +54,7 @@ The window shows the **View** controls on the left, the brain in the middle, and
 - **Show or hide glomeruli.** In **Brain regions**, tick or clear the `Show` box of each glomerulus. Search by name or receptor, or choose a **Driver line** to show only the glomeruli that a GAL4 or QF2 line labels. Click a glomerulus to see its receptor, sensillum and other details.
 - **Compare atlases.** The hemibrain has three atlases of the same lobe. Choose one in **Source**, then tick its glomeruli. All the atlases you tick are drawn together, and a glomerulus has the same color in each. To see an atlas of another brain, choose that brain in **Brain**.
 - **Mirror or flip.** **Mirror the brain left to right** helps you compare a left lobe with a right one. **Flip the picture upside down** turns the picture over. Both change the display only, not the data.
+- **Bring your own data.** In the **Your data** tab, open your own TIFF or NRRD stack, move it into place by hand or fit it to glomeruli, and save where it goes. Add FlyWire neurons by root ID or Codex link, or from SWC files.
 
 ## What's inside
 
@@ -74,7 +75,7 @@ The three EM brains also show their *neuropils*, the named regions of the brain,
 
 ## Learn more
 
-- [Using the viewer](https://github.com/gumadeiras/lobemap/blob/main/docs/viewer.md): every control, the panel, the layers, and speed.
+- [Using the viewer](https://github.com/gumadeiras/lobemap/blob/main/docs/viewer.md): every control, the panel, your own data, the layers, and speed.
 - [The brains and atlases](https://github.com/gumadeiras/lobemap/blob/main/docs/atlases.md): what each atlas is, which one to use, and known gaps in the data.
 - [Data](https://github.com/gumadeiras/lobemap/blob/main/docs/data.md): download, storage, checks, rebuilding from source, and data licenses.
 - [Data sources](https://github.com/gumadeiras/lobemap/blob/main/docs/data-sources.md): where each dataset came from, and what lobemap does to it.

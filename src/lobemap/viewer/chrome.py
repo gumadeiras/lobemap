@@ -202,12 +202,12 @@ def _watch_tab_bars(window, viewer) -> None:
         tidy_once(bar)
 
 
-def tidy(viewer, view_dock, panel_dock) -> None:
+def tidy(viewer, view_dock, panel_dock, yours_dock) -> None:
     """Arrange the docks as lobemap's.
 
-    Left: the View dock, tabbed with napari's layer settings, above the
-    layer list with napari's buttons. Right: the compartment panel, at
-    full height.
+    Left: the View dock, tabbed with napari's layer settings and the Your
+    data dock, in that order, above the layer list with napari's buttons.
+    Right: the compartment panel, at full height.
     """
     from qtpy.QtCore import Qt, QTimer
     from qtpy.QtWidgets import QTabWidget, QWidget
@@ -225,7 +225,8 @@ def tidy(viewer, view_dock, panel_dock) -> None:
     _watch_tab_bars(window, viewer)
     viewer.events.theme.connect(functools.partial(_restyle_edges, window, viewer))
     window.tabifyDockWidget(view_dock, controls)
-    for dock in (view_dock, controls):
+    window.tabifyDockWidget(controls, yours_dock)
+    for dock in (view_dock, controls, yours_dock):
         # The tab names each; a title bar under it named it again. napari
         # gives a dock a title bar back when it floats.
         dock.setTitleBarWidget(QWidget(dock))
