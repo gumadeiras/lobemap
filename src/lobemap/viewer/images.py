@@ -45,7 +45,7 @@ DEFAULT_DISPLAY = {"colormap": "magma"}
 #: Applied to every image layer unless a role overrides it.
 #:
 #: Translucent, drawn without depth (`translucent_no_depth`): the brain maps
-#: are the bottom of the stack (`scene.scene_ranks`), and the neuropils and
+#: are the bottom of the stack (`stacking.scene_ranks`), and the neuropils and
 #: glomeruli are laid over them. In 3D a volume writes the depth of the
 #: voxel it shows, its brightest along the ray, and a glomerulus behind
 #: that voxel failed the depth test and was not drawn. Under either

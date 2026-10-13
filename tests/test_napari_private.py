@@ -81,7 +81,6 @@ CHECKED = {
     "_volume_node": "test_a_volume_takes_its_voxels_at_its_next_draw",
     "_prepare_draw": "test_a_volume_takes_its_voxels_at_its_next_draw",
     "napari._qt.widgets.qt_viewer_dock_widget": "test_the_napari_chrome_lobemap_tidies",
-    "_extent_world_augmented": "test_a_turned_view_rewrites_the_extent_napari_reads",
     "_clean_cache": "test_a_turned_view_rewrites_the_extent_napari_reads",
     "_on_layers_change": "test_a_turned_view_rewrites_the_extent_napari_reads",
     "_extent_augmented": "test_a_turned_view_rewrites_the_extent_napari_reads",
@@ -705,6 +704,19 @@ def test_a_turned_view_rewrites_the_extent_napari_reads(viewer):
     need(type(viewer.layers) is LayerList
          and tuple(viewer.dims.range[0]) == (0.0, 18.0, 2.0),
          "LayerList restored with its own extent", used)
+    # A layer left out of the extent moves neither the sliders nor the fit,
+    # which are napari's own over the layers counted.
+    from lobemap.viewer.napari_private import count_in_extent
+
+    used = "viewer.yours.leave_out, through napari_private.count_in_extent"
+    ranges, fitted = list(viewer.dims.range), viewer.layers._extent_world_augmented.copy()
+    far = viewer.add_image(np.zeros((5, 5, 5), np.uint8), translate=(500.0, 500.0, 500.0),
+                           scale=(0.1, 0.1, 0.1))
+    count_in_extent(viewer, lambda each: each is not far)
+    with reaching("LayerList._get_extent_world(extents, augmented=True, units=...)", used):
+        own = viewer.layers._extent_world_augmented
+    need(list(viewer.dims.range) == ranges and np.allclose(own, fitted),
+         "LayerList.get_extent and _get_extent_world over the layers counted", used)
 
 
 def test_a_turned_image_picks_its_level_as_napari_draws(viewer):

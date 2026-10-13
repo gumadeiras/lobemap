@@ -204,48 +204,59 @@ def _hooked_class(base: type) -> type:
 
     if base not in _HOOKED:
         class Hooked(base):
-            """napari's layer list, whose extent a turned view rewrites."""
+            """napari's layer list, whose extent counts only some layers, and
+            which a turned view rewrites."""
 
             @cached_property
             def extent(self):
-                value = base.extent.func(self)
+                value = self.get_extent(counted_layers(self))
                 world, step = self._lobemap_ranges(value.world, value.step)
                 return type(value)(data=value.data, world=world, step=step,
                                    units=value.units)
 
             @cached_property
             def _extent_world_augmented(self):
-                return self._lobemap_fit(base._extent_world_augmented.func(self))
+                world = self._get_extent_world(
+                    [layer._extent_augmented for layer in counted_layers(self)],
+                    augmented=True, units=self.units)
+                return self._lobemap_fit(world)
 
         _HOOKED[base] = Hooked
     return _HOOKED[base]
 
 
-def hook_extent(viewer, ranges=None, fit=None) -> None:
-    """Rewrite the extent napari reads its slider ranges and its fit from, or stop.
+def _same_ranges(world, step):
+    return world, step
 
-    `ranges(world, step)` takes the (2, ndim) world extent and the step
-    napari computed for `dims.range` and returns the ones to use; `fit(world)`
-    does the same for the extent the camera is fitted to (`reset_view`,
-    `fit_to_view`). Both None puts napari's own back. The slider ranges are recomputed at once, as napari
-    recomputes them when a layer changes.
 
-    napari has no public way to do this. Its layer list caches the extent
-    in two cached properties, and the viewer reads them; the list's class is
-    swapped for a subclass that passes them through these, and back.
-    """
+def _same_fit(world):
+    return world
+
+
+def counted_layers(layers) -> list:
+    """The layers of a layer list its extent counts (`count_in_extent`): all,
+    unless some are left out, and all if every one would be."""
+    counted = layers.__dict__.get("_lobemap_counted")
+    every = list(layers)
+    kept = every if counted is None else [layer for layer in every if counted(layer)]
+    return kept or every
+
+
+def _rehook(viewer) -> None:
+    """Hook the layer list's class while anything is asked of its extent,
+    and give napari's own back when nothing is."""
     layers = viewer.layers
-    hooked = ranges is not None or fit is not None
     base = getattr(layers, "_lobemap_base", type(layers))
-    if hooked:
+    wanted = any(name in layers.__dict__
+                 for name in ("_lobemap_ranges", "_lobemap_fit", "_lobemap_counted"))
+    if wanted:
         layers._lobemap_base = base
-        layers._lobemap_ranges = ranges or (lambda world, step: (world, step))
-        layers._lobemap_fit = fit or (lambda world: world)
+        layers.__dict__.setdefault("_lobemap_ranges", _same_ranges)
+        layers.__dict__.setdefault("_lobemap_fit", _same_fit)
         layers.__class__ = _hooked_class(base)
     elif type(layers) is not base:
         layers.__class__ = base
-        for name in ("_lobemap_base", "_lobemap_ranges", "_lobemap_fit"):
-            layers.__dict__.pop(name, None)
+        layers.__dict__.pop("_lobemap_base", None)
     refresh_extent(viewer)
     # napari sizes the 3D camera's depth range from the same extent, on a
     # change of mode only: entered while turned, it kept the turned scene's
@@ -254,6 +265,40 @@ def hook_extent(viewer, ranges=None, fit=None) -> None:
     qt_viewer = getattr(viewer.window, "_qt_viewer", None)
     if qt_viewer is not None:
         qt_viewer._update_camera_depth()
+
+
+def hook_extent(viewer, ranges=None, fit=None) -> None:
+    """Rewrite the extent napari reads its slider ranges and its fit from, or stop.
+
+    `ranges(world, step)` takes the (2, ndim) world extent and the step
+    napari computed for `dims.range` and returns the ones to use; `fit(world)`
+    does the same for the extent the camera is fitted to (`reset_view`,
+    `fit_to_view`). Both None puts napari's own back. The slider ranges are
+    recomputed at once, as napari recomputes them when a layer changes.
+
+    napari has no public way to do this. Its layer list caches the extent
+    in two cached properties, and the viewer reads them; the list's class is
+    swapped for a subclass that passes them through these, and back.
+    """
+    layers = viewer.layers
+    for name, value in (("_lobemap_ranges", ranges), ("_lobemap_fit", fit)):
+        layers.__dict__.pop(name, None)
+        if ranges is not None or fit is not None:
+            layers.__dict__[name] = value or (_same_ranges if name.endswith("ranges")
+                                              else _same_fit)
+    _rehook(viewer)
+
+
+def count_in_extent(viewer, counted) -> None:
+    """Leave the layers `counted(layer)` is false for out of the extent napari
+    reads its slider ranges and its fit from (`hook_extent`), from now on.
+
+    Your own data is left out so: it moves, and every change of the slider
+    ranges made napari slice every layer again -- 0.6 s in 3D, where it
+    rebuilt each mesh's normals -- for a move of one image.
+    """
+    viewer.layers.__dict__["_lobemap_counted"] = counted
+    _rehook(viewer)
 
 
 def augmented_extent(layer):
@@ -458,6 +503,8 @@ __all__ = [
     "augmented_extent",
     "before_slicing",
     "clear_extent",
+    "count_in_extent",
+    "counted_layers",
     "data_from_world",
     "fit_axis_labels",
     "front_face",

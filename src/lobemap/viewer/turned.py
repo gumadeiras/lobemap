@@ -276,18 +276,21 @@ class TurnedView:
         frame = self._frame(turn)
         for overlay in self.session.contours.values():
             overlay.set_frame(frame)
-        mirror = self._mirror()
-        dims = self.viewer.dims
-        axis = int(dims.order[0])
-        # The slice position in the layers' data before the mirror, which
-        # is the contours' `slice_position`.
-        position = float((np.linalg.inv(mirror) @ np.r_[np.asarray(dims.point, float),
-                                                         1.0])[axis])
         for layer in self.session.images:
-            self._virtualize(layer, turn, mirror, position)
+            self._virtualize(layer, turn)
 
-    def _virtualize(self, layer, turn: Turn, mirror, position: float) -> None:
+    def _position(self, mirror) -> float:
+        """The slice position in the layers' data before the mirror, which
+        is the contours' `slice_position`."""
+        dims = self.viewer.dims
+        point = np.linalg.inv(mirror) @ np.r_[np.asarray(dims.point, float), 1.0]
+        return float(point[int(dims.order[0])])
+
+    def _virtualize(self, layer, turn: Turn) -> None:
         from .resample import TurnedImage
+
+        mirror = self._mirror()
+        position = self._position(mirror)
 
         held = self._virtual.get(layer)
         if held is None:
@@ -379,28 +382,32 @@ class TurnedView:
         if self._applied is None and not self._unturned and not self._virtual:
             return
         matrix = self._mirror()
-        for layer, (sources, translate, scale, image) in list(self._virtual.items()):
-            images.release(layer)
-            image.close()
-            kept = self._unturned.get(layer)
-            with contextlib.suppress(Exception), napari_private.shown_unsliced(layer):
-                layer.data = sources if layer.multiscale else sources[0]
-                layer.translate = translate
-                layer.scale = scale
-                if rest and kept is not None:
-                    napari_private.put_level(layer, kept[2])
-                elif sliced and self._two_d():
-                    napari_private.update_draw(self.viewer, layer)
-            if sliced:
-                with contextlib.suppress(Exception):
-                    napari_private.slice_now(self.viewer, layer)
-        self._virtual = {}
+        for layer in list(self._virtual):
+            self._own(layer, sliced, rest)
         for layer, kept in list(self._unturned.items()):
             with contextlib.suppress(Exception):
                 self._set_affine(layer, matrix, None, sliced=sliced,
                                  level=kept[2] if rest else None)
         self._unturned = {}
         self._applied = self._applied_kind = None
+
+    def _own(self, layer, sliced: bool = True, rest: bool = False) -> None:
+        """Give an image shown resampled its own data back (`_unapply`)."""
+        sources, translate, scale, image = self._virtual.pop(layer)
+        images.release(layer)
+        image.close()
+        kept = self._unturned.get(layer)
+        with contextlib.suppress(Exception), napari_private.shown_unsliced(layer):
+            layer.data = sources if layer.multiscale else sources[0]
+            layer.translate = translate
+            layer.scale = scale
+            if rest and kept is not None:
+                napari_private.put_level(layer, kept[2])
+            elif sliced and self._two_d():
+                napari_private.update_draw(self.viewer, layer)
+        if sliced:
+            with contextlib.suppress(Exception):
+                napari_private.slice_now(self.viewer, layer)
 
     def _redraw(self) -> None:
         space = self._space()
@@ -434,6 +441,30 @@ class TurnedView:
             self.viewer.dims.set_point(axis, float(self.turn.focus[axis]))
         self._apply()
 
+    def moved(self, change, images=()) -> None:
+        """Run `change` -- your own data added, placed anew or taken out --
+        and show the scene as it was shown.
+
+        The brain does not move, so unlike `around` a turn kept through 3D
+        keeps its pivot; only what a turn has placed is placed again, after
+        the change, on the unturned scene. `images`, if given, are images of
+        yours that `change` only gives new data, which a spin's affine turns
+        as it is, and an oblique view resamples alone: anew, the brain's
+        images took 0.3 s a move.
+        """
+        self._depth = None
+        if self._applied is None or (images and self._applied_kind == "spin"):
+            change()
+        elif not images:
+            self.around(change)
+        else:
+            for layer in images:
+                if layer in self._virtual:
+                    self._own(layer, sliced=False)
+            change()
+            for layer in images:
+                self._virtualize(layer, self._applied)
+
     def _reflected(self, point, before) -> np.ndarray:
         """`point` of the world mirrored as `before` was, in the world as it is."""
         from .view import MIRROR_AXIS
@@ -464,9 +495,10 @@ class TurnedView:
             napari_private.refresh_extent(self.viewer)
 
     def _extents(self, augmented: bool) -> list:
-        """Every layer's extent as it is unturned: what napari would union."""
+        """Every layer's extent as it is unturned: what napari would union,
+        which leaves your data out (`yours.leave_out`)."""
         out = []
-        for layer in self.viewer.layers:
+        for layer in napari_private.counted_layers(self.viewer.layers):
             kept = self._unturned.get(layer)
             if kept is not None:
                 out.append(kept[1 if augmented else 0])
@@ -515,7 +547,7 @@ class TurnedView:
 
         Every mesh by its vertices, built or not -- a part not read yet by
         its corners -- and every image by its box: the brain's extent, not
-        the box around a box.
+        the box around a box. Your data is not the brain's (`yours.leave_out`).
         """
         if self._depth is not None and self._depth[0] is turn:
             return self._depth[1], self._depth[2]
@@ -533,7 +565,10 @@ class TurnedView:
                 low, high = min(low, float(values.min()) + shift), max(
                     high, float(values.max()) + shift)
 
-        clouds = [surface.meshset.vertices for surface in s.surfaces.values()]
+        from .yours import counted
+
+        clouds = [surface.meshset.vertices for surface in s.surfaces.values()
+                  if counted(surface.layer)]
         for name in s.pending:
             vertices = s.deferred.vertices(name) if s.deferred is not None else None
             if vertices is None and s.deferred is not None:
@@ -546,7 +581,7 @@ class TurnedView:
         for vertices in clouds:
             take(np.asarray(vertices) @ on_mesh.astype(np.asarray(vertices).dtype),
                  mesh_offset)
-        for layer in s.images:
+        for layer in filter(counted, s.images):
             kept = self._unturned.get(layer)
             box = np.asarray((kept[0] if kept is not None else layer.extent).world, float)
             corners = np.array([np.where(bits, box[1], box[0])

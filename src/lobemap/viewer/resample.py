@@ -238,6 +238,20 @@ def tile_shape(du, dv, chunks=(64, 64, 64)) -> tuple[int, int]:
     return best
 
 
+def _sampled(level):
+    """(the array a level is sampled from, how its voxels map into it).
+
+    A level is sampled itself, and the map is None. An image of yours is
+    shown on a grid square to the space, resampled on demand
+    (`placed.PlacedVolume`): it is sampled at its own image's voxels, by the
+    (linear, offset) map from the grid's voxels to them, so an oblique
+    section of it is interpolated once, not again from boxes of the grid,
+    which took 0.15 s a plane.
+    """
+    resampled = getattr(level, "resampled", None)
+    return (level, None) if resampled is None else (resampled[0], resampled[1:])
+
+
 class TurnedLevel:
     """One level of a `TurnedImage`, read a plane at a time.
 
@@ -372,10 +386,10 @@ class TurnedImage:
 
     def _tiles_of(self, k: int) -> Tiles:
         use = self._uses[k]
+        source = _sampled(self.sources[use])[0]
         tiles = self._tiles.get(use)
-        if tiles is None or tiles.source is not self.sources[use]:
-            tiles = self._tiles[use] = Tiles(self.sources[use], self.order, self.dtype,
-                                             self._boxes)
+        if tiles is None or tiles.source is not source:
+            tiles = self._tiles[use] = Tiles(source, self.order, self.dtype, self._boxes)
         return tiles
 
     def to_source(self, k: int):
@@ -390,7 +404,9 @@ class TurnedImage:
         to_voxel = 1.0 / (self._scale * f)
         P = (p_linear * to_voxel[:, None])
         b = (p0 - self._source_translate) / self._scale
-        return P, (b - center) / f
+        p0 = (b - center) / f
+        inner = _sampled(self.sources[self._uses[k]])[1]
+        return (P, p0) if inner is None else (inner[0] @ P, inner[0] @ p0 + inner[1])
 
     def read(self, k: int, lo, hi) -> np.ndarray:
         """The box [lo, hi) of turned level `k`.

@@ -34,7 +34,7 @@ REFERENCE_CONTOUR_WIDTH = 0.2
 #:
 #: Translucent, as every layer of a scene is: each is laid over what is
 #: drawn before it, glomeruli over neuropils over the brain maps
-#: (`scene.scene_ranks`), so a glomerulus keeps its own color rather than
+#: (`stacking.scene_ranks`), so a glomerulus keeps its own color rather than
 #: having the stain's gray and the shells' colors added to it.
 #:
 #: A shell is drawn without depth (`translucent_no_depth`): one that wrote

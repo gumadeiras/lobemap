@@ -246,7 +246,11 @@ class ContourOverlay:
         width: float = 0.35,
         colors=None,
         display_names: list[str] | None = None,
+        sections=None,
     ) -> None:
+        """`sections` cuts the meshes, `sections.MeshSections` of `meshset`
+        unless given: your neurons are cut by their skeletons
+        (`neurons.SkeletonSections`)."""
         self.viewer = viewer
         self.meshset = meshset
         self.name = name
@@ -275,7 +279,7 @@ class ContourOverlay:
         self.selection = set(
             range(meshset.n_compartments) if selection is None else selection
         )
-        self.sections = MeshSections(meshset)
+        self.sections = MeshSections(meshset) if sections is None else sections
         self._geometry = PlaneCache(GEOMETRY_CACHE_BYTES)
         #: What the prefetch is computing for, and its plan; see `_prefetch`.
         self._prefetch_key = None

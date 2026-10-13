@@ -87,11 +87,14 @@ class ScenePose:
         the mid-plane of the sliders, which span the same layers, so the
         reflected slider grid is the same grid and the plane stays on it.
         Measured while nothing is mirrored, because `extent.world` includes
-        the reflection, and held while the mirror is on.
+        the reflection, and held while the mirror is on. Your data is not the
+        brain's, and spans no slider (`yours.leave_out`).
         """
         if self.mirrored and self._mirror_center is not None:
             return self._mirror_center
-        return mirror_center(self.all_layers())
+        from .yours import counted
+
+        return mirror_center(list(filter(counted, self.all_layers())))
 
     def set_mirror(self, on: bool) -> None:
         """Show the space reflected, or stop.
@@ -125,6 +128,10 @@ class ScenePose:
                 surface.set_mirror(self.reflect_axis(), self.mirror_center)
         if self.deferred is not None:
             self.deferred.set_mirror(self.reflect_axis(), self.mirror_center)
+        # Your images' 3D layers carry their placement on `affine`, so the
+        # mirror goes in front of it there; their slice layers are images.
+        for image in self.placed:
+            image.set_mirror(self.reflect_axis(), self.mirror_center)
         apply_mirror(self.affine_layers(), self.mirrored, self.mirror_center)
         space = self.registry.spaces.get(self.space)
         if space is not None:

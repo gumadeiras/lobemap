@@ -38,6 +38,7 @@ from .slicing import (
     compartment_spans,
     crosses,
 )
+from .stacking import scene_ranks, stack
 from .turned import TurnedView
 from .view import (
     MIRROR_AXIS,
@@ -46,6 +47,7 @@ from .view import (
     fit_view,
     install_home_orientation,
 )
+from .yours import SceneYours
 
 #: Whether 2D gets its own exact mesh-plane contour layers, or just shows
 #: the Surface layers sliced by napari.
@@ -71,58 +73,6 @@ USE_SLICE_CONTOURS = True
 
 #: The number napari puts after a layer name another layer already has.
 _NUMBERED = re.compile(r" \[\d+\]$")
-
-
-def scene_ranks(parts: dict, primary, surfaces: dict, contours: dict, images,
-                standins=None) -> dict[int, tuple]:
-    """Each layer's place in a scene's stack, by `id`: higher is drawn later,
-    over the lower, and listed higher in the layer list.
-
-    Bottom first: the brain maps -- the stain or the confocal image, then
-    the label volume, which under the confocal image could not be seen --
-    then each neuropil set, then each glomerulus atlas, the primary one on
-    top. Each part's outlines sit right over its 3D layer, so the two are
-    one entry in the list: 2D draws the one and 3D the other. A stand-in
-    (`deferred`) holds the place of the 3D layer it becomes. `primary` is
-    the primary atlas's scene key, or None.
-    """
-    shells = [name for name, part in parts.items() if part.reference]
-    atlases = sorted((name for name, part in parts.items() if not part.reference),
-                     key=lambda name: name != primary)
-    place = {}
-    for group, names in ((1, shells), (2, atlases)):
-        for i, name in enumerate(names):
-            place[name] = (group, len(names) - i)       # the first listed on top
-    maps = sorted(images, key=lambda layer: layer.metadata.get(
-        "lobemap", {}).get("kind") == "labels")
-    ranks = {id(layer): (0, i, 0) for i, layer in enumerate(maps)}
-    for name, surface in surfaces.items():
-        ranks[id(surface.layer)] = (*place[name], 0)
-    for name, overlay in contours.items():
-        ranks[id(overlay.layer)] = (*place[name], 1)
-    for name, layer in (standins or {}).items():
-        ranks[id(layer)] = (*place[name], 0)
-    return ranks
-
-
-def stack(viewer, ranks: dict[int, tuple]) -> None:
-    """Put a scene's layers in the order of their `ranks`, under every other
-    layer: one the user added stays on top, where napari put it.
-
-    Beside the scene a switch replaces, the new one goes under it until it
-    is gone. napari redraws the stack once, after the last move, as its own
-    `move_multiple` has it do; that method is not used because its plan of
-    moves lost track of the indices for some orders, and moved past the end.
-    """
-    layers = viewer.layers
-    ours = sorted((layer for layer in layers if id(layer) in ranks),
-                  key=lambda layer: ranks[id(layer)])
-    if [layers.index(layer) for layer in ours] == list(range(len(ours))):
-        return
-    with layers.events.reordered.blocker():
-        for place, layer in enumerate(ours):
-            layers.move(layers.index(layer), place)
-    layers.events.reordered(value=layers)
 
 
 def build_scene(
@@ -299,7 +249,7 @@ def show_primary_atlas(registry: Registry, space: str, surfaces,
             contours[name].selection = set()
 
 
-class SceneSession(ScenePose):
+class SceneSession(ScenePose, SceneYours):
     """One loaded space, and everything needed to unload it again.
 
     Switching space inside a live viewer is not just `layers.clear()`. The
@@ -354,10 +304,17 @@ class SceneSession(ScenePose):
         self._spans: dict[tuple[str, int], object] = {}
         #: The angles the scene is turned by, and what they move; see `turned`.
         self.turned = TurnedView(self)
+        #: Your images in the scene (`placed.PlacedImage`): their slice
+        #: layers are among `images`, their 3D layers only here; see `yours`.
+        self.placed: list = []
+        #: Whether `teardown` has run: work for this scene that finishes
+        #: later is dropped (`your_data`).
+        self.closed = False
 
     def all_layers(self) -> list:
-        """Every layer this session owns."""
+        """Every layer this session owns, yours among them."""
         out = [s.layer for s in self.surfaces.values()] + self.affine_layers()
+        out += [layer for image in self.placed for layer in image.volumes]
         if self.deferred is not None:
             out += self.deferred.layers()
         return out
@@ -412,12 +369,7 @@ class SceneSession(ScenePose):
                 contour = make_contour(self.viewer, surface, self.styles[name],
                                        part.reference)
                 added.append(contour.layer)
-                contour.handlers = self.contour_handlers
-                surface.pair(contour)
-            surface.sync()          # nothing selected: both layers off
-            self._put_in_place(name, surface, contour)
-            if self.mirrored and contour is not None:
-                apply_mirror([contour.layer], True, self.mirror_center)
+            self._seat(name, surface, contour)       # nothing selected: both off
             if contour is not None:
                 # Placed on the turned plane, as the parts already built are.
                 self.turned.adopt(contour)
@@ -437,6 +389,31 @@ class SceneSession(ScenePose):
                 layers.selection.active = active
         return surface, contour
 
+    def _seat(self, name: str, surface, contour) -> None:
+        """Pair a part just built with its contours, draw it as its selection
+        says, and put it in its place in the stack and under the mirror.
+
+        A turned view places it on its plane after: `turned.adopt`, or
+        `turned.moved` around the change.
+        """
+        if contour is not None:
+            contour.handlers = self.contour_handlers
+            surface.pair(contour)
+        surface.sync()
+        self._put_in_place(name, surface, contour)
+        if self.mirrored and contour is not None:
+            apply_mirror([contour.layer], True, self.mirror_center)
+
+    def ranks(self, surfaces=None, contours=None) -> dict[int, tuple]:
+        """Every layer's place in the stack (`scene_ranks`), with these
+        surfaces and contours in place of the session's own."""
+        primary = self.registry.primary_atlas(self.space)
+        return scene_ranks(
+            self.parts, primary.id if primary is not None else None,
+            self.surfaces if surfaces is None else surfaces,
+            self.contours if contours is None else contours, self.images,
+            self.deferred.standins if self.deferred is not None else None, self.placed)
+
     def _put_in_place(self, name: str, surface, contour) -> None:
         """Move a part just built into its place in the stack (`scene_ranks`).
 
@@ -445,12 +422,9 @@ class SceneSession(ScenePose):
         user has put them: a layer the user added stays on top. Just added,
         a layer is on top; a stand-in taken over is in its place already.
         """
-        primary = self.registry.primary_atlas(self.space)
-        ranks = scene_ranks(
-            self.parts, primary.id if primary is not None else None,
+        ranks = self.ranks(
             {**self.surfaces, name: surface},
-            {**self.contours, **({name: contour} if contour is not None else {})},
-            self.images, self.deferred.standins if self.deferred is not None else None)
+            {**self.contours, **({name: contour} if contour is not None else {})})
         layers = self.viewer.layers
         for layer in (surface.layer, contour.layer if contour is not None else None):
             if layer is None:
@@ -614,6 +588,7 @@ class SceneSession(ScenePose):
         napari's close removes every layer once it has stopped slicing, and
         the window takes the dock with it, so neither is touched here.
         """
+        self.closed = True
         self.turned.close()
         for event, handler in self.handlers:
             with contextlib.suppress(Exception):
@@ -632,6 +607,8 @@ class SceneSession(ScenePose):
         self.callbacks = []
         for surface in self.surfaces.values():
             surface.stop()
+        for image in self.placed:
+            image.stop()
         stop_levels(self.images)
         if self.deferred is not None:
             self.deferred.stop()
@@ -671,7 +648,7 @@ class SceneSession(ScenePose):
             with contextlib.suppress(Exception):
                 self.dock.deleteLater()
         self.dock = self.panel = None
-        self.surfaces, self.contours, self.images = {}, {}, []
+        self.surfaces, self.contours, self.images, self.placed = {}, {}, [], []
         self.pending, self.deferred = {}, None
 
 

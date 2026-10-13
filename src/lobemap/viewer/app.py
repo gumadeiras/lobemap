@@ -231,7 +231,9 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
     any layer active, so hovering named nothing until the right layer
     happened to be selected. The viewer's callbacks run on every move, and
     this asks each layer the current mode draws: surfaces in 3D, contours in
-    2D, the atlases before the reference shells.
+    2D, your neurons first, then the atlases, then the reference shells. A
+    neuron's section is a dot inside a glomerulus's outline, and was named
+    as the glomerulus.
 
     In 3D the ray is tested against the shown compartments' boxes and then
     their triangles (`AtlasSurface.pick`), not against every triangle of
@@ -263,11 +265,12 @@ def install_picking(viewer, surfaces, contours, panel=None) -> list:
 
     def _pick_at(position, view_direction, dims_displayed):
         three_d = viewer.dims.ndisplay == 3
-        order = sorted(
-            surfaces,
-            key=lambda n: surfaces[n].layer.metadata.get("lobemap", {}).get("role")
-            in REFERENCE_ROLES,
-        )
+
+        def rank(name) -> tuple[bool, bool]:
+            info = surfaces[name].layer.metadata.get("lobemap", {})
+            return not info.get("yours"), info.get("role") in REFERENCE_ROLES
+
+        order = sorted(surfaces, key=rank)
         for name in order:
             surface = surfaces[name]
             overlay = contours.get(name)
