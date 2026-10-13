@@ -94,9 +94,16 @@ def sha256_file(path: Path, chunk: int = CHUNK) -> tuple[str, int]:
     return h.hexdigest(), n
 
 
+#: Files that are no part of a store: macOS's Finder writes a `.DS_Store`
+#: into every folder it opens, and one in the FAFB stain made a store that
+#: was fine read as corrupt.
+IGNORED = frozenset({".DS_Store"})
+
+
 def _store_files(src: Path) -> list[Path]:
-    """Every file in a store, in the order `zip_directory` writes them."""
-    return sorted(p for p in Path(src).rglob("*") if p.is_file())
+    """Every file in a store, in the order `zip_directory` writes them, but
+    the ones that are no part of it (`IGNORED`)."""
+    return sorted(p for p in Path(src).rglob("*") if p.is_file() and p.name not in IGNORED)
 
 
 def _member_name(p: Path, src: Path) -> str:

@@ -98,6 +98,21 @@ def test_a_store_that_gained_lost_or_renamed_a_file_is_corrupt(tmp_path, change)
     assert status.state == "corrupt"
 
 
+def test_finder_s_ds_store_files_are_no_part_of_a_store(tmp_path):
+    """Opening a store's folder in Finder leaves it what it was: verified,
+    hashed and packed as before."""
+    data = tmp_path / "data"
+    arts = mf.build(tmp_path, _tree(data))
+    store = data / "stain.zarr"
+    before = mf.tree_digest(store)
+    for folder in (store, store / "0"):
+        (folder / ".DS_Store").write_bytes(b"Bud1 finder view settings")
+    assert [s.state for s in mf.verify(arts, tmp_path)] == ["ok", "ok"]
+    assert mf.tree_digest(store) == before
+    with zipfile.ZipFile(mf.zip_directory(store, tmp_path / "s.zip")) as zf:
+        assert not [n for n in zf.namelist() if n.endswith(".DS_Store")]
+
+
 def test_the_digest_ignores_how_the_store_was_zipped(tmp_path):
     """Unpacking a zip made at another level gives the same content digest."""
     data = tmp_path / "data"

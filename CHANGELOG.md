@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- `fetch --check`, `fetch` and `pack` ignore the `.DS_Store` files that macOS's Finder adds to data folders. A stain that you opened in Finder no longer shows as corrupt.
+
 ## 0.2.1 - 2026-10-05
 
 ### Changes
