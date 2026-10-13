@@ -263,6 +263,77 @@ def _retitle(dock, name: str) -> None:
     dock.title.title.setText(name)
 
 
+def grid_form(widget):
+    """A form for a dock's controls on one grid (`GRID`), laid out in `widget`.
+
+    Labels in one column and controls in the next, a grid unit apart; rows
+    a grid unit apart within a group and two between groups (`add_gap`);
+    every control as wide as its content, no wider, and as tall as the rest
+    (`fit_form`). Only the headings and the text that wraps run across the
+    dock. The labels against their column's right edge and the form at the
+    left, under every style: each style has its own default, and Fusion's
+    put the labels against the left edge.
+    """
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import QFormLayout
+
+    form = QFormLayout(widget)
+    form.setContentsMargins(GRID, GRID, GRID, GRID)
+    form.setHorizontalSpacing(GRID)
+    form.setVerticalSpacing(GRID)
+    form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
+    form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+    form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    return form
+
+
+def add_gap(form) -> None:
+    """Set two groups of rows apart: an empty row, which adds one more grid
+    unit of the form's spacing between them."""
+    from qtpy.QtWidgets import QWidget
+
+    gap = QWidget()
+    gap.setFixedHeight(0)
+    form.addRow(gap)
+
+
+def fit_form(widget, form, controls) -> None:
+    """Give `controls` and the labels of `form` one height, and `widget`'s
+    buttons and boxes the grid's padding.
+
+    One height: the boxes and checkboxes were 20 px, their text a few pixels
+    from their edges, and the Sections menu 26. A label is as tall as a
+    control, at the top of its row, so its text sits on its control's
+    baseline: "Sections", beside a menu and a checkbox, sat 3 px below its
+    menu's. It has no indent, as on the panel's labels
+    (`panel_grid.ColumnLabel`): napari's style frames a label, and a framed
+    label keeps half an x clear beside its text, which widened the column.
+
+    napari's theme pads a push button by half a grid unit all round, which
+    left its text touching the sides: a grid unit either side instead. It
+    pads a box's text by 1 px above and below, and holds its height to its
+    own: half a grid unit there too, as on a button. And it draws a box's
+    text a size smaller than the dock's other text, a pixel off its label's
+    baseline: one size throughout.
+    """
+    from qtpy.QtWidgets import QFormLayout, QSizePolicy
+
+    for control in controls:
+        control.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        control.setFixedHeight(CONTROL_HEIGHT)
+    for row in range(form.rowCount()):
+        label = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
+        if label is not None and label.widget() is not None:
+            label.widget().setFixedHeight(CONTROL_HEIGHT)
+            label.widget().setIndent(0)
+    pad = GRID // 2
+    widget.setStyleSheet(
+        f"QPushButton {{ padding: {pad}px {GRID}px; }}"
+        f"QAbstractSpinBox {{ padding: {pad}px 10px; "
+        f"min-height: {CONTROL_HEIGHT - 2 * pad}px; "
+        f"font-size: {widget.font().pointSizeF():g}pt; }}")
+
+
 def lock_layers(viewer) -> None:
     """Keep lobemap's own layers out of napari's editing modes, and undeleted.
 
@@ -340,7 +411,10 @@ __all__ = [
     "STAYS_LOCKED",
     "TAB_STYLE",
     "add_dock",
+    "add_gap",
     "edge_color",
+    "fit_form",
+    "grid_form",
     "lock_layers",
     "tidy",
     "tidy_tab_bar",

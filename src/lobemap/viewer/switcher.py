@@ -39,11 +39,9 @@ from qtpy.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSizePolicy,
     QStyle,
     QStyleOptionComboBox,
     QVBoxLayout,
@@ -52,7 +50,7 @@ from qtpy.QtWidgets import (
 
 from .buttons import take_action
 from .camera_rows import PERSPECTIVE, ZOOM, CameraRows
-from .chrome import CONTROL_HEIGHT, GRID
+from .chrome import GRID, add_gap, fit_form, grid_form
 from .request import MissingAssets, loadable_spaces
 from .rotation_rows import RotationRows
 from .slicing import AXIS_LETTERS, order_for, slice_axes
@@ -295,68 +293,26 @@ class SpaceSwitcher(QWidget):
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(GRID)
 
-        # One grid (`chrome.GRID`): labels in one column and controls in
-        # the next, a grid unit apart; rows a grid unit apart within a
-        # group and two between groups; every control as wide as its
-        # content, no wider, and as tall as the rest. Only the headings and
-        # the text that wraps run across the dock.
-        # The labels against their column's right edge and the form at the
-        # left, under every style: each style has its own default, and
-        # Fusion's put the labels against the left edge.
-        form = QFormLayout(self)
-        form.setContentsMargins(GRID, GRID, GRID, GRID)
-        form.setHorizontalSpacing(GRID)
-        form.setVerticalSpacing(GRID)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-        form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        form = grid_form(self)
         form.addRow("Brain", self.combo)
-        self._gap(form)
+        add_gap(form)
         form.addRow("Show", show)
         form.addRow(ZOOM, self.camera.zoom)
         form.addRow(PERSPECTIVE, self.camera.perspective)
-        self._gap(form)
+        add_gap(form)
         form.addRow("Sections", sections)
-        self._gap(form)
+        add_gap(form)
         form.addRow(None, self.picture)
-        self._gap(form)
+        add_gap(form)
         self.rotation.add_to(form)
-        self._gap(form)
+        add_gap(form)
         form.addRow(arrows)
         form.addRow(self.status)
-        for control in (self.combo, self.three_d, self.slice_view, self.home, self.slice,
-                        self.align, self.mirror, self.flip, self.camera.zoom,
-                        self.camera.perspective, self.rotation.reset,
-                        *self.rotation.box.values()):
-            control.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            # One height: the boxes and checkboxes were 20 px, their text a
-            # few pixels from their edges, and the Sections menu 26.
-            control.setFixedHeight(CONTROL_HEIGHT)
         boxes = (self.camera.zoom, self.camera.perspective, *self.rotation.box.values())
-        for row in range(form.rowCount()):
-            label = form.itemAt(row, QFormLayout.ItemRole.LabelRole)
-            if label is not None and label.widget() is not None:
-                # As tall as a control, at the top of its row, so its text
-                # sits on its control's baseline: "Sections", beside a menu
-                # and a checkbox, sat 3 px below its menu's.
-                label.widget().setFixedHeight(CONTROL_HEIGHT)
-                # No indent, as on the panel's labels (`panel_grid.ColumnLabel`):
-                # napari's style frames a label, and a framed label keeps
-                # half an x clear beside its text, which widened the column.
-                label.widget().setIndent(0)
+        fit_form(self, form, (self.combo, self.three_d, self.slice_view, self.home,
+                              self.slice, self.align, self.mirror, self.flip,
+                              self.rotation.reset, *boxes))
         guard_wheel(self.combo, self.slice, *boxes)
-        # napari's theme pads a push button by half a grid unit all round,
-        # which left its text touching the sides: a grid unit either side
-        # instead. It pads a box's text by 1 px above and below, and holds
-        # its height to its own: half a grid unit there too, as on a button.
-        # And it draws a box's text a size smaller than the dock's other
-        # text, a pixel off its label's baseline: one size throughout.
-        pad = GRID // 2
-        self.setStyleSheet(
-            f"QPushButton {{ padding: {pad}px {GRID}px; }}"
-            f"QAbstractSpinBox {{ padding: {pad}px 10px; "
-            f"min-height: {CONTROL_HEIGHT - 2 * pad}px; "
-            f"font-size: {self.font().pointSizeF():g}pt; }}")
 
         # The dock outlives every scene, so it is connected once.
         take_action(viewer, "napari:roll_axes", self.next_sections)
@@ -364,14 +320,6 @@ class SpaceSwitcher(QWidget):
         viewer.dims.events.order.connect(self._on_order)
         viewer.scene.camera.events.orientation.connect(self._on_orientation)
         self._on_mode()
-
-    @staticmethod
-    def _gap(form: QFormLayout) -> None:
-        """Set two groups of rows apart: an empty row, which adds one more
-        grid unit of the form's spacing between them."""
-        gap = QWidget()
-        gap.setFixedHeight(0)
-        form.addRow(gap)
 
     def _mode_button(self, text: str, tip: str, ndisplay: int) -> QPushButton:
         button = QPushButton(text)
