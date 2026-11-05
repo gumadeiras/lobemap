@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Performance
+
+- Use the MIP 7 FlyWire-to-FAFB offset field for neuron display, reducing measured conversion time from about 19 seconds to 0.3–0.7 seconds while preserving the skeleton tree and keeping atlas transforms at their registered resolution.
+
 ### Features
 
 - A new **Your data** tab, after **Layer settings** in the left column, shows your own images and neurons in the open brain. Each brain keeps its own.

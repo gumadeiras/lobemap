@@ -94,11 +94,15 @@ def resolve_points(
     target_template: str,
     mirror: bool = False,
     allow_binary: bool | None = None,
+    *,
+    flywire_mip: int | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Transform (n, 3) points in micrometers between two templates.
 
     Returns the transformed points, also in micrometers, plus a record of what
     was done -- suitable for a Derivation.
+    `flywire_mip` selects the forward FlyWire offset field's resolution;
+    None uses the registered resolution. Other transforms keep their settings.
     """
     src_scale = template_scale_to_um(source_template)
     pts = np.asarray(points_um, dtype=np.float64) / src_scale  # um -> native
@@ -124,7 +128,8 @@ def resolve_points(
         out_scale = src_scale
     else:
         pts, info = sp.bridge(
-            pts, source_template, target_template, allow_binary=allow_binary
+            pts, source_template, target_template, allow_binary=allow_binary,
+            flywire_mip=flywire_mip,
         )
         record.update(info)
         out_scale = template_scale_to_um(target_template)

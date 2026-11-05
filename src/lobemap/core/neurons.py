@@ -177,6 +177,8 @@ def into_space(points_um: np.ndarray, template: str | None, lateral: str | None,
     `template` None means the points are in `space`'s own coordinates. A
     neuron lands on the side of the animal it is on: mirrored where the two
     disagree about laterality (`resolve.resolve`'s `align_biology`).
+    FlyWire's forward offset field is read at MIP 7 for display; every
+    skeleton point is transformed before thinning.
     """
     if template is None or (template == space.flybrains_template
                             and lateral == space.lateral_convention):
@@ -190,7 +192,8 @@ def into_space(points_um: np.ndarray, template: str | None, lateral: str | None,
         if template == FLYWIRE_TEMPLATE:
             _register_flywire()
         out, _record = resolve_points(points_um, template, space.flybrains_template,
-                                      mirror=lateral != space.lateral_convention)
+                                      mirror=lateral != space.lateral_convention,
+                                      flywire_mip=7 if template == FLYWIRE_TEMPLATE else None)
     except ImportError as exc:
         raise NeuronError(NEEDS_INGEST.format(what="Bridging a neuron")) from exc
     except Exception as exc:

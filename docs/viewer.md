@@ -203,7 +203,9 @@ The table shows each landmark and **Off by**: how far, in µm, the landmark is f
 
 ### Add neurons
 
-**From FlyWire:** paste a FlyWire root ID, or a FlyWire Codex link to a neuron, into the **FlyWire** box. An example of a link is `https://codex.flywire.ai/app/cell_details?root_id=720575940623636701&data_version=783`. Click **Add**. The first neuron can take up to half a minute. The next ones take a few seconds. While you wait, the line under **Add** says what lobemap is reading. If lobemap cannot add the neuron, the same line says why.
+**From FlyWire:** paste a FlyWire root ID, or a FlyWire Codex link to a neuron, into the **FlyWire** box. An example of a link is `https://codex.flywire.ai/app/cell_details?root_id=720575940623636701&data_version=783`. Click **Add**. Loading needs a network connection, and the first neuron also loads the extra packages. While you wait, the line under **Add** says what lobemap is reading. If lobemap cannot add the neuron, the same line says why.
+
+For display, the FlyWire-to-FAFB coordinate conversion uses a coarser offset field, MIP 7. It transforms every skeleton point before the usual display thinning; no smoothing or branch removal is added. On two large neurons, conversion took 0.3–0.7 seconds, with 99% of positions within 0.05 µm of the full-resolution conversion. The largest position differences were 0.14 and 0.45 µm. These measurements are examples, not an error bound for every neuron. SWC files in FlyWire coordinates use the same conversion. Atlas conversions keep their registered resolution.
 
 **From an SWC file:** an SWC file does not say where its coordinates come from, so first choose:
 

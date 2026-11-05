@@ -143,7 +143,8 @@ def test_a_bridged_neuron_lands_on_its_own_side_of_the_animal(monkeypatch, later
 
     asked = {}
 
-    def resolve_points(points, source, target, mirror=False, allow_binary=None):
+    def resolve_points(points, source, target, mirror=False, allow_binary=None, *,
+                       flywire_mip=None):
         asked.update(source=source, target=target, mirror=mirror)
         return np.asarray(points) + 1.0, {}
 

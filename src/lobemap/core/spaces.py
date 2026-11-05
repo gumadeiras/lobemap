@@ -13,6 +13,7 @@ count.
 from __future__ import annotations
 
 import functools
+import itertools
 from typing import Any
 
 import numpy as np
@@ -127,11 +128,15 @@ def bridge(
     source: str,
     target: str,
     allow_binary: bool | None = None,
+    *,
+    flywire_mip: int | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Transform (n, 3) points between template spaces.
 
     Points go in and come out in the *native units of each template*, so the
     caller is responsible for unit handling; see resolve.py.
+    `flywire_mip` overrides only a copy of the forward FlyWire offset field,
+    leaving the shared registry and the inverse field's resolution intact.
 
     A point the transform does not cover comes back non-finite. Dense offset
     fields cover only the imaged volume and return NaN outside it -- the
@@ -148,10 +153,19 @@ def bridge(
     if info.get("overridden"):
         # navis picks the route itself, so steer it by excluding the edge.
         kwargs["avoid"] = "CMTK"
-    out = np.asarray(
-        navis.xform_brain(pts, source=source, target=target, **kwargs),
-        dtype=np.float64,
-    )
+    if flywire_mip is None:
+        out = navis.xform_brain(pts, source=source, target=target, **kwargs)
+    else:
+        path, transforms = _registry().find_bridging_path(source, target,
+                                                        avoid=kwargs.get("avoid"))
+        transforms = list(transforms)
+        for i, edge in enumerate(itertools.pairwise(path)):
+            if edge == ("FLYWIREraw", "FAFB14raw"):
+                transforms[i] = transforms[i].copy()
+                transforms[i].mip = flywire_mip
+                info["flywire_mip"] = flywire_mip
+        out = navis.xform(pts, transform=transforms, affine_fallback=True)
+    out = np.asarray(out, dtype=np.float64)
 
     # navis may route differently from describe_path -- importing fafbseg
     # registers extra edges -- so record what was actually available.

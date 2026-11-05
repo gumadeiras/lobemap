@@ -129,7 +129,7 @@ def fake_bridge(monkeypatch, tmp_path):
 
     monkeypatch.setattr(R, "template_scale_to_um", lambda template: 1.0)
     monkeypatch.setattr(R, "cache_root", lambda: tmp_path / "cache")
-    monkeypatch.setattr(sp, "bridge", lambda pts, s, t, allow_binary=None: (
+    monkeypatch.setattr(sp, "bridge", lambda pts, s, t, allow_binary=None, flywire_mip=None: (
         np.array(pts, dtype=float), {"path": [s, t], "classes": [], "n_warps": 0}))
     monkeypatch.setattr(sp, "mirror", mirror)
     monkeypatch.setattr(sp, "has_mirror_registration", lambda template: True)
