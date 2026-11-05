@@ -14,12 +14,15 @@ index, so that value is EXACTLY the index -- identification is unambiguous.
 from __future__ import annotations
 
 import itertools
+import logging
 import weakref
 
 import numpy as np
 
 from ..core.meshfmt import MeshSet
 from . import napari_private
+from .background import Job
+from .picking import MeshPicker
 from .view import face_front, reflect_vertices
 
 
@@ -329,6 +332,10 @@ class AtlasSurface:
         self.layer.events.data.connect(self._on_changed)
         for setting in ("affine", "scale", "translate", "rotate", "shear", "shading"):
             getattr(self.layer.events, setting).connect(self._on_set_in_2d)
+        self._picker = MeshPicker(meshset)
+        self._pick_job = None
+        if visible:
+            self._prepare_picking()
 
     # -- the 3D build, kept through 2D -------------------------------------
     #
@@ -504,6 +511,9 @@ class AtlasSurface:
         """
         shown = bool(self.selection)
         mesh = shown and self.draws_now()
+        if mesh:
+            # The layer eye may already have made the mesh visible.
+            self._prepare_picking()
         self._syncing = True
         try:
             if self.layer.visible != mesh:
@@ -545,6 +555,7 @@ class AtlasSurface:
                 return
             showing = True
         elif layer.visible == bool(self.selection):
+            self.sync()             # An eye toggle may still need the first picking index.
             return
         else:
             showing = layer.visible
@@ -580,10 +591,12 @@ class AtlasSurface:
         self._timer.start(self.compact_delay_ms)
 
     def stop(self) -> None:
-        """Cancel a pending compaction, and give back the colormap entry,
-        for a scene being torn down."""
+        """Stop pending mesh work and return the colormap entry on scene teardown."""
         if self._timer is not None:
             self._timer.stop()
+        self._picker.cancel()
+        if self._pick_job is not None:
+            self._pick_job.cancel()
         ref = _HOLDERS.get(self._colormap.name)
         if ref is not None and ref() is self:
             _HOLDERS[self._colormap.name] = None
@@ -606,6 +619,14 @@ class AtlasSurface:
 
     # -- identification --------------------------------------------------
 
+    def _prepare_picking(self) -> None:
+        if (self.viewer.dims.ndisplay == 3 and self._pick_job is None
+                and len(self._picker.large)):
+            self._pick_job = Job(
+                self._picker.prepare, self._picker.install,
+                lambda exc: logging.getLogger(__name__).warning(
+                    "Could not index %s for picking: %s", self.name, exc))
+
     def pick(self, position, view_direction, dims_displayed,
              from_position: bool = False) -> int | None:
         """The shown compartment a view ray through `position` meets first.
@@ -618,23 +639,22 @@ class AtlasSurface:
         perspective, the eye can be inside the brain, and what lies behind it
         is not drawn: hover named it.
 
-        napari's own Surface pick tests every triangle of the layer -- about
-        40 ms for Benton's 298k -- and hovering asks on every mouse move.
-        Bounding boxes first: only the compartments whose box the ray enters
-        are tested, nearest box first, stopping once no remaining box starts
-        nearer than a hit already found. Only selected compartments count,
-        so geometry awaiting compaction cannot answer for a hidden one.
+        Cached bounds clip the ray without scanning the uploaded vertices.
+        `MeshPicker` culls compartments, then triangles in large ones. Only
+        selected compartments count, including while compaction is pending.
         """
-        from napari.utils.geometry import (
-            intersect_line_with_triangles,
-            line_in_triangles_3d,
-        )
-
-        if view_direction is None or not self.selection:
+        if view_direction is None or not self.selection or not self._resident:
             return None
-        start, end = self.layer.get_ray_intersections(
-            position, view_direction, list(dims_displayed), world=True
-        )
+        lo, hi = self._picker.lo, self._picker.hi
+        resident = [i for i in self._resident if np.isfinite(lo[i]).all()]
+        if not resident:
+            return None
+        bounds = np.array((lo[resident].min(axis=0), hi[resident].max(axis=0)))
+        if self._mirror is not None:
+            axis, center = self._mirror
+            bounds[:, axis] = 2 * center - bounds[::-1, axis]
+        start, end = napari_private.ray_intersections(
+            self.layer, position, view_direction, dims_displayed, bounds)
         if start is None or end is None:
             return None
         start = np.asarray(start, dtype=float)
@@ -655,43 +675,7 @@ class AtlasSurface:
             axis, center = self._mirror
             start[axis] = 2.0 * center - start[axis]
             direction[axis] = -direction[axis]
-        lo, hi = self._boxes()
-        indices = np.array(sorted(self.selection))
-        with np.errstate(divide="ignore", invalid="ignore"):
-            near = (lo[indices] - start) / direction
-            far = (hi[indices] - start) / direction
-        enter = np.maximum(np.nanmax(np.minimum(near, far), axis=1), first or 0.0)
-        leave = np.nanmin(np.maximum(near, far), axis=1)
-        crossed = leave >= enter
-        best, best_t = None, np.inf
-        for j in np.flatnonzero(crossed)[np.argsort(enter[crossed])]:
-            if enter[j] > best_t:
-                break
-            v, f = self.meshset.compartment(int(indices[j]))
-            triangles = v[f]
-            met = line_in_triangles_3d(start, direction, triangles)
-            if not met.any():
-                continue
-            points = intersect_line_with_triangles(start, direction, triangles[met])
-            t = (np.asarray(points, float) - start) @ direction
-            if first is not None:
-                t = t[t >= first]
-            if t.size and float(t.min()) < best_t:
-                best, best_t = int(indices[j]), float(t.min())
-        return best
-
-    def _boxes(self) -> tuple[np.ndarray, np.ndarray]:
-        """(K, 3) lowest and highest vertex of each compartment, cached."""
-        if getattr(self, "_box_cache", None) is None:
-            v = np.asarray(self.meshset.vertices, dtype=float)
-            starts = np.asarray(self.meshset.vertex_offsets[:-1])
-            lo = np.full((self.meshset.n_compartments, 3), np.nan)
-            hi = np.full((self.meshset.n_compartments, 3), np.nan)
-            filled = np.diff(self.meshset.vertex_offsets) > 0
-            lo[filled] = np.minimum.reduceat(v, starts[filled], axis=0)
-            hi[filled] = np.maximum.reduceat(v, starts[filled], axis=0)
-            self._box_cache = (lo, hi)
-        return self._box_cache
+        return self._picker.pick(start, direction, self.selection, first)
 
     def name_at_value(self, value: float | None) -> str | None:
         """Map a picked vertex value back to a compartment name.

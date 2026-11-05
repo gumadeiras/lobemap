@@ -86,6 +86,17 @@ def clear_extent(layer) -> None:
     layer._clear_extent()
 
 
+def ray_intersections(layer, position, direction, displayed, bounds):
+    """napari's ray clipping with known data bounds, without scanning vertices."""
+    if len(displayed) != 3:
+        return None, None
+    box = np.asarray(bounds, float)[:, list(displayed)].T.copy()
+    box[:, 1] += 1                  # napari's upper-exclusive bounding box
+    return layer._get_ray_intersections(
+        position=np.asarray(position), view_direction=np.asarray(direction),
+        dims_displayed=list(displayed), bounding_box=box, world=True)
+
+
 def before_slicing(viewer, callback) -> None:
     """Call `callback` whenever the viewer is about to slice its layers.
 
@@ -518,6 +529,7 @@ __all__ = [
     "light_surface",
     "no_scene_update",
     "put_level",
+    "ray_intersections",
     "refresh_extent",
     "shown_unsliced",
     "slice_now",

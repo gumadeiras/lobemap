@@ -90,12 +90,20 @@ The benchmarks need the data on disk. Each one runs its measurements in fresh pr
 ```bash
 uv run python benchmarks/slice_step.py
 uv run python benchmarks/space_switch.py
+uv run python benchmarks/neuron_navigation.py neuron.npz --space FAFB14
 ```
 
 - `slice_step.py` times 2D slice steps, row toggles, scene loads and switches between 2D and 3D. `--rotate SPIN TILT TURN`, `--aligned` and `--flip` time a turned, aligned or flipped scene.
 - `space_switch.py` times opening a space and switching to another, as the **Brain** menu does.
+- `neuron_navigation.py` compares 3D hover and consecutive slice steps before and after adding a saved neuron. Its NPZ input has `points` in the chosen brain's micrometers and `parents` with -1 for roots. It applies normal display thinning, waits for the picking index, and measures slices with prefetch active and finished. `--rotate`, `--aligned` and `--mirror` exercise other slice planes. Frame times include drawing and framebuffer readback; they are workload comparisons, not screen frame rates. Repeat the command in fresh processes to check the spread.
 
-`--help` lists the options of each, and the docstring at the top of each file explains what it measures. The machine is rarely quiet, so use `--repeat` and read the spread.
+`--help` lists the options of each, and the docstring at the top of each file explains what it measures. The machine is rarely quiet, so repeat the measurements and read the spread. `slice_step.py` and `space_switch.py` accept `--repeat`.
+
+### Picking index lifecycle
+
+Each surface owns a `MeshPicker` for its immutable `MeshSet`. When the surface is first shown in 3D, including through napari's layer eye, compartments with at least 16,384 faces are indexed by a background `Job`. The job reads mesh arrays only; its result is installed on the UI thread. Picking uses full triangle scans until the index is ready, or if preparation fails. Index queries are serialized because the underlying library does not support simultaneous reads of one index.
+
+The index is reused across selection changes, hiding, mirroring, and 2D/3D switches. Scene teardown or part replacement calls `AtlasSurface.stop()`: it cancels preparation and blocks result delivery. An active native compartment build finishes, then its result is discarded and no later compartment build starts. The shared `Job.cancel()` contract remains result-delivery cancellation; `MeshPicker.cancel()` supplies the cooperative stop between builds.
 
 ## Lint
 

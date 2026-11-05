@@ -13,6 +13,7 @@ CHECKED = {
     "_actions": "test_napari_actions_lobemap_takes_over",
     "_on_view_direction_change": "test_the_light_napari_gives_a_surface",
     "_update_camera_depth": "test_the_fits_and_the_depth_napari_makes",
+    "_get_ray_intersections": "test_ray_clipping_accepts_cached_surface_bounds",
 }
 
 
@@ -20,6 +21,28 @@ def _helpers():
     from test_napari_private import need, reaching
 
     return need, reaching
+
+
+def test_ray_clipping_accepts_cached_surface_bounds(viewer):
+    import numpy as np
+    import trimesh
+
+    from lobemap.viewer.napari_private import ray_intersections
+
+    need, reaching = _helpers()
+    used = "viewer.layers.AtlasSurface.pick"
+    mesh = trimesh.creation.box(extents=(3, 4, 5))
+    layer = viewer.add_surface((mesh.vertices, mesh.faces), scale=(2, 3, 4), translate=(4, 5, 6))
+    bounds = np.array((mesh.vertices.min(axis=0), mesh.vertices.max(axis=0)))
+    with reaching("Layer._get_ray_intersections(..., bounding_box=, world=True)", used):
+        for dims in ([0, 1, 2], [2, 0, 1]):
+            for position, direction in [((4, 5, 6), (1, .2, .1)),
+                                         ((100, 100, 100), (1, 0, 0))]:
+                expected = layer.get_ray_intersections(position, direction, dims, world=True)
+                actual = ray_intersections(layer, position, direction, dims, bounds)
+                need(all((a is None and b is None) or np.array_equal(a, b)
+                         for a, b in zip(actual, expected, strict=True)),
+                     "cached bounds clipping like Layer.get_ray_intersections", used)
 
 
 def test_the_status_napari_reckons_for_the_cursor(viewer):
