@@ -140,8 +140,8 @@ For a frontal view, the controls of lobemap 0.1 map onto the new ones as follows
 
 Use the **Your data** tab to see your own data in a brain:
 
-- an image stack, such as a two-photon or confocal stack, which you move into place by hand or fit to glomeruli;
-- neurons from FlyWire, or from SWC files.
+- neurons from FlyWire, or from SWC files, in the first section;
+- an image stack, such as a two-photon or confocal stack, in the section below, which you move into place by hand or fit to glomeruli.
 
 Each brain keeps its own data. When you switch to another brain and back, your data is there as you left it.
 

@@ -11,6 +11,7 @@
 
 ### Features
 
+- Show FlyWire and SWC neuron controls first in the Your data tab, followed by custom image loading and placement.
 - A new **Your data** tab, after **Layer settings** in the left column, shows your own images and neurons in the open brain. Each brain keeps its own.
 - Open TIFF and NRRD stacks, including OME, ImageJ and ScanImage 3 files. Each channel gets its own color, and a recording over time shows as its average. The voxel size comes from the file when the file gives it.
 - Move an image by hand: voxel size, image center, turns, size, flips and dragging, all as you see the brain, with **Undo** and **Reset**.

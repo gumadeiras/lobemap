@@ -25,20 +25,20 @@ TITLE = "Your data"
 
 
 class YourData(QScrollArea):
-    """The Your data tab: your images, then your neurons, in one scrolling column."""
+    """The Your data tab: your neurons, then your images, in one scrolling column."""
 
     def __init__(self, viewer, parent=None) -> None:
         super().__init__(parent)
         self.viewer = viewer
         self.session = None
-        self.images = ImagesBox(viewer)
         self.neurons = NeuronsBox(viewer)
+        self.images = ImagesBox(viewer)
         page = QWidget()
         column = QVBoxLayout(page)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(2 * GRID)
-        column.addWidget(self.images)
         column.addWidget(self.neurons)
+        column.addWidget(self.images)
         column.addStretch(1)
         self.setWidget(page)
         self.setWidgetResizable(True)
