@@ -64,9 +64,12 @@ class SkeletonSections:
 
     def __init__(self, skeletons, radius: float = TUBE_RADIUS_UM,
                  max_bytes: int = SECTION_CACHE_BYTES) -> None:
-        #: (points, parents) of each compartment.
-        self.skeletons = [(np.asarray(p, np.float64), np.asarray(q, np.int64))
-                          for p, q in skeletons]
+        #: Edge endpoints of each compartment, kept across slider planes.
+        self.edges = []
+        for points, parents in skeletons:
+            points, parents = np.asarray(points, np.float64), np.asarray(parents, np.int64)
+            child = np.flatnonzero(parents >= 0)
+            self.edges.append((points[child], points[parents[child]]))
         self.radius = float(radius)
         self.planes = PlaneCache(max_bytes)
         self._frame = (None, None)
@@ -81,20 +84,23 @@ class SkeletonSections:
         if hit is not None:
             return hit
         out = {}
-        for index, (points, parents) in enumerate(self._points(frame)):
-            loops = _crossings(points, parents, int(axis), float(position), self.radius)
+        for index, (a, b) in enumerate(self._edges(frame)):
+            if pause is not None:
+                pause()
+            loops = _crossings(a, b, int(axis), float(position), self.radius)
             if len(loops):
                 out[index] = list(loops)
         return self.planes.put(key, out, sum(loop.nbytes for v in out.values() for loop in v),
                                keep=keep)
 
-    def _points(self, frame) -> list:
-        """Each skeleton's (points, parents), in `frame` if given."""
+    def _edges(self, frame) -> list:
+        """Each skeleton's endpoints, in `frame` if given."""
         if frame is None:
-            return self.skeletons
+            return self.edges
         with self._lock:
             if self._frame[0] != frame.key:
-                self._frame = (frame.key, [(frame.apply(p), q) for p, q in self.skeletons])
+                self._frame = (frame.key, [(frame.apply(a), frame.apply(b))
+                                           for a, b in self.edges])
             return self._frame[1]
 
     def drop_frames(self) -> None:
@@ -104,10 +110,8 @@ class SkeletonSections:
         self.planes.drop(lambda key: len(key) > 2)
 
 
-def _crossings(points, parents, axis: int, position: float, radius: float) -> np.ndarray:
+def _crossings(a, b, axis: int, position: float, radius: float) -> np.ndarray:
     """(edges crossing, SECTION_POINTS + 1, 3): each crossing's ellipse, closed."""
-    child = np.flatnonzero(parents >= 0)
-    a, b = points[child], points[parents[child]]
     crossing = (a[:, axis] < position) != (b[:, axis] < position)
     a, b = a[crossing], b[crossing]
     if not len(a):

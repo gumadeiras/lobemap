@@ -72,15 +72,17 @@ class _PlaneGeometry:
         verts, faces, owners = [], [], []
         count = 0
         small = np.int16 if max(sections, default=0) < 2**15 else np.int32
-        for n, owner in enumerate(sorted(sections)):
-            if pause is not None and n % 8 == 7:
-                pause()
+        loops = 0
+        for owner in sorted(sections):
             for loop in sections[owner]:
+                if pause is not None and loops % 32 == 0:
+                    pause()
                 v, f = triangulate.stroke(loop[:-1][:, self.plane], width)
                 verts.append(v)
                 faces.append(f + count)
                 owners.append(np.full(len(v), owner, small))
                 count += len(v)
+                loops += 1
         self.vertices, self.faces = _stack(verts, faces)
         #: The compartment each outline point belongs to.
         self.owner = np.concatenate(owners) if owners else np.empty(0, small)
@@ -89,10 +91,14 @@ class _PlaneGeometry:
         self._lock = threading.Lock()
         self.add_fills(fills, pause)
 
-    def _make_fill(self, owner: int) -> tuple[np.ndarray, np.ndarray]:
+    def _make_fill(self, owner: int, pause=None) -> tuple[np.ndarray, np.ndarray]:
         verts, faces, count = [], [], 0
-        for loop in self._sections.get(owner, ()):
-            v, f = triangulate.fill(loop[:-1][:, self.plane])
+        loops = self._sections.get(owner, ())
+        for start in range(0, len(loops), 64):
+            if pause is not None:
+                pause()
+            v, f = triangulate.fills([loop[:-1][:, self.plane]
+                                      for loop in loops[start:start + 64]])
             verts.append(v)
             faces.append(f + count)
             count += len(v)
@@ -125,10 +131,8 @@ class _PlaneGeometry:
         """Build the fills of `owners` on this plane not built yet; the bytes added."""
         added = 0
         missing = sorted(o for o in self.present.intersection(owners) if o not in self._fills)
-        for n, owner in enumerate(missing):
-            if pause is not None and n % 4 == 3:
-                pause()
-            added += self._keep_fill(owner, self._make_fill(owner))[1]
+        for owner in missing:
+            added += self._keep_fill(owner, self._make_fill(owner, pause))[1]
         return added
 
     @property
@@ -181,6 +185,11 @@ class SliceVisual:
         from vispy.scene.visuals import Mesh
 
         visual = napari_private.layer_visual(viewer, layer)
+        # Empty Shapes still draws stand-in triangles and recompiles their
+        # shaders on each slice. This layer carries only our own visuals.
+        for placeholder in (visual.node.shape_faces, visual.node.shape_highlights,
+                            visual.node.highlight_lines, visual.node.highlight_vertices):
+            placeholder.visible = False
         self.layer = layer
         self.mesh = Mesh(parent=visual.node)
         self.mesh.order = 0

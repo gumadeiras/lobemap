@@ -140,6 +140,39 @@ def fill(ring: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return made if first is None or _covers(*made, ring32) else first
 
 
+def fills(rings) -> tuple[np.ndarray, np.ndarray]:
+    """Fill independent rings, batching equal-sized star-shaped polygons.
+
+    Tube sections are many small ellipses. Their centroid fans can be made
+    together without merging overlapping sections or changing their winding.
+    Other polygons keep `fill`'s checked triangulation.
+    """
+    if len(rings) > 1 and len({len(r) for r in rings}) == 1:
+        rings = np.asarray(rings, dtype=np.float64)
+        nxt = np.roll(rings, -1, axis=1)
+        cross = rings[:, :, 0] * nxt[:, :, 1] - rings[:, :, 1] * nxt[:, :, 0]
+        area = cross.sum(axis=1) / 2.0
+        if np.all(area != 0.0):
+            centers = ((rings + nxt) * cross[:, :, None]).sum(axis=1) / (6 * area[:, None])
+            a, b = rings - centers[:, None], nxt - centers[:, None]
+            turn = a[:, :, 0] * b[:, :, 1] - a[:, :, 1] * b[:, :, 0]
+            if np.all(turn * np.sign(area)[:, None] >= 0.0):
+                count, n, _ = rings.shape
+                idx = np.arange(1, n + 1)
+                fan = np.column_stack((np.zeros(n, np.int64), idx, np.roll(idx, -1)))
+                faces = fan[None] + (np.arange(count) * (n + 1))[:, None, None]
+                return (np.concatenate((centers[:, None], rings), axis=1).reshape(-1, 2),
+                        faces.reshape(-1, 3))
+    vertices, triangles, count = [], [], 0
+    for ring in rings:
+        v, f = fill(ring)
+        vertices.append(v)
+        triangles.append(f + count)
+        count += len(v)
+    return (np.vstack(vertices) if vertices else np.empty((0, 2)),
+            np.vstack(triangles) if triangles else np.empty((0, 3), np.int64))
+
+
 def _ring_index(given: np.ndarray, points: np.ndarray, triangles: np.ndarray):
     """bermuda's triangles, which index the `points` it made, as indices into
     the ring it was `given`; None if it made a point the ring does not have.

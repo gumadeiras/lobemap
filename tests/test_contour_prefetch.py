@@ -154,13 +154,13 @@ def ui_fills(monkeypatch):
     from lobemap.viewer import triangulate
 
     calls = []
-    real = triangulate.fill
+    real = triangulate.fills
 
-    def spy(ring):
+    def spy(rings):
         calls.append(threading.current_thread() is threading.main_thread())
-        return real(ring)
+        return real(rings)
 
-    monkeypatch.setattr(triangulate, "fill", spy)
+    monkeypatch.setattr(triangulate, "fills", spy)
     return calls
 
 

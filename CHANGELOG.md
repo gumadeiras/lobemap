@@ -5,6 +5,8 @@
 ### Performance
 
 - Use the MIP 7 FlyWire-to-FAFB offset field for neuron display, reducing measured conversion time from about 19 seconds to 0.3–0.7 seconds while preserving the skeleton tree and keeping atlas transforms at their registered resolution.
+- Batch neuron slice fills, reuse skeleton endpoints, and let background contour preparation yield within large neurons, reducing slider stalls without changing the displayed geometry.
+- Stop drawing napari's empty Shapes placeholders under slice contours, avoiding unused shader rebuilds on every slider step.
 
 ### Features
 
